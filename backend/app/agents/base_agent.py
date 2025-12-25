@@ -1,133 +1,124 @@
 """
-Base Agent Class
+Base Agent Implementation
 
-Provides common functionality for all TWG agents including:
-- LLM initialization
-- System prompt loading
-- Chat interface
-- Conversation history management
-- Logging
+This module defines the common base class for all Technical Working Group agents,
+including integration with tools and LLMs.
 """
 
-from typing import List, Dict, Optional
-from loguru import logger
+from typing import List, Dict, Any, Optional
+import os
+import logging
+from langchain_openai import ChatOpenAI
+from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
-from app.services.llm_service import get_llm_service
-from app.agents.prompts import get_prompt
+from backend.app.tools.knowledge_tools import KNOWLEDGE_TOOLS
+from backend.app.tools.database_tools import DATABASE_TOOLS
 
+logger = logging.getLogger(__name__)
 
-class BaseAgent:
-    """Base class for all TWG agents"""
-
+class TWGAgent:
+    """
+    Base class for thematic TWG agents.
+    """
+    
     def __init__(
         self,
-        agent_id: str,
-        keep_history: bool = False,
-        max_history: int = 10
+        name: str,
+        pillar: str,
+        twg_id: Optional[str] = None,
+        model_name: str = "gpt-4-turbo-preview"
     ):
+        self.name = name
+        self.pillar = pillar
+        self.twg_id = twg_id
+        
+        # Initialize LLM
+        self.llm = ChatOpenAI(
+            model=model_name,
+            temperature=0,
+            openai_api_key=os.getenv("OPENAI_API_KEY")
+        )
+        
+        # Combine tools
+        self.tools = self._initialize_tools()
+        
+        # Create prompt
+        self.prompt = self._create_prompt()
+        
+        # Initialize agent
+        self.agent = create_openai_tools_agent(self.llm, self.tools, self.prompt)
+        self.executor = AgentExecutor(agent=self.agent, tools=self.tools, verbose=True)
+        
+        logger.info(f"Initialized agent: {name} for pillar: {pillar}")
+
+    def _initialize_tools(self):
         """
-        Initialize a base agent.
-
-        Args:
-            agent_id: Unique identifier for the agent (e.g., 'supervisor', 'energy')
-            keep_history: Whether to maintain conversation history
-            max_history: Maximum number of messages to keep in history
+        Merge knowledge base tools and database tools.
         """
-        self.agent_id = agent_id
-        self.keep_history = keep_history
-        self.max_history = max_history
+        # Convert custom tool definitions to LangChain tools if necessary
+        # For now, we assume tools are already in a compatible format or we use wrappers
+        from langchain.tools import Tool
+        
+        lc_tools = []
+        
+        # Knowledge Base Tools
+        from backend.app.tools.knowledge_tools import search_knowledge_base, get_relevant_context
+        lc_tools.append(Tool(
+            name="search_knowledge",
+            func=search_knowledge_base,
+            description="Search the ECOWAS Summit knowledge base for relevant documents and policy info."
+        ))
+        
+        # Database Tools
+        from backend.app.tools.database_tools import get_twg_info, list_twg_meetings, create_meeting_invite
+        
+        # Note: Since database tools are async, we might need to handle them differently in AgentExecutor
+        # For now, we will use synchronous wrappers or ensure the executor handles async.
+        
+        return lc_tools
 
-        # Load system prompt for this agent
-        try:
-            self.system_prompt = get_prompt(agent_id)
-            logger.info(f"Initialized {agent_id} agent with system prompt")
-        except ValueError as e:
-            logger.error(f"Failed to load prompt for {agent_id}: {e}")
-            raise
+    def _create_prompt(self) -> ChatPromptTemplate:
+        """
+        Define the system prompt for the agent.
+        """
+        system_message = f"""
+You are {self.name}, the AI support agent for the {self.pillar} Technical Working Group (TWG) of the ECOWAS Summit 2026.
+Your goal is to streamline the TWG's work, ensuring alignment with Summit pillars and deliverables like the Abuja Declaration.
 
-        # Get LLM service
-        self.llm = get_llm_service()
+Context:
+- Current Pillar: {self.pillar}
+- TWG ID: {self.twg_id}
 
-        # Conversation history
-        self.history: List[Dict[str, str]] = []
+Responsibilities:
+1. Assist in scheduling meetings and drafting invitations.
+2. Formulate policy drafts based on knowledge base search.
+3. Track and update action items from meeting discussions.
+4. Curate investment projects for the Deal Room pipeline.
 
-        logger.info(f"Agent '{agent_id}' initialized successfully")
+Always maintain a professional, diplomatic tone. Cite your sources when retrieving information from the knowledge base.
+"""
+        return ChatPromptTemplate.from_messages([
+            ("system", system_message),
+            MessagesPlaceholder(variable_name="chat_history"),
+            ("human", "{input}"),
+            MessagesPlaceholder(variable_name="agent_scratchpad"),
+        ])
 
-    def chat(self, message: str, temperature: Optional[float] = None) -> str:
+    async def chat(self, user_input: str, chat_history: List[BaseMessage] = None) -> str:
         """
         Send a message to the agent and get a response.
-
-        Args:
-            message: User message/question
-            temperature: Optional temperature override (0-1)
-
-        Returns:
-            str: Agent response
         """
+        if chat_history is None:
+            chat_history = []
+            
         try:
-            logger.info(f"[{self.agent_id}] Received message: {message[:100]}...")
-
-            if self.keep_history and self.history:
-                # Use conversation history
-                self.history.append({"role": "user", "content": message})
-
-                # Trim history if too long
-                if len(self.history) > self.max_history * 2:  # *2 for user+assistant pairs
-                    self.history = self.history[-(self.max_history * 2):]
-
-                response = self.llm.chat_with_history(
-                    messages=self.history,
-                    system_prompt=self.system_prompt,
-                    temperature=temperature
-                )
-
-                # Add response to history
-                self.history.append({"role": "assistant", "content": response})
-
-            else:
-                # No history - simple chat
-                response = self.llm.chat(
-                    prompt=message,
-                    system_prompt=self.system_prompt,
-                    temperature=temperature
-                )
-
-            logger.info(f"[{self.agent_id}] Generated response: {response[:100]}...")
-            return response
-
+            response = await self.executor.ainvoke({
+                "input": user_input,
+                "chat_history": chat_history
+            })
+            return response["output"]
         except Exception as e:
-            error_msg = f"Error in {self.agent_id} agent: {str(e)}"
-            logger.error(error_msg)
-            return f"I apologize, but I encountered an error: {str(e)}"
-
-    def reset_history(self):
-        """Clear the conversation history"""
-        self.history = []
-        logger.info(f"[{self.agent_id}] Conversation history cleared")
-
-    def get_history(self) -> List[Dict[str, str]]:
-        """
-        Get the current conversation history.
-
-        Returns:
-            List of message dictionaries
-        """
-        return self.history.copy()
-
-    def get_agent_info(self) -> Dict[str, any]:
-        """
-        Get information about this agent.
-
-        Returns:
-            Dictionary with agent metadata
-        """
-        return {
-            "agent_id": self.agent_id,
-            "system_prompt": self.system_prompt[:200] + "...",  # Truncated
-            "keep_history": self.keep_history,
-            "max_history": self.max_history,
-            "history_length": len(self.history)
-        }
-
-    def __repr__(self) -> str:
-        return f"<Agent: {self.agent_id}>"
+            logger.error(f"Error in agent chat: {e}")
+            return f"I encountered an error while processing your request: {str(e)}"
