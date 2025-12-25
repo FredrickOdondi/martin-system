@@ -38,5 +38,7 @@ async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
 @pytest.fixture
 async def client(db_engine) -> AsyncGenerator[AsyncClient, None]:
     """Provide an async HTTP client for testing API endpoints."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    from httpx import ASGITransport
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
+

@@ -4,7 +4,7 @@ Authentication Pydantic Schemas
 Defines request/response schemas for authentication endpoints.
 """
 
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
 from typing import Optional
 from datetime import datetime
 import uuid
@@ -19,7 +19,8 @@ class UserRegister(BaseModel):
     role: UserRole = UserRole.TWG_MEMBER
     organization: Optional[str] = Field(None, max_length=255)
     
-    @validator('password')
+    @field_validator('password')
+    @classmethod
     def validate_password(cls, v):
         """Validate password strength."""
         if len(v) < 8:
@@ -65,7 +66,8 @@ class PasswordChange(BaseModel):
     current_password: str
     new_password: str = Field(..., min_length=8)
     
-    @validator('new_password')
+    @field_validator('new_password')
+    @classmethod
     def validate_new_password(cls, v):
         """Validate new password strength."""
         if len(v) < 8:
@@ -93,8 +95,7 @@ class UserResponse(BaseModel):
     last_login: Optional[datetime]
     created_at: datetime
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserWithToken(BaseModel):
