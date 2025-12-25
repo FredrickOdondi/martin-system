@@ -129,8 +129,16 @@ Examples:
         agent = AGENT_FACTORY[args.agent](keep_history=not args.no_history)
         print("✓ Agent initialized successfully!")
 
+        # If supervisor, show registered agents
+        if args.agent == "supervisor" and hasattr(agent, 'get_supervisor_status'):
+            status = agent.get_supervisor_status()
+            if status['delegation_enabled']:
+                print(f"✓ Supervisor has {status['agent_count']} TWG agents registered:")
+                for twg in status['registered_agents']:
+                    print(f"  - {twg}")
+
         # Check LLM connection
-        print("Checking Ollama connection...")
+        print("\nChecking Ollama connection...")
         if not agent.llm.check_connection():
             print("\n❌ ERROR: Cannot connect to Ollama!")
             print("\nPlease ensure:")
@@ -181,7 +189,13 @@ Examples:
             # Send to agent
             try:
                 print(f"\033[92m{args.agent.title()}:\033[0m ", end="", flush=True)
-                response = agent.chat(user_input)
+
+                # Use smart_chat for supervisor if available
+                if args.agent == "supervisor" and hasattr(agent, 'smart_chat'):
+                    response = agent.smart_chat(user_input)
+                else:
+                    response = agent.chat(user_input)
+
                 print(response)
                 print()  # Empty line for readability
 

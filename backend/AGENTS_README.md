@@ -4,13 +4,23 @@
 
 This system includes 7 AI agents for the ECOWAS Summit 2026 TWG Support System:
 
-1. **Supervisor Agent** - Central coordinator
+1. **Supervisor Agent** - Central coordinator with intelligent delegation to all TWGs
 2. **Energy Agent** - Energy & Infrastructure TWG
 3. **Agriculture Agent** - Agriculture & Food Systems TWG
 4. **Minerals Agent** - Critical Minerals & Industrialization TWG
 5. **Digital Agent** - Digital Economy & Transformation TWG
 6. **Protocol Agent** - Protocol & Logistics TWG
 7. **Resource Mobilization Agent** - Investment pipeline TWG
+
+### Supervisor Agent - Enhanced Orchestration
+
+The Supervisor Agent is the central coordinator with advanced capabilities:
+
+- **Automatic Agent Registration**: Automatically connects to all 6 TWG agents on initialization
+- **Intelligent Query Routing**: Analyzes queries and delegates to the most relevant agent(s)
+- **Multi-Agent Consultation**: Can consult multiple TWG agents for cross-cutting issues
+- **Response Synthesis**: Combines insights from multiple agents into coherent recommendations
+- **Domain Expertise Mapping**: Uses keyword analysis to match queries to appropriate TWGs
 
 ## Prerequisites
 
@@ -110,11 +120,47 @@ While chatting with an agent:
 
 ## Example Conversations
 
-### Supervisor Agent
+### Supervisor Agent - Intelligent Delegation
 
+The Supervisor Agent automatically delegates to the appropriate TWG agents:
+
+**Single Agent Delegation:**
 ```
-You: What are the main priorities for the ECOWAS Summit 2026?
-Supervisor: The ECOWAS Summit 2026 focuses on four integrated pillars:
+You: What are the renewable energy opportunities in West Africa?
+Supervisor: [Consulted ENERGY TWG]
+
+West Africa has massive renewable energy potential:
+1. Solar - Abundant sunshine across the Sahel region
+2. Wind - Strong coastal winds in Senegal, Mauritania
+3. Hydropower - Major rivers (Niger, Senegal, Volta)
+4. The WAPP (West African Power Pool) framework enables regional integration...
+```
+
+**Multi-Agent Synthesis:**
+```
+You: How can we attract investment for solar-powered irrigation systems?
+Supervisor: [Consulted ENERGY, AGRICULTURE, and RESOURCE_MOBILIZATION TWGs]
+
+This cross-cutting opportunity requires coordinated action:
+
+ENERGY Perspective: Solar mini-grids can provide reliable off-grid power for
+agricultural operations with declining costs making them increasingly viable...
+
+AGRICULTURE Perspective: Irrigation is critical for year-round farming and
+climate resilience. Solar-powered systems reduce operational costs...
+
+INVESTMENT Perspective: These projects score high on AfCEN criteria - strong
+regional impact, clear revenue models from crop sales, and innovation in
+agri-energy nexus...
+
+SYNTHESIS: Priority actions include...
+```
+
+**General Knowledge:**
+```
+You: What are the main objectives of the ECOWAS Summit 2026?
+Supervisor: The ECOWAS Summit 2026 aims to accelerate regional economic integration
+through four integrated pillars:
 1. Energy Transition - Regional power integration and renewable energy
 2. Mineral Industrialization - Value chain development for critical minerals
 3. Agriculture & Food Security - Regional food systems and agribusiness
@@ -170,7 +216,7 @@ backend/
 
 ## Programmatic Usage
 
-You can also use the agents in your own Python code:
+### Using Individual Agents
 
 ```python
 from app.agents.energy_agent import create_energy_agent
@@ -188,6 +234,58 @@ print(info)
 
 # Reset conversation history
 agent.reset_history()
+```
+
+### Using the Supervisor Agent
+
+```python
+from app.agents.supervisor import create_supervisor
+
+# Create supervisor with auto-registration of all TWG agents
+supervisor = create_supervisor(keep_history=True, auto_register=True)
+
+# Check supervisor status
+status = supervisor.get_supervisor_status()
+print(f"Registered agents: {status['registered_agents']}")
+# Output: ['energy', 'agriculture', 'minerals', 'digital', 'protocol', 'resource_mobilization']
+
+# Use smart_chat for automatic delegation
+response = supervisor.smart_chat("How can solar energy support agriculture?")
+print(response)
+# The supervisor automatically identifies this involves both Energy and Agriculture TWGs,
+# consults both, and synthesizes their responses
+
+# Manual delegation to specific agent
+energy_response = supervisor.delegate_to_agent("energy", "What is WAPP?")
+print(energy_response)
+
+# Consult multiple agents manually
+query = "Investment opportunities in renewable energy"
+responses = supervisor.consult_multiple_agents(query, ["energy", "resource_mobilization"])
+for agent_id, response in responses.items():
+    print(f"\n{agent_id.upper()}:\n{response}")
+
+# Identify which agents are relevant for a query
+relevant = supervisor.identify_relevant_agents("digital infrastructure for mining")
+print(relevant)  # Output: ['digital', 'minerals']
+```
+
+### Advanced: Custom Supervisor Setup
+
+```python
+from app.agents.supervisor import SupervisorAgent
+from app.agents.energy_agent import create_energy_agent
+from app.agents.agriculture_agent import create_agriculture_agent
+
+# Create supervisor without auto-registration
+supervisor = SupervisorAgent(keep_history=True)
+
+# Manually register specific agents only
+supervisor.register_agent("energy", create_energy_agent())
+supervisor.register_agent("agriculture", create_agriculture_agent())
+
+# Now supervisor only has access to these two agents
+print(supervisor.get_registered_agents())  # Output: ['energy', 'agriculture']
 ```
 
 ## System Prompts
