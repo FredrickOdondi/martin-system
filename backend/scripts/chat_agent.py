@@ -57,6 +57,16 @@ def print_welcome(agent_id: str):
     print("  • 'reset' - Clear conversation history")
     print("  • 'info' - Show agent information")
     print("  • 'help' - Show this help message")
+
+    # Add synthesis commands for supervisor
+    if agent_id == "supervisor":
+        print("\nSynthesis Commands (Supervisor only):")
+        print("  • 'synthesis:pillar PILLAR' - Generate pillar overview (energy|agriculture|minerals|digital)")
+        print("  • 'synthesis:cross PILLAR1 PILLAR2' - Generate cross-pillar synthesis")
+        print("  • 'synthesis:priorities' - Generate strategic priorities across all TWGs")
+        print("  • 'synthesis:coherence' - Check policy coherence")
+        print("  • 'synthesis:readiness' - Assess summit readiness")
+
     print("\n" + "-"*70 + "\n")
 
 
@@ -238,6 +248,68 @@ Examples:
 
             elif user_input.lower() == "help":
                 print_welcome(args.agent)
+                continue
+
+            # Handle synthesis commands (supervisor only)
+            elif args.agent == "supervisor" and user_input.lower().startswith("synthesis:"):
+                try:
+                    parts = user_input.split()
+                    command = parts[0].lower()
+
+                    if command == "synthesis:pillar" and len(parts) >= 2:
+                        pillar = parts[1].lower()
+                        valid_pillars = ["energy", "agriculture", "minerals", "digital"]
+                        if pillar not in valid_pillars:
+                            print(f"\n❌ Invalid pillar. Choose from: {', '.join(valid_pillars)}\n")
+                            continue
+
+                        print(f"\n🔄 Generating {pillar.title()} pillar overview...\n")
+                        response = agent.generate_pillar_overview(pillar)
+                        print(response)
+                        print()
+
+                    elif command == "synthesis:cross" and len(parts) >= 3:
+                        pillars = [p.lower() for p in parts[1:]]
+                        valid_pillars = ["energy", "agriculture", "minerals", "digital"]
+
+                        invalid = [p for p in pillars if p not in valid_pillars]
+                        if invalid:
+                            print(f"\n❌ Invalid pillars: {invalid}\n")
+                            print(f"Choose from: {', '.join(valid_pillars)}\n")
+                            continue
+
+                        print(f"\n🔄 Generating cross-pillar synthesis for {' & '.join(pillars)}...\n")
+                        response = agent.generate_cross_pillar_synthesis(pillars)
+                        print(response)
+                        print()
+
+                    elif command == "synthesis:priorities":
+                        print("\n🔄 Generating strategic priorities synthesis...\n")
+                        print("⏳ This may take 30-60 seconds (querying all TWGs)...\n")
+                        response = agent.generate_strategic_priorities()
+                        print(response)
+                        print()
+
+                    elif command == "synthesis:coherence":
+                        print("\n🔄 Generating policy coherence check...\n")
+                        print("⏳ This may take 30-60 seconds (querying all TWGs)...\n")
+                        response = agent.generate_policy_coherence_check()
+                        print(response)
+                        print()
+
+                    elif command == "synthesis:readiness":
+                        print("\n🔄 Generating summit readiness assessment...\n")
+                        print("⏳ This may take 30-60 seconds (querying all TWGs)...\n")
+                        response = agent.generate_summit_readiness_assessment()
+                        print(response)
+                        print()
+
+                    else:
+                        print("\n❌ Invalid synthesis command. Type 'help' to see available commands.\n")
+
+                except Exception as e:
+                    print(f"\n❌ Synthesis error: {e}\n")
+
                 continue
 
             # Send to agent
