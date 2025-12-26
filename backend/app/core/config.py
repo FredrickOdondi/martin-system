@@ -4,19 +4,19 @@ Configuration Management
 Centralized configuration using Pydantic Settings for environment variables.
 """
 
-from typing import Optional
-from pydantic_settings import BaseSettings
-from pydantic import Field, ConfigDict
+from typing import Optional, List, Union, Any
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables"""
 
     # Application
-    APP_NAME: str = "ECOWAS Summit TWG Support System"
-    APP_VERSION: str = "0.1.0"
+    PROJECT_NAME: str = "ECOWAS Summit TWG Support System"
+    VERSION: str = "0.1.0"
+    API_V1_STR: str = "/api/v1"
     DEBUG: bool = False
-    API_PREFIX: str = "/api/v1"
 
     # Database
     DATABASE_URL: str = Field(
@@ -56,6 +56,11 @@ class Settings(BaseSettings):
         default=30,
         description="LLM request timeout in seconds"
     )
+    
+    # OpenAI (from Auth implementation)
+    LLM_PROVIDER: str = "openai"
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_MODEL: str = "gpt-4-turbo-preview"
 
     # Message Bus Settings
     MESSAGE_BUS_ENABLED: bool = Field(
@@ -134,17 +139,34 @@ class Settings(BaseSettings):
         default="your-secret-key-change-this-in-production",
         description="JWT secret key"
     )
-    ALGORITHM: str = Field(default="HS256", description="JWT algorithm")
+    JWT_SECRET_KEY: Optional[str] = None # For compatibility
+    JWT_ALGORITHM: str = "HS256"
+    ALGORITHM: str = Field(default="HS256", description="JWT algorithm") # For compatibility
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
         default=30,
         description="Access token expiration time"
     )
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(
+        default=7,
+        description="Refresh token expiration in days"
+    )
+    
+    # Password Policy
+    PASSWORD_MIN_LENGTH: int = 8
+    REQUIRE_SPECIAL_CHAR: bool = True
 
     # CORS
-    CORS_ORIGINS: str = Field(
-        default="http://localhost:5173,http://localhost:3000",
-        description="Allowed CORS origins (comma-separated)"
+    CORS_ORIGINS: Union[str, List[str]] = Field(
+        default=["http://localhost:5173", "http://localhost:3000"],
+        description="Allowed CORS origins"
     )
+    
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def assemble_cors_origins(cls, v: Any) -> Any:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",")]
+        return v
 
     @property
     def cors_origins_list(self) -> list:
@@ -169,12 +191,16 @@ class Settings(BaseSettings):
         default=10485760,  # 10MB
         description="Maximum upload size in bytes"
     )
+    
+    # Vector DB
+    PINECONE_API_KEY: Optional[str] = None
+    PINECONE_ENVIRONMENT: Optional[str] = None
+    PINECONE_INDEX_NAME: Optional[str] = None
 
-    model_config = ConfigDict(
+    model_config = SettingsConfigDict(
         env_file=".env",
-        env_file_encoding="utf-8",
         case_sensitive=True,
-        extra="ignore"  # Ignore extra fields in .env
+        extra="ignore"
     )
 
 
