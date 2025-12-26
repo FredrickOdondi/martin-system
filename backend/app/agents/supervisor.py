@@ -7,8 +7,24 @@ Routes requests, synthesizes outputs, and maintains global consistency.
 
 from typing import Dict, List, Optional, Any
 from loguru import logger
+from uuid import UUID
 
 from app.agents.base_agent import BaseAgent
+from app.services.broadcast_service import BroadcastService
+from app.services.conflict_detector import ConflictDetector
+from app.services.negotiation_service import NegotiationService
+from app.services.document_synthesizer import DocumentSynthesizer, DocumentType as SynthDocType, SynthesisStyle
+from app.services.global_scheduler import GlobalScheduler, EventType, EventPriority, ScheduledEvent
+from app.schemas.broadcast_messages import (
+    ContextBroadcast,
+    DocumentBroadcast,
+    BroadcastType,
+    BroadcastPriority,
+    ConflictAlert,
+    create_context_broadcast,
+    create_document_broadcast
+)
+from datetime import datetime
 
 
 class SupervisorAgent(BaseAgent):
@@ -41,6 +57,15 @@ class SupervisorAgent(BaseAgent):
 
         # Registry of all TWG agents
         self._agent_registry: Dict[str, BaseAgent] = {}
+
+        # Initialize broadcast and conflict management services
+        self.broadcast_service = BroadcastService()
+        self.conflict_detector = ConflictDetector(llm_client=self.llm)
+        self.negotiation_service = NegotiationService(supervisor_llm=self.llm)
+
+        # Initialize document synthesis and scheduling services
+        self.document_synthesizer = DocumentSynthesizer(llm_client=self.llm)
+        self.global_scheduler = GlobalScheduler()
 
         # Agent domain keywords for intelligent routing
         # Primary keywords (strong signals) and secondary keywords (weak signals)
@@ -552,6 +577,611 @@ I have consulted {len(responses)} TWG agents and received these responses:
 
         logger.info("Generating summit readiness assessment")
         return super().chat(prompt)
+
+    # =========================================================================
+    # BROADCAST AND CONTEXT MANAGEMENT
+    # =========================================================================
+
+    def broadcast_strategic_context(
+        self,
+        summit_objectives: List[str],
+        strategic_priorities: List[str],
+        policy_constraints: Optional[List[str]] = None,
+        cross_cutting_themes: Optional[List[str]] = None,
+        coordination_points: Optional[Dict[str, str]] = None,
+        version: str = "1.0"
+    ) -> Dict[str, bool]:
+        """
+        Broadcast strategic context to all registered TWG agents.
+
+        This ensures all agents work from the same strategic playbook,
+        including Summit objectives, core documents, and policy guardrails.
+
+        Args:
+            summit_objectives: Overarching Summit objectives
+            strategic_priorities: Current strategic priorities
+            policy_constraints: Policy guardrails and constraints
+            cross_cutting_themes: Themes that span all TWGs (e.g., youth, gender)
+            coordination_points: Key coordination requirements
+            version: Version identifier for this context update
+
+        Returns:
+            Dict mapping agent_id to delivery success status
+
+        Example:
+            >>> supervisor.broadcast_strategic_context(
+            ...     summit_objectives=[
+            ...         "Accelerate regional integration through infrastructure",
+            ...         "Mobilize $50B for strategic investments"
+            ...     ],
+            ...     strategic_priorities=[
+            ...         "WAPP expansion to 5000 MW by 2026",
+            ...         "Digital payment interoperability"
+            ...     ],
+            ...     policy_constraints=[
+            ...         "All projects must align with ECOWAS protocols",
+            ...         "Climate neutrality required for energy projects"
+            ...     ]
+            ... )
+        """
+        context = create_context_broadcast(
+            summit_objectives=summit_objectives,
+            strategic_priorities=strategic_priorities,
+            policy_constraints=policy_constraints,
+            cross_cutting_themes=cross_cutting_themes,
+            coordination_points=coordination_points,
+            version=version
+        )
+
+        results = self.broadcast_service.broadcast_context(
+            context,
+            self._agent_registry
+        )
+
+        successful = sum(1 for success in results.values() if success)
+        logger.info(
+            f"📢 Strategic context broadcast to {successful}/{len(results)} agents"
+        )
+
+        return results
+
+    def broadcast_document(
+        self,
+        document_type: str,
+        title: str,
+        version: str,
+        summary: str,
+        key_points: List[str],
+        full_text: Optional[str] = None,
+        relevant_sections: Optional[Dict[str, List[str]]] = None
+    ) -> Dict[str, bool]:
+        """
+        Broadcast a key document to all TWG agents.
+
+        This distributes core documents like Concept Notes, Declaration drafts,
+        or Summit guidelines to ensure all agents reference the same materials.
+
+        Args:
+            document_type: Type of document (e.g., "concept_note", "declaration_draft")
+            title: Document title
+            version: Version identifier
+            summary: Executive summary
+            key_points: Key points agents should note
+            full_text: Full document text (optional)
+            relevant_sections: Map of agent_id to relevant sections (optional)
+
+        Returns:
+            Dict mapping agent_id to delivery success status
+
+        Example:
+            >>> supervisor.broadcast_document(
+            ...     document_type="concept_note",
+            ...     title="ECOWAS Summit 2026 Concept Note",
+            ...     version="2.1",
+            ...     summary="Framework for regional integration summit...",
+            ...     key_points=[
+            ...         "Focus on 4 pillars: Energy, Agriculture, Minerals, Digital",
+            ...         "Deal Room target: $50B investment pipeline"
+            ...     ]
+            ... )
+        """
+        from app.schemas.broadcast_messages import DocumentType
+
+        # Convert string to enum
+        doc_type_enum = DocumentType(document_type)
+
+        document = create_document_broadcast(
+            document_type=doc_type_enum,
+            title=title,
+            version=version,
+            summary=summary,
+            key_points=key_points,
+            full_text=full_text,
+            relevant_sections=relevant_sections
+        )
+
+        results = self.broadcast_service.broadcast_document(
+            document,
+            self._agent_registry
+        )
+
+        successful = sum(1 for success in results.values() if success)
+        logger.info(
+            f"📄 Document '{title}' broadcast to {successful}/{len(results)} agents"
+        )
+
+        return results
+
+    def get_active_context(self) -> Optional[ContextBroadcast]:
+        """Get the currently active strategic context"""
+        return self.broadcast_service.get_active_context()
+
+    # =========================================================================
+    # CONFLICT DETECTION AND RESOLUTION
+    # =========================================================================
+
+    def detect_conflicts(
+        self,
+        twg_outputs: Optional[Dict[str, str]] = None,
+        query: Optional[str] = None
+    ) -> List[ConflictAlert]:
+        """
+        Detect conflicts and contradictions across TWG outputs.
+
+        This catches policy divergences, overlapping sessions, contradictory
+        targets, and resource conflicts before they reach Ministers.
+
+        Args:
+            twg_outputs: Dictionary mapping agent_id to their output text.
+                        If None, collects latest outputs from all agents.
+            query: Optional query to collect outputs for (if twg_outputs not provided)
+
+        Returns:
+            List of detected conflicts
+
+        Example:
+            >>> conflicts = supervisor.detect_conflicts()
+            >>> for conflict in conflicts:
+            ...     print(f"{conflict.severity}: {conflict.description}")
+            ...     if conflict.requires_negotiation:
+            ...         supervisor.initiate_negotiation(conflict)
+        """
+        # If no outputs provided, collect from all agents
+        if twg_outputs is None:
+            if query is None:
+                query = "What are your current policy recommendations and key targets?"
+
+            logger.info("Collecting TWG outputs for conflict detection...")
+            twg_outputs = {}
+            for agent_id in self.get_registered_agents():
+                try:
+                    response = self.delegate_to_agent(agent_id, query)
+                    if response:
+                        twg_outputs[agent_id] = response
+                except Exception as e:
+                    logger.error(f"Failed to collect from {agent_id}: {e}")
+
+        # Run conflict detection
+        conflicts = self.conflict_detector.detect_conflicts(twg_outputs)
+
+        if conflicts:
+            logger.warning(
+                f"⚠️  Detected {len(conflicts)} conflicts across TWG outputs"
+            )
+            for conflict in conflicts:
+                logger.warning(
+                    f"  • [{conflict.severity.upper()}] {conflict.description}"
+                )
+        else:
+            logger.info("✓ No conflicts detected - all TWGs aligned")
+
+        return conflicts
+
+    def initiate_negotiation(
+        self,
+        conflict: ConflictAlert,
+        constraints: Optional[List[str]] = None,
+        max_rounds: int = 3
+    ) -> Dict[str, Any]:
+        """
+        Initiate automated negotiation to resolve a conflict.
+
+        The supervisor facilitates multi-round negotiation between agents
+        to build consensus and resolve differences without human intervention.
+
+        Args:
+            conflict: The conflict to resolve
+            constraints: Non-negotiable constraints (optional)
+            max_rounds: Maximum negotiation rounds (default: 3)
+
+        Returns:
+            Dict with negotiation results
+
+        Example:
+            >>> conflict = conflicts[0]  # High-priority conflict
+            >>> result = supervisor.initiate_negotiation(
+            ...     conflict,
+            ...     constraints=["Must align with ECOWAS protocols"],
+            ...     max_rounds=3
+            ... )
+            >>> if result["status"] == "resolved":
+            ...     print(f"Consensus reached: {result['resolution']}")
+            >>> elif result["status"] == "escalated":
+            ...     print("Human intervention required")
+        """
+        # Create negotiation
+        negotiation = self.negotiation_service.initiate_negotiation(
+            conflict,
+            self._agent_registry,
+            constraints=constraints,
+            max_rounds=max_rounds
+        )
+
+        logger.info(
+            f"🤝 Starting negotiation between {', '.join(conflict.agents_involved)}"
+        )
+
+        # Run negotiation
+        result = self.negotiation_service.run_negotiation(
+            negotiation.negotiation_id,
+            self._agent_registry
+        )
+
+        # Log outcome
+        if result["status"] == "resolved":
+            logger.info(
+                f"✅ Negotiation resolved: {result['resolution']}"
+            )
+        elif result["status"] == "escalated":
+            logger.warning(
+                f"⚠️  Negotiation escalated to humans: {result['reason']}"
+            )
+        elif result["status"] == "in_progress":
+            logger.info(
+                f"🔄 Negotiation in progress: Round {result['round']}"
+            )
+
+        return result
+
+    def auto_resolve_conflicts(
+        self,
+        conflicts: Optional[List[ConflictAlert]] = None,
+        auto_negotiate: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Automatically resolve conflicts through negotiation.
+
+        This is the "90% automated consensus-building" feature that resolves
+        minor issues before they reach Ministers.
+
+        Args:
+            conflicts: List of conflicts to resolve. If None, detects conflicts first.
+            auto_negotiate: If True, automatically initiate negotiations for
+                          conflicts that require it (default: True)
+
+        Returns:
+            Dict with resolution summary
+
+        Example:
+            >>> summary = supervisor.auto_resolve_conflicts()
+            >>> print(f"Resolved: {summary['resolved']}")
+            >>> print(f"Escalated: {summary['escalated']}")
+            >>> print(f"Success rate: {summary['resolution_rate']:.1%}")
+        """
+        # Detect conflicts if not provided
+        if conflicts is None:
+            logger.info("🔍 Running automated conflict detection...")
+            conflicts = self.detect_conflicts()
+
+        if not conflicts:
+            return {
+                "total_conflicts": 0,
+                "resolved": 0,
+                "escalated": 0,
+                "resolution_rate": 1.0,
+                "message": "No conflicts detected"
+            }
+
+        resolved = 0
+        escalated = 0
+        in_progress = 0
+
+        for conflict in conflicts:
+            if not auto_negotiate or not conflict.requires_negotiation:
+                # Skip conflicts that don't need negotiation
+                if conflict.requires_human_intervention:
+                    escalated += 1
+                continue
+
+            # Attempt automated resolution
+            try:
+                result = self.initiate_negotiation(conflict)
+
+                if result["status"] == "resolved":
+                    resolved += 1
+                elif result["status"] == "escalated":
+                    escalated += 1
+                else:
+                    in_progress += 1
+
+            except Exception as e:
+                logger.error(f"Negotiation failed: {e}")
+                escalated += 1
+
+        resolution_rate = resolved / len(conflicts) if conflicts else 0
+
+        summary = {
+            "total_conflicts": len(conflicts),
+            "resolved": resolved,
+            "escalated": escalated,
+            "in_progress": in_progress,
+            "resolution_rate": resolution_rate,
+            "message": f"Resolved {resolved}/{len(conflicts)} conflicts automatically"
+        }
+
+        logger.info(
+            f"📊 Auto-resolution complete: {resolved} resolved, "
+            f"{escalated} escalated, {in_progress} in progress"
+        )
+
+        return summary
+
+    def get_conflict_summary(self) -> Dict[str, Any]:
+        """Get summary of all detected conflicts"""
+        return self.conflict_detector.get_conflict_summary()
+
+    def get_negotiation_summary(self) -> Dict[str, Any]:
+        """Get summary of all negotiations"""
+        return self.negotiation_service.get_negotiation_summary()
+
+    # =========================================================================
+    # DOCUMENT SYNTHESIS
+    # =========================================================================
+
+    def synthesize_declaration(
+        self,
+        title: str = "ECOWAS Summit 2026 Declaration",
+        preamble: Optional[str] = None,
+        knowledge_base: Optional[Dict[str, Any]] = None,
+        collect_from_twgs: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Synthesize TWG sections into a coherent Declaration.
+
+        This compiles disparate TWG outputs into a unified document with:
+        - Consistent voice and terminology
+        - Proper formatting
+        - Citation of sources
+        - One coherent narrative
+
+        Args:
+            title: Declaration title
+            preamble: Optional preamble text
+            knowledge_base: Knowledge base for citation verification
+            collect_from_twgs: If True, automatically collect sections from TWGs
+
+        Returns:
+            Dict with synthesized declaration and metadata
+
+        Example:
+            >>> # Collect sections from all TWGs
+            >>> result = supervisor.synthesize_declaration(
+            ...     title="ECOWAS Summit 2026 Declaration",
+            ...     collect_from_twgs=True
+            ... )
+            >>> print(result['document'])
+            >>> print(f"Coherence: {result['metadata']['coherence_score']:.1%}")
+        """
+        logger.info("Synthesizing Declaration from TWG sections")
+
+        # Collect sections from TWGs if requested
+        if collect_from_twgs:
+            twg_sections = self._collect_declaration_sections()
+        else:
+            # Use placeholder - would be provided by user
+            twg_sections = {}
+
+        # Synthesize using document synthesizer
+        result = self.document_synthesizer.synthesize_declaration(
+            twg_sections=twg_sections,
+            title=title,
+            preamble=preamble,
+            knowledge_base=knowledge_base
+        )
+
+        logger.info(
+            f"✓ Declaration synthesized: {result['metadata']['word_count']} words, "
+            f"{len(twg_sections)} sections, "
+            f"coherence: {result['metadata']['coherence_score']:.1%}"
+        )
+
+        return result
+
+    def _collect_declaration_sections(self) -> Dict[str, str]:
+        """Collect Declaration draft sections from all TWGs"""
+        sections = {}
+
+        query = """Please provide your draft section for the ECOWAS Summit 2026 Declaration.
+
+Include:
+- Key commitments and policy directions
+- Specific targets and timelines
+- Expected outcomes
+- Resource mobilization needs
+
+Format: 2-3 paragraphs in formal ministerial voice."""
+
+        for agent_id in self.get_registered_agents():
+            try:
+                logger.info(f"Collecting Declaration section from {agent_id}...")
+                response = self.delegate_to_agent(agent_id, query)
+
+                if response:
+                    sections[agent_id] = response
+                    logger.info(f"✓ Received section from {agent_id}")
+
+            except Exception as e:
+                logger.error(f"Failed to collect from {agent_id}: {e}")
+
+        return sections
+
+    def add_terminology_standard(
+        self,
+        twg_id: str,
+        abbreviation: str,
+        full_term: str
+    ) -> None:
+        """
+        Add a terminology standard for consistent usage across documents.
+
+        Example:
+            >>> supervisor.add_terminology_standard(
+            ...     twg_id="energy",
+            ...     abbreviation="WAPP",
+            ...     full_term="West African Power Pool"
+            ... )
+        """
+        self.document_synthesizer.add_terminology_standard(
+            twg_id, abbreviation, full_term
+        )
+
+    # =========================================================================
+    # GLOBAL SCHEDULING
+    # =========================================================================
+
+    def schedule_event(
+        self,
+        event_type: str,
+        title: str,
+        start_time: datetime,
+        duration_minutes: int,
+        required_twgs: List[str],
+        priority: str = "medium",
+        description: Optional[str] = None,
+        optional_twgs: Optional[List[str]] = None,
+        vip_attendees: Optional[List[str]] = None,
+        location: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Schedule a cross-TWG event with conflict detection.
+
+        This ensures proper sequencing, prevents overlaps, and coordinates
+        VIP engagements across multiple TWGs.
+
+        Args:
+            event_type: Type (ministerial_prep, vip_engagement, etc.)
+            title: Event title
+            start_time: Start time
+            duration_minutes: Duration in minutes
+            required_twgs: TWGs that must participate
+            priority: Priority level (critical, high, medium, low)
+            description: Event description
+            optional_twgs: Optional TWG participants
+            vip_attendees: VIP attendees
+            location: Event location
+
+        Returns:
+            Dict with scheduling result and any conflicts
+
+        Example:
+            >>> result = supervisor.schedule_event(
+            ...     event_type="ministerial_prep",
+            ...     title="Pre-Summit Ministerial Coordination",
+            ...     start_time=datetime(2026, 3, 15, 14, 0),
+            ...     duration_minutes=180,
+            ...     required_twgs=["energy", "agriculture", "minerals"],
+            ...     priority="critical",
+            ...     vip_attendees=["Minister of Energy"]
+            ... )
+            >>> if result['status'] == 'conflict':
+            ...     print(f"Conflicts: {result['conflicts']}")
+            ...     print(f"Alternatives: {result['alternative_times']}")
+        """
+        # Convert string enums
+        event_type_enum = EventType(event_type)
+        priority_enum = EventPriority(priority)
+
+        result = self.global_scheduler.schedule_event(
+            event_type=event_type_enum,
+            title=title,
+            start_time=start_time,
+            duration_minutes=duration_minutes,
+            required_twgs=required_twgs,
+            priority=priority_enum,
+            description=description,
+            optional_twgs=optional_twgs,
+            vip_attendees=vip_attendees,
+            location=location
+        )
+
+        if result['status'] == 'scheduled':
+            logger.info(f"✓ Scheduled: {title}")
+        else:
+            logger.warning(f"⚠️ Scheduling conflict: {title}")
+
+        return result
+
+    def get_twg_schedule(
+        self,
+        twg_id: str,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> List[ScheduledEvent]:
+        """
+        Get schedule for a specific TWG.
+
+        Example:
+            >>> events = supervisor.get_twg_schedule(
+            ...     twg_id="energy",
+            ...     start_date=datetime(2026, 3, 1),
+            ...     end_date=datetime(2026, 3, 31)
+            ... )
+            >>> for event in events:
+            ...     print(f"{event.title}: {event.start_time}")
+        """
+        return self.global_scheduler.get_twg_schedule(
+            twg_id, start_date, end_date
+        )
+
+    def get_global_schedule(
+        self,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> List[ScheduledEvent]:
+        """
+        Get global schedule across all TWGs.
+
+        Example:
+            >>> schedule = supervisor.get_global_schedule(
+            ...     start_date=datetime(2026, 3, 1)
+            ... )
+            >>> print(f"Total events: {len(schedule)}")
+        """
+        return self.global_scheduler.get_global_schedule(
+            start_date, end_date
+        )
+
+    def detect_schedule_conflicts(self) -> List[Any]:
+        """
+        Detect all scheduling conflicts.
+
+        Example:
+            >>> conflicts = supervisor.detect_schedule_conflicts()
+            >>> for conflict in conflicts:
+            ...     print(f"{conflict.severity}: {conflict.description}")
+        """
+        return self.global_scheduler.detect_all_conflicts()
+
+    def get_scheduling_summary(self) -> Dict[str, Any]:
+        """
+        Get summary of current schedule.
+
+        Example:
+            >>> summary = supervisor.get_scheduling_summary()
+            >>> print(f"Total events: {summary['total_events']}")
+            >>> print(f"Conflicts: {summary['total_conflicts']}")
+        """
+        return self.global_scheduler.get_scheduling_summary()
 
 
 # Convenience function to create a supervisor agent
