@@ -325,6 +325,234 @@ I have consulted {len(responses)} TWG agents and received these responses:
             "delegation_enabled": len(self._agent_registry) > 0
         }
 
+    # =========================================================================
+    # Cross-TWG Synthesis Methods
+    # =========================================================================
+
+    def collect_twg_status(self, agent_ids: Optional[List[str]] = None, brief: bool = True) -> Dict[str, str]:
+        """
+        Collect current status from multiple TWGs.
+
+        Args:
+            agent_ids: List of agent IDs to query (None = all registered agents)
+            brief: If True, request brief responses (much faster, recommended)
+
+        Returns:
+            Dictionary mapping agent_id to their status summary
+        """
+        if agent_ids is None:
+            agent_ids = self.get_registered_agents()
+
+        # Use VERY brief query for faster responses (reduces timeout issues)
+        if brief:
+            status_query = "In 2-3 sentences max: What are your top 2 priorities right now?"
+        else:
+            status_query = "Provide a brief status update covering: current priorities, recent progress, upcoming milestones, and any blockers or dependencies on other TWGs."
+
+        statuses = {}
+        for agent_id in agent_ids:
+            try:
+                logger.info(f"Querying {agent_id} TWG...")
+                response = self.delegate_to_agent(agent_id, status_query)
+                if response:
+                    statuses[agent_id] = response
+                    logger.info(f"✓ Got response from {agent_id}")
+            except Exception as e:
+                logger.error(f"✗ Failed to collect from {agent_id}: {e}")
+                statuses[agent_id] = f"[Error: {str(e)[:100]}]"
+
+        return statuses
+
+    def generate_pillar_overview(self, pillar_agent_id: str) -> str:
+        """
+        Generate a strategic overview of a single pillar.
+
+        Args:
+            pillar_agent_id: Agent ID (energy, agriculture, minerals, digital)
+
+        Returns:
+            Formatted pillar overview
+        """
+        from app.agents.synthesis_templates import (
+            SynthesisType,
+            format_synthesis_prompt
+        )
+
+        # Collect detailed input from the pillar TWG
+        pillar_query = """Provide a comprehensive overview of your pillar including:
+1. Key priorities and strategic goals
+2. Flagship initiatives and projects
+3. Expected outcomes and impacts
+4. Critical success factors
+5. Main risks and dependencies"""
+
+        twg_input = self.delegate_to_agent(pillar_agent_id, pillar_query)
+
+        if not twg_input:
+            return f"Could not generate overview for {pillar_agent_id} - agent not available"
+
+        # Format synthesis prompt
+        pillar_names = {
+            "energy": "Energy & Infrastructure",
+            "agriculture": "Agriculture & Food Security",
+            "minerals": "Critical Minerals & Industrialization",
+            "digital": "Digital Economy & Transformation"
+        }
+
+        prompt = format_synthesis_prompt(
+            SynthesisType.PILLAR_OVERVIEW,
+            twg_inputs={pillar_agent_id: twg_input},
+            pillar_name=pillar_names.get(pillar_agent_id, pillar_agent_id.title())
+        )
+
+        # Generate synthesis
+        logger.info(f"Generating pillar overview for {pillar_agent_id}")
+        return super().chat(prompt)
+
+    def generate_cross_pillar_synthesis(self, agent_ids: List[str]) -> str:
+        """
+        Generate synthesis identifying synergies between multiple pillars.
+
+        Args:
+            agent_ids: List of agent IDs to synthesize (2+ pillars)
+
+        Returns:
+            Cross-pillar synthesis report
+        """
+        from app.agents.synthesis_templates import (
+            SynthesisType,
+            format_synthesis_prompt
+        )
+
+        if len(agent_ids) < 2:
+            return "Cross-pillar synthesis requires at least 2 pillars"
+
+        # Collect inputs from all specified TWGs
+        query = "Describe your pillar's priorities, key projects, and any dependencies or synergies with other pillars (energy, agriculture, minerals, digital)."
+
+        twg_inputs = {}
+        for agent_id in agent_ids:
+            response = self.delegate_to_agent(agent_id, query)
+            if response:
+                twg_inputs[agent_id] = response
+
+        if not twg_inputs:
+            return "Could not collect TWG inputs for synthesis"
+
+        # Format pillar names
+        pillar_names_map = {
+            "energy": "Energy",
+            "agriculture": "Agriculture",
+            "minerals": "Minerals",
+            "digital": "Digital"
+        }
+        pillars_names = " & ".join([pillar_names_map.get(aid, aid.title()) for aid in agent_ids])
+        pillars_list = ", ".join([pillar_names_map.get(aid, aid.title()) for aid in agent_ids])
+
+        # Generate synthesis
+        prompt = format_synthesis_prompt(
+            SynthesisType.CROSS_PILLAR,
+            twg_inputs=twg_inputs,
+            pillars_names=pillars_names,
+            pillars_list=pillars_list
+        )
+
+        logger.info(f"Generating cross-pillar synthesis for: {pillars_list}")
+        return super().chat(prompt)
+
+    def generate_strategic_priorities(self) -> str:
+        """
+        Generate strategic priorities synthesis across all TWGs.
+
+        Returns:
+            Strategic priorities report
+        """
+        from app.agents.synthesis_templates import (
+            SynthesisType,
+            format_synthesis_prompt
+        )
+
+        # Collect status from all TWGs
+        twg_inputs = self.collect_twg_status()
+
+        if not twg_inputs:
+            return "Could not collect TWG inputs for strategic priorities"
+
+        # Generate synthesis
+        prompt = format_synthesis_prompt(
+            SynthesisType.STRATEGIC_PRIORITIES,
+            twg_inputs=twg_inputs
+        )
+
+        logger.info("Generating strategic priorities synthesis across all TWGs")
+        return super().chat(prompt)
+
+    def generate_policy_coherence_check(self) -> str:
+        """
+        Generate policy coherence check across all TWGs.
+
+        Returns:
+            Policy coherence analysis
+        """
+        from app.agents.synthesis_templates import (
+            SynthesisType,
+            format_synthesis_prompt
+        )
+
+        # Query TWGs about their policy recommendations
+        policy_query = "List your key policy recommendations and regulatory proposals for the summit."
+
+        twg_inputs = {}
+        for agent_id in self.get_registered_agents():
+            response = self.delegate_to_agent(agent_id, policy_query)
+            if response:
+                twg_inputs[agent_id] = response
+
+        if not twg_inputs:
+            return "Could not collect policy inputs from TWGs"
+
+        # Generate coherence check
+        prompt = format_synthesis_prompt(
+            SynthesisType.POLICY_COHERENCE,
+            twg_inputs=twg_inputs
+        )
+
+        logger.info("Generating policy coherence check across all TWGs")
+        return super().chat(prompt)
+
+    def generate_summit_readiness_assessment(self) -> str:
+        """
+        Generate comprehensive summit readiness assessment.
+
+        Returns:
+            Summit readiness report
+        """
+        from app.agents.synthesis_templates import (
+            SynthesisType,
+            format_synthesis_prompt
+        )
+
+        # Collect comprehensive status from all TWGs including protocol
+        readiness_query = "Provide a readiness assessment covering: deliverables status, timeline adherence, resource needs, stakeholder engagement, and any critical issues."
+
+        twg_inputs = {}
+        for agent_id in self.get_registered_agents():
+            response = self.delegate_to_agent(agent_id, readiness_query)
+            if response:
+                twg_inputs[agent_id] = response
+
+        if not twg_inputs:
+            return "Could not collect readiness inputs from TWGs"
+
+        # Generate assessment
+        prompt = format_synthesis_prompt(
+            SynthesisType.SUMMIT_READINESS,
+            twg_inputs=twg_inputs
+        )
+
+        logger.info("Generating summit readiness assessment")
+        return super().chat(prompt)
+
 
 # Convenience function to create a supervisor agent
 def create_supervisor(
