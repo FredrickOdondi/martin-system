@@ -57,6 +57,25 @@ def print_welcome(agent_id: str):
     print("  • 'reset' - Clear conversation history")
     print("  • 'info' - Show agent information")
     print("  • 'help' - Show this help message")
+
+    # Add synthesis commands for supervisor
+    if agent_id == "supervisor":
+        print("\nCross-TWG Synthesis Commands:")
+        print("  • 'synthesis:pillar PILLAR' - Generate pillar overview (energy|agriculture|minerals|digital)")
+        print("  • 'synthesis:cross PILLAR1 PILLAR2' - Generate cross-pillar synthesis")
+        print("  • 'synthesis:priorities' - Generate strategic priorities across all TWGs")
+        print("  • 'synthesis:coherence' - Check policy coherence")
+        print("  • 'synthesis:readiness' - Assess summit readiness")
+
+        print("\nDocument Synthesis Commands:")
+        print("  • 'document:declaration' - Synthesize Declaration from all TWG sections")
+        print("  • 'document:status' - Show document synthesis statistics")
+
+        print("\nScheduling Commands:")
+        print("  • 'schedule:view' - View global schedule")
+        print("  • 'schedule:conflicts' - Detect scheduling conflicts")
+        print("  • 'schedule:summary' - Show scheduling summary")
+
     print("\n" + "-"*70 + "\n")
 
 
@@ -238,6 +257,245 @@ Examples:
 
             elif user_input.lower() == "help":
                 print_welcome(args.agent)
+                continue
+
+            # Handle synthesis commands (supervisor only)
+            elif args.agent == "supervisor" and user_input.lower().startswith("synthesis:"):
+                try:
+                    parts = user_input.split()
+                    command = parts[0].lower()
+
+                    if command == "synthesis:pillar" and len(parts) >= 2:
+                        pillar = parts[1].lower()
+                        valid_pillars = ["energy", "agriculture", "minerals", "digital"]
+                        if pillar not in valid_pillars:
+                            print(f"\n❌ Invalid pillar. Choose from: {', '.join(valid_pillars)}\n")
+                            continue
+
+                        print(f"\n🔄 Generating {pillar.title()} pillar overview...\n")
+                        response = agent.generate_pillar_overview(pillar)
+                        print(response)
+                        print()
+
+                    elif command == "synthesis:cross" and len(parts) >= 3:
+                        pillars = [p.lower() for p in parts[1:]]
+                        valid_pillars = ["energy", "agriculture", "minerals", "digital"]
+
+                        invalid = [p for p in pillars if p not in valid_pillars]
+                        if invalid:
+                            print(f"\n❌ Invalid pillars: {invalid}\n")
+                            print(f"Choose from: {', '.join(valid_pillars)}\n")
+                            continue
+
+                        print(f"\n🔄 Generating cross-pillar synthesis for {' & '.join(pillars)}...\n")
+                        response = agent.generate_cross_pillar_synthesis(pillars)
+                        print(response)
+                        print()
+
+                    elif command == "synthesis:priorities":
+                        print("\n🔄 Generating strategic priorities synthesis...\n")
+                        print("⏳ This may take 30-60 seconds (querying all TWGs)...\n")
+                        response = agent.generate_strategic_priorities()
+                        print(response)
+                        print()
+
+                    elif command == "synthesis:coherence":
+                        print("\n🔄 Generating policy coherence check...\n")
+                        print("⏳ This may take 30-60 seconds (querying all TWGs)...\n")
+                        response = agent.generate_policy_coherence_check()
+                        print(response)
+                        print()
+
+                    elif command == "synthesis:readiness":
+                        print("\n🔄 Generating summit readiness assessment...\n")
+                        print("⏳ This may take 30-60 seconds (querying all TWGs)...\n")
+                        response = agent.generate_summit_readiness_assessment()
+                        print(response)
+                        print()
+
+                    else:
+                        print("\n❌ Invalid synthesis command. Type 'help' to see available commands.\n")
+
+                except Exception as e:
+                    print(f"\n❌ Synthesis error: {e}\n")
+
+                continue
+
+            # Handle document synthesis commands (supervisor only)
+            elif args.agent == "supervisor" and user_input.lower().startswith("document:"):
+                try:
+                    command = user_input.lower().strip()
+
+                    if command == "document:declaration":
+                        print("\n📄 Synthesizing Declaration from all TWG sections...\n")
+                        print("⏳ This may take 1-2 minutes (collecting from all TWGs)...\n")
+
+                        result = agent.synthesize_declaration(
+                            title="ECOWAS Summit 2026 Declaration",
+                            collect_from_twgs=True
+                        )
+
+                        print("=" * 70)
+                        print("DECLARATION SYNTHESIS RESULTS")
+                        print("=" * 70)
+                        print(f"Title: {result['metadata']['title']}")
+                        print(f"Word count: {result['metadata']['word_count']}")
+                        print(f"Sections: {len(result['metadata']['sections'])}")
+                        print(f"Coherence score: {result['metadata']['coherence_score']:.1%}")
+                        print(f"\nTerminology changes: {result['synthesis_log']['terminology_changes']}")
+                        print(f"Voice adjustments: {result['synthesis_log']['voice_adjustments']}")
+                        print(f"Citations added: {result['synthesis_log']['citations_added']}")
+
+                        if result['metadata']['issues']:
+                            print(f"\n⚠️  Issues detected ({len(result['metadata']['issues'])}):")
+                            for issue in result['metadata']['issues']:
+                                print(f"  - {issue}")
+                        else:
+                            print("\n✓ No coherence issues detected")
+
+                        print("\n" + "-" * 70)
+                        print("DECLARATION PREVIEW (first 1000 characters):")
+                        print("-" * 70)
+                        print(result['document'][:1000])
+                        if len(result['document']) > 1000:
+                            print("\n... (truncated)")
+                        print("-" * 70)
+
+                        # Ask if user wants to save
+                        save = input("\nSave full Declaration to file? (y/n): ").strip().lower()
+                        if save == 'y':
+                            filename = input("Filename (default: declaration_draft.md): ").strip()
+                            if not filename:
+                                filename = "declaration_draft.md"
+
+                            with open(filename, 'w') as f:
+                                f.write(result['document'])
+                            print(f"\n✓ Declaration saved to: {filename}\n")
+
+                    elif command == "document:status":
+                        print("\n📊 Document Synthesis Statistics\n")
+
+                        history = agent.document_synthesizer.get_synthesis_history()
+
+                        if not history:
+                            print("No documents synthesized yet.\n")
+                        else:
+                            print(f"Total documents synthesized: {len(history)}\n")
+
+                            for i, doc in enumerate(history, 1):
+                                print(f"{i}. {doc['metadata']['title']}")
+                                print(f"   Words: {doc['metadata']['word_count']}")
+                                print(f"   Coherence: {doc['metadata']['coherence_score']:.1%}")
+                                print(f"   Sections: {len(doc['metadata']['sections'])}")
+                                print(f"   Synthesized: {doc['metadata']['synthesized_at']}")
+                                print()
+
+                        # Show terminology standards
+                        standards = agent.document_synthesizer.get_terminology_standards()
+                        if standards:
+                            print("Terminology Standards:")
+                            for twg_id, terms in standards.items():
+                                print(f"  {twg_id.upper()}:")
+                                for abbr, full in terms.items():
+                                    print(f"    {abbr} → {full}")
+                            print()
+
+                    else:
+                        print("\n❌ Invalid document command. Type 'help' to see available commands.\n")
+
+                except Exception as e:
+                    print(f"\n❌ Document synthesis error: {e}\n")
+                    import traceback
+                    traceback.print_exc()
+
+                continue
+
+            # Handle scheduling commands (supervisor only)
+            elif args.agent == "supervisor" and user_input.lower().startswith("schedule:"):
+                try:
+                    command = user_input.lower().strip()
+
+                    if command == "schedule:view":
+                        print("\n📅 Global Schedule\n")
+
+                        schedule = agent.get_global_schedule()
+
+                        if not schedule:
+                            print("No events scheduled yet.\n")
+                        else:
+                            print(f"Total events: {len(schedule)}\n")
+
+                            from collections import defaultdict
+                            by_day = defaultdict(list)
+
+                            for event in schedule:
+                                day = event.start_time.date()
+                                by_day[day].append(event)
+
+                            for day, events in sorted(by_day.items()):
+                                print(f"\n{day.strftime('%B %d, %Y')}:")
+                                print("-" * 50)
+                                for event in events:
+                                    print(f"{event.start_time.strftime('%H:%M')} - {event.end_time.strftime('%H:%M')}")
+                                    print(f"  {event.title}")
+                                    print(f"  Type: {event.event_type.value}, Priority: {event.priority.value}")
+                                    print(f"  TWGs: {', '.join(event.required_twgs)}")
+                                    if event.vip_attendees:
+                                        print(f"  VIPs: {', '.join(event.vip_attendees)}")
+                                    print()
+
+                    elif command == "schedule:conflicts":
+                        print("\n⚠️  Detecting Scheduling Conflicts...\n")
+
+                        conflicts = agent.detect_schedule_conflicts()
+
+                        if not conflicts:
+                            print("✓ No scheduling conflicts detected.\n")
+                        else:
+                            print(f"Found {len(conflicts)} conflicts:\n")
+
+                            for i, conflict in enumerate(conflicts, 1):
+                                print(f"Conflict #{i}:")
+                                print(f"  Type: {conflict.conflict_type}")
+                                print(f"  Severity: {conflict.severity.upper()}")
+                                print(f"  Events: {', '.join(conflict.event_titles)}")
+                                print(f"  Description: {conflict.description}")
+                                print(f"  Impact: {conflict.impact}")
+                                if conflict.suggested_resolution:
+                                    print(f"  Suggestion: {conflict.suggested_resolution}")
+                                print()
+
+                    elif command == "schedule:summary":
+                        print("\n📊 Scheduling Summary\n")
+
+                        summary = agent.get_scheduling_summary()
+
+                        print(f"Total events: {summary['total_events']}")
+                        print(f"\nBy Type:")
+                        for event_type, count in summary['by_type'].items():
+                            print(f"  {event_type}: {count}")
+
+                        print(f"\nBy Priority:")
+                        for priority, count in summary['by_priority'].items():
+                            print(f"  {priority}: {count}")
+
+                        print(f"\nBy Status:")
+                        for status, count in summary['by_status'].items():
+                            print(f"  {status}: {count}")
+
+                        print(f"\nConflicts:")
+                        print(f"  Total: {summary['total_conflicts']}")
+                        print(f"  Critical: {summary['critical_conflicts']}")
+                        print()
+
+                    else:
+                        print("\n❌ Invalid schedule command. Type 'help' to see available commands.\n")
+
+                except Exception as e:
+                    print(f"\n❌ Scheduling error: {e}\n")
+                    import traceback
+                    traceback.print_exc()
+
                 continue
 
             # Send to agent
