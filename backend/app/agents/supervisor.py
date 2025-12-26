@@ -398,7 +398,7 @@ I have consulted {len(responses)} TWG agents and received these responses:
         Returns:
             Formatted pillar overview
         """
-        from app.agents.synthesis_templates import (
+        from backend.app.agents.synthesis_templates import (
             SynthesisType,
             format_synthesis_prompt
         )
@@ -444,7 +444,7 @@ I have consulted {len(responses)} TWG agents and received these responses:
         Returns:
             Cross-pillar synthesis report
         """
-        from app.agents.synthesis_templates import (
+        from backend.app.agents.synthesis_templates import (
             SynthesisType,
             format_synthesis_prompt
         )
@@ -492,7 +492,7 @@ I have consulted {len(responses)} TWG agents and received these responses:
         Returns:
             Strategic priorities report
         """
-        from app.agents.synthesis_templates import (
+        from backend.app.agents.synthesis_templates import (
             SynthesisType,
             format_synthesis_prompt
         )
@@ -519,7 +519,7 @@ I have consulted {len(responses)} TWG agents and received these responses:
         Returns:
             Policy coherence analysis
         """
-        from app.agents.synthesis_templates import (
+        from backend.app.agents.synthesis_templates import (
             SynthesisType,
             format_synthesis_prompt
         )
@@ -552,7 +552,7 @@ I have consulted {len(responses)} TWG agents and received these responses:
         Returns:
             Summit readiness report
         """
-        from app.agents.synthesis_templates import (
+        from backend.app.agents.synthesis_templates import (
             SynthesisType,
             format_synthesis_prompt
         )
@@ -685,7 +685,7 @@ I have consulted {len(responses)} TWG agents and received these responses:
             ...     ]
             ... )
         """
-        from app.schemas.broadcast_messages import DocumentType
+        from backend.app.schemas.broadcast_messages import DocumentType
 
         # Convert string to enum
         doc_type_enum = DocumentType(document_type)
