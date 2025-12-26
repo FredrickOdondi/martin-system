@@ -6,7 +6,7 @@ Centralized configuration using Pydantic Settings for environment variables.
 
 from typing import Optional
 from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic import Field, ConfigDict
 
 
 class Settings(BaseSettings):
@@ -57,6 +57,64 @@ class Settings(BaseSettings):
         description="LLM request timeout in seconds"
     )
 
+    # Message Bus Settings
+    MESSAGE_BUS_ENABLED: bool = Field(
+        default=True,
+        description="Enable Redis message bus for agent communication"
+    )
+    MESSAGE_BUS_MAX_QUEUE_SIZE: int = Field(
+        default=1000,
+        description="Maximum messages per agent queue"
+    )
+    MESSAGE_BUS_DEFAULT_TIMEOUT: int = Field(
+        default=30,
+        description="Default timeout for blocking operations (seconds)"
+    )
+    MESSAGE_BUS_MESSAGE_TTL: int = Field(
+        default=3600,
+        description="Message TTL in seconds (1 hour)"
+    )
+
+    # Enhanced Routing Settings
+    AGENT_USE_ENHANCED_ROUTING: bool = Field(
+        default=False,
+        description="Use enhanced confidence-based routing (feature flag)"
+    )
+    ROUTING_CONFIDENCE_THRESHOLD: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence to select an agent"
+    )
+    ROUTING_MULTI_AGENT_THRESHOLD: float = Field(
+        default=0.7,
+        ge=0.0,
+        le=1.0,
+        description="Confidence threshold for multi-agent consultation"
+    )
+    ROUTING_MAX_PARALLEL_AGENTS: int = Field(
+        default=3,
+        ge=1,
+        le=6,
+        description="Maximum agents to consult in parallel"
+    )
+
+    # Peer Delegation Settings
+    AGENT_PEER_DELEGATION_ENABLED: bool = Field(
+        default=False,
+        description="Allow agents to delegate to peers (feature flag)"
+    )
+    AGENT_MAX_DELEGATION_DEPTH: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Maximum delegation chain depth"
+    )
+    AGENT_RESPONSE_TIMEOUT: int = Field(
+        default=30,
+        description="Timeout for agent responses (seconds)"
+    )
+
     # Agent Settings
     AGENT_USE_REDIS_MEMORY: bool = Field(
         default=True,
@@ -83,10 +141,17 @@ class Settings(BaseSettings):
     )
 
     # CORS
-    CORS_ORIGINS: list = Field(
-        default=["http://localhost:5173", "http://localhost:3000"],
-        description="Allowed CORS origins"
+    CORS_ORIGINS: str = Field(
+        default="http://localhost:5173,http://localhost:3000",
+        description="Allowed CORS origins (comma-separated)"
     )
+
+    @property
+    def cors_origins_list(self) -> list:
+        """Parse CORS_ORIGINS string into a list"""
+        if isinstance(self.CORS_ORIGINS, list):
+            return self.CORS_ORIGINS
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
 
     # Email Settings (for future use)
     SMTP_HOST: Optional[str] = None
@@ -105,10 +170,12 @@ class Settings(BaseSettings):
         description="Maximum upload size in bytes"
     )
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore"  # Ignore extra fields in .env
+    )
 
 
 # Singleton instance
