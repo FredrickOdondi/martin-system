@@ -8,6 +8,8 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 import uuid
 
 from backend.app.core.database import get_db
@@ -36,36 +38,30 @@ async def get_current_user(
     Raises:
         HTTPException: If token is invalid or user not found
     """
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    
     token = credentials.credentials
     
     # Verify token
-    payload = verify_token(token, token_type="access")
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Could not validate credentials",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    payload = verify_token(token, "access")
+    if payload is None:
+        raise credentials_exception
     
-    # Extract user ID
-    user_id_str = payload.get("sub")
-    if not user_id_str:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    user_id: str = payload.get("sub")
+    if user_id is None:
+        raise credentials_exception
+        
+    # Eager load TWGs for permission checks
+    query = select(User).where(User.id == uuid.UUID(user_id)).options(selectinload(User.twgs))
+    result = await db.execute(query)
+    user = result.scalar_one_or_none()
     
-    # Get user from database
-    auth_service = AuthService(db)
-    user = await auth_service.get_user_by_id(uuid.UUID(user_id_str))
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    if user is None:
+        raise credentials_exception
     
     return user
 
