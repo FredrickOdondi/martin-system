@@ -30,6 +30,12 @@ class MeetingStatus(str, enum.Enum):
     CANCELLED = "cancelled"
     COMPLETED = "completed"
 
+class MinutesStatus(str, enum.Enum):
+    DRAFT = "draft"
+    REVIEW = "review"
+    APPROVED = "approved"
+    FINAL = "final"
+
 class ActionItemStatus(str, enum.Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"

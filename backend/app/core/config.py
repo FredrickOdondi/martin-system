@@ -53,7 +53,7 @@ class Settings(BaseSettings):
         description="LLM sampling temperature"
     )
     LLM_TIMEOUT: int = Field(
-        default=30,
+        default=300,
         description="LLM request timeout in seconds"
     )
     

@@ -8,7 +8,7 @@ Routes requests, synthesizes outputs, and maintains global consistency.
 from typing import Dict, List, Optional, Any
 from loguru import logger
 
-from app.agents.base_agent import BaseAgent
+from backend.app.agents.base_agent import BaseAgent
 
 
 class SupervisorAgent(BaseAgent):
@@ -87,12 +87,12 @@ class SupervisorAgent(BaseAgent):
         Automatically register all TWG agents.
         This creates instances of all available agents.
         """
-        from app.agents.energy_agent import create_energy_agent
-        from app.agents.agriculture_agent import create_agriculture_agent
-        from app.agents.minerals_agent import create_minerals_agent
-        from app.agents.digital_agent import create_digital_agent
-        from app.agents.protocol_agent import create_protocol_agent
-        from app.agents.resource_mobilization_agent import create_resource_mobilization_agent
+        from backend.app.agents.energy_agent import create_energy_agent
+        from backend.app.agents.agriculture_agent import create_agriculture_agent
+        from backend.app.agents.minerals_agent import create_minerals_agent
+        from backend.app.agents.digital_agent import create_digital_agent
+        from backend.app.agents.protocol_agent import create_protocol_agent
+        from backend.app.agents.resource_mobilization_agent import create_resource_mobilization_agent
 
         agents = {
             "energy": create_energy_agent(keep_history=False),
