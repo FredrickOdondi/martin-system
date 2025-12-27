@@ -20,12 +20,12 @@ class UserRole(str, enum.Enum):
     SECRETARIAT_LEAD = "secretariat_lead"
 
 class TWGPillar(str, enum.Enum):
-    ENERGY = "energy"
-    AGRIBUSINESS = "agribusiness"
-    MINERALS = "minerals"
-    DIGITAL = "digital"
-    LOGISTICS = "logistics"
-    RESOURCE_MOBILIZATION = "resource_mobilization"
+    energy_infrastructure = "energy_infrastructure"
+    agriculture_food_systems = "agriculture_food_systems"
+    critical_minerals_industrialization = "critical_minerals_industrialization"
+    digital_economy_transformation = "digital_economy_transformation"
+    protocol_logistics = "protocol_logistics"
+    resource_mobilization = "resource_mobilization"
 
 class MeetingStatus(str, enum.Enum):
     SCHEDULED = "scheduled"
@@ -56,21 +56,30 @@ class ProjectStatus(str, enum.Enum):
     BANKABLE = "bankable"
     PRESENTED = "presented"
 
+class NotificationType(str, enum.Enum):
+    INFO = "info"
+    SUCCESS = "success"
+    WARNING = "warning"
+    ALERT = "alert"
+    MESSAGE = "message"
+    DOCUMENT = "document"
+    TASK = "task"
+
 # --- Association Tables ---
 
 twg_members = Table(
     "twg_members",
     Base.metadata,
-    Column("user_id", Uuid, ForeignKey("users.id"), primary_key=True),
-    Column("twg_id", Uuid, ForeignKey("twgs.id"), primary_key=True),
+    Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("twg_id", Uuid, ForeignKey("twgs.id", ondelete="CASCADE"), primary_key=True),
     Column("joined_at", DateTime, default=datetime.utcnow)
 )
 
 meeting_participants = Table(
     "meeting_participants",
     Base.metadata,
-    Column("meeting_id", Uuid, ForeignKey("meetings.id"), primary_key=True),
-    Column("user_id", Uuid, ForeignKey("users.id"), primary_key=True),
+    Column("meeting_id", Uuid, ForeignKey("meetings.id", ondelete="CASCADE"), primary_key=True),
+    Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
     Column("rsvp_status", String(50), default="pending"), # pending, accepted, declined
     Column("attended", Boolean, default=False)
 )
@@ -98,6 +107,9 @@ class User(Base):
     meetings: Mapped[List["Meeting"]] = relationship(
         secondary=meeting_participants, back_populates="participants"
     )
+    notifications: Mapped[List["Notification"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", order_by="Notification.created_at.desc()"
+    )
     refresh_tokens: Mapped[List["RefreshToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     audit_logs: Mapped[List["AuditLog"]] = relationship(back_populates="user")
 
@@ -105,7 +117,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     action: Mapped[str] = mapped_column(String(255))
     resource_type: Mapped[str] = mapped_column(String(100)) # e.g., "meeting", "document", "project"
     resource_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, nullable=True)
@@ -124,8 +136,8 @@ class TWG(Base):
     pillar: Mapped[TWGPillar] = mapped_column(Enum(TWGPillar))
     status: Mapped[str] = mapped_column(String(50), default="active")
     
-    political_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id"), nullable=True)
-    technical_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id"), nullable=True)
+    political_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    technical_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Relationships
     members: Mapped[List["User"]] = relationship(
@@ -189,7 +201,7 @@ class ActionItem(Base):
     twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
     meeting_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("meetings.id"), nullable=True)
     description: Mapped[str] = mapped_column(Text)
-    owner_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
+    owner_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
     due_date: Mapped[datetime] = mapped_column(DateTime)
     status: Mapped[ActionItemStatus] = mapped_column(Enum(ActionItemStatus), default=ActionItemStatus.PENDING)
     priority: Mapped[ActionItemPriority] = mapped_column(Enum(ActionItemPriority), default=ActionItemPriority.MEDIUM)
@@ -224,8 +236,8 @@ class Document(Base):
     twg_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("twgs.id"), nullable=True)
     file_name: Mapped[str] = mapped_column(String(255))
     file_path: Mapped[str] = mapped_column(String(512))
-    file_type: Mapped[str] = mapped_column(String(50)) # pdf, docx, etc.
-    uploaded_by_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
+    file_type: Mapped[str] = mapped_column(String(255))  # MIME type can be long
+    uploaded_by_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
     is_confidential: Mapped[bool] = mapped_column(Boolean, default=False)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -245,3 +257,18 @@ class RefreshToken(Base):
     
     # Relationships
     user: Mapped["User"] = relationship(back_populates="refresh_tokens")
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
+    type: Mapped[NotificationType] = mapped_column(Enum(NotificationType), default=NotificationType.INFO)
+    title: Mapped[str] = mapped_column(String(255))
+    content: Mapped[str] = mapped_column(Text)
+    link: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="notifications")
