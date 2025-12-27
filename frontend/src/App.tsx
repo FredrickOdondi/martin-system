@@ -10,7 +10,6 @@ import ForgotPassword from './pages/auth/ForgotPassword'
 import ResetPassword from './pages/auth/ResetPassword'
 import Settings from './pages/settings/Settings'
 import Dashboard from './pages/dashboard/Dashboard'
-import CommandCenter from './pages/dashboard/CommandCenter'
 import TwgWorkspace from './pages/workspace/TwgWorkspace'
 import TwgAgent from './pages/workspace/TwgAgent'
 import ActionTracker from './pages/actions/ActionTracker'
@@ -145,6 +144,16 @@ function App() {
             <Route path="/deal-pipeline" element={
                 <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.FACILITATOR, UserRole.SECRETARIAT_LEAD]}>
                     <DealPipeline />
+                </ProtectedRoute>
+            } />
+            <Route path="/actions" element={
+                <ProtectedRoute>
+                    <ActionTracker />
+                </ProtectedRoute>
+            } />
+            <Route path="/assistant" element={
+                <ProtectedRoute>
+                    <AgentAssistant />
                 </ProtectedRoute>
             } />
             <Route path="/actions" element={
