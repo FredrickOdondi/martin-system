@@ -61,16 +61,16 @@ class ProjectStatus(str, enum.Enum):
 twg_members = Table(
     "twg_members",
     Base.metadata,
-    Column("user_id", Uuid, ForeignKey("users.id"), primary_key=True),
-    Column("twg_id", Uuid, ForeignKey("twgs.id"), primary_key=True),
+    Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("twg_id", Uuid, ForeignKey("twgs.id", ondelete="CASCADE"), primary_key=True),
     Column("joined_at", DateTime, default=datetime.utcnow)
 )
 
 meeting_participants = Table(
     "meeting_participants",
     Base.metadata,
-    Column("meeting_id", Uuid, ForeignKey("meetings.id"), primary_key=True),
-    Column("user_id", Uuid, ForeignKey("users.id"), primary_key=True),
+    Column("meeting_id", Uuid, ForeignKey("meetings.id", ondelete="CASCADE"), primary_key=True),
+    Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
     Column("rsvp_status", String(50), default="pending"), # pending, accepted, declined
     Column("attended", Boolean, default=False)
 )
@@ -105,7 +105,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     action: Mapped[str] = mapped_column(String(255))
     resource_type: Mapped[str] = mapped_column(String(100)) # e.g., "meeting", "document", "project"
     resource_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, nullable=True)
@@ -124,8 +124,8 @@ class TWG(Base):
     pillar: Mapped[TWGPillar] = mapped_column(Enum(TWGPillar))
     status: Mapped[str] = mapped_column(String(50), default="active")
     
-    political_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id"), nullable=True)
-    technical_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id"), nullable=True)
+    political_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    technical_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Relationships
     members: Mapped[List["User"]] = relationship(
@@ -189,7 +189,7 @@ class ActionItem(Base):
     twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
     meeting_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("meetings.id"), nullable=True)
     description: Mapped[str] = mapped_column(Text)
-    owner_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
+    owner_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
     due_date: Mapped[datetime] = mapped_column(DateTime)
     status: Mapped[ActionItemStatus] = mapped_column(Enum(ActionItemStatus), default=ActionItemStatus.PENDING)
     priority: Mapped[ActionItemPriority] = mapped_column(Enum(ActionItemPriority), default=ActionItemPriority.MEDIUM)
@@ -225,7 +225,7 @@ class Document(Base):
     file_name: Mapped[str] = mapped_column(String(255))
     file_path: Mapped[str] = mapped_column(String(512))
     file_type: Mapped[str] = mapped_column(String(50)) # pdf, docx, etc.
-    uploaded_by_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
+    uploaded_by_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
     is_confidential: Mapped[bool] = mapped_column(Boolean, default=False)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

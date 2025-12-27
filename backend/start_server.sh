@@ -38,5 +38,6 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 # Set PYTHONPATH and start server
-export PYTHONPATH="/Users/fredrickotieno/Desktop/Martins System:$PYTHONPATH"
+# We set PYTHONPATH to the root of the project so that backend.app.main can be found
+export PYTHONPATH="$(cd .. && pwd):$(pwd):$PYTHONPATH"
 uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload

@@ -8,11 +8,10 @@ import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
 import ForgotPassword from './pages/auth/ForgotPassword'
 import ResetPassword from './pages/auth/ResetPassword'
+import Settings from './pages/settings/Settings'
 import Dashboard from './pages/dashboard/Dashboard'
 import TwgWorkspace from './pages/workspace/TwgWorkspace'
-import MyWorkspaces from './pages/workspace/MyWorkspaces'
 import TwgAgent from './pages/workspace/TwgAgent'
-import Integrations from './pages/settings/Integrations'
 import ActionTracker from './pages/actions/ActionTracker'
 import KnowledgeBase from './pages/knowledge/KnowledgeBase'
 import DealPipeline from './pages/resource/DealPipeline'
@@ -23,7 +22,6 @@ import DocumentLibrary from './pages/documents/DocumentLibrary'
 import NotificationCenter from './pages/notifications/NotificationCenter'
 import TeamManagement from './pages/admin/TeamManagement'
 import PendingApproval from './pages/auth/PendingApproval'
-import DashboardLayout from './layouts/DashboardLayout'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function HomeRedirect() {
@@ -92,8 +90,10 @@ function App() {
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/pending-approval" element={<PendingApproval />} />
 
+            {/* Home Redirect */}
+            <Route path="/" element={<HomeRedirect />} />
+
             {/* Protected routes */}
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={
                 <ProtectedRoute>
                     <Dashboard />
@@ -102,6 +102,11 @@ function App() {
             <Route path="/twgs" element={
                 <ProtectedRoute>
                     <TwgAgent />
+                </ProtectedRoute>
+            } />
+            <Route path="/workspace/:id" element={
+                <ProtectedRoute>
+                    <TwgWorkspace />
                 </ProtectedRoute>
             } />
             <Route path="/documents" element={
@@ -114,40 +119,51 @@ function App() {
                     <NotificationCenter />
                 </ProtectedRoute>
             } />
-            <Route path="/integrations" element={
+            <Route path="/settings" element={
                 <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
                     <Settings />
                 </ProtectedRoute>
             } />
-            <Route path="/" element={
+            <Route path="/profile" element={
                 <ProtectedRoute>
-                    <DashboardLayout />
+                    <UserProfile />
                 </ProtectedRoute>
-            }>
-                <Route index element={<HomeRedirect />} />
-                <Route path="dashboard" element={<CommandCenter />} />
-                <Route path="my-twgs" element={<MyWorkspaces />} />
-                <Route path="workspace/:id" element={<TwgWorkspace />} />
-                <Route path="schedule" element={<SummitSchedule />} />
-                <Route path="knowledge-base" element={<KnowledgeBase />} />
-                <Route path="deal-pipeline" element={
-                    <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.FACILITATOR, UserRole.SECRETARIAT_LEAD]}>
-                        <DealPipeline />
-                    </ProtectedRoute>
-                } />
-                <Route path="actions" element={<ActionTracker />} />
-                <Route path="profile" element={<UserProfile />} />
-                <Route path="assistant" element={<AgentAssistant />} />
-                <Route path="notifications" element={<NotificationCenter />} />
-                <Route path="admin/team" element={
-                    <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
-                        <TeamManagement />
-                    </ProtectedRoute>
-                } />
-            </Route>
+            } />
+            <Route path="/schedule" element={
+                <ProtectedRoute>
+                    <SummitSchedule />
+                </ProtectedRoute>
+            } />
+            <Route path="/knowledge-base" element={
+                <ProtectedRoute>
+                    <KnowledgeBase />
+                </ProtectedRoute>
+            } />
+            <Route path="/deal-pipeline" element={
+                <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.FACILITATOR, UserRole.SECRETARIAT_LEAD]}>
+                    <DealPipeline />
+                </ProtectedRoute>
+            } />
+            <Route path="/actions" element={
+                <ProtectedRoute>
+                    <ActionTracker />
+                </ProtectedRoute>
+            } />
+            <Route path="/assistant" element={
+                <ProtectedRoute>
+                    <AgentAssistant />
+                </ProtectedRoute>
+            } />
+            <Route path="/admin/team" element={
+                <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                    <TeamManagement />
+                </ProtectedRoute>
+            } />
+
+            {/* Fallback */}
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
     )
 }
 
 export default App
-
