@@ -8,9 +8,10 @@ import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
 import ForgotPassword from './pages/auth/ForgotPassword'
 import ResetPassword from './pages/auth/ResetPassword'
-import CommandCenter from './pages/dashboard/CommandCenter'
+import Dashboard from './pages/dashboard/Dashboard'
 import TwgWorkspace from './pages/workspace/TwgWorkspace'
 import MyWorkspaces from './pages/workspace/MyWorkspaces'
+import TwgAgent from './pages/workspace/TwgAgent'
 import Integrations from './pages/settings/Integrations'
 import ActionTracker from './pages/actions/ActionTracker'
 import KnowledgeBase from './pages/knowledge/KnowledgeBase'
@@ -92,6 +93,32 @@ function App() {
             <Route path="/pending-approval" element={<PendingApproval />} />
 
             {/* Protected routes */}
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={
+                <ProtectedRoute>
+                    <Dashboard />
+                </ProtectedRoute>
+            } />
+            <Route path="/twgs" element={
+                <ProtectedRoute>
+                    <TwgAgent />
+                </ProtectedRoute>
+            } />
+            <Route path="/documents" element={
+                <ProtectedRoute>
+                    <DocumentLibrary />
+                </ProtectedRoute>
+            } />
+            <Route path="/notifications" element={
+                <ProtectedRoute>
+                    <NotificationCenter />
+                </ProtectedRoute>
+            } />
+            <Route path="/integrations" element={
+                <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                    <Settings />
+                </ProtectedRoute>
+            } />
             <Route path="/" element={
                 <ProtectedRoute>
                     <DashboardLayout />
@@ -101,17 +128,11 @@ function App() {
                 <Route path="dashboard" element={<CommandCenter />} />
                 <Route path="my-twgs" element={<MyWorkspaces />} />
                 <Route path="workspace/:id" element={<TwgWorkspace />} />
-                <Route path="documents" element={<DocumentLibrary />} />
                 <Route path="schedule" element={<SummitSchedule />} />
                 <Route path="knowledge-base" element={<KnowledgeBase />} />
                 <Route path="deal-pipeline" element={
                     <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.FACILITATOR, UserRole.SECRETARIAT_LEAD]}>
                         <DealPipeline />
-                    </ProtectedRoute>
-                } />
-                <Route path="integrations" element={
-                    <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
-                        <Integrations />
                     </ProtectedRoute>
                 } />
                 <Route path="actions" element={<ActionTracker />} />
