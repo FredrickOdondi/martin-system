@@ -130,7 +130,7 @@ export default function NotificationCenter() {
                             </span>
                         </div>
                     </div>
-                </aside>
+
 
                     <div className="flex-1 overflow-y-auto divide-y divide-[#e7ebf3] dark:divide-[#2d3748]">
                         {loading && notifications.length === 0 ? (
