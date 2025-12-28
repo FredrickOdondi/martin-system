@@ -1,0 +1,24 @@
+# Exclude heavy local folders
+node_modules/
+**/node_modules/
+venv/
+**/venv/
+.venv/
+**/ .venv/
+__pycache__/
+**/*.pyc
+.git/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+uploads/
+storage/
+logs/
+data/
+chroma_data/
+credentials/
+*.sqlite
+*.db
+.env
+.env.*
