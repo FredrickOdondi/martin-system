@@ -16,21 +16,16 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy requirements first for better caching
 COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Install Python dependencies
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+# Copy all files from the backend folder into a subfolder named 'backend'
+# This satisfies imports like 'from backend.app...'
+WORKDIR /app
+COPY . ./backend/
 
-# Copy application code into a 'backend' directory to support absolute imports
-COPY ./app ./backend/app
-COPY ./scripts ./backend/scripts
-
-# Create necessary directories
-RUN mkdir -p /app/storage /app/logs /app/credentials /app/chroma_data
-
-# Set PYTHONPATH to include the root directory
+# Set PYTHONPATH so the /app folder is treated as a package root
 ENV PYTHONPATH=/app
 
 # Expose port
@@ -40,6 +35,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application
-# Point to backend.app.main:app to match the new directory structure
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Run the application using the full module path
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
