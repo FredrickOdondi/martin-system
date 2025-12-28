@@ -35,8 +35,10 @@ ENV PYTHONPATH=/app
 EXPOSE 8000
 
 # Health check (matches the nested structure)
+# Note: Using shell form to allow variable expansion
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
 
 # Run the application using the full package path
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# USES SHELL FORM TO ALLOW $PORT EXPANSION
+CMD uvicorn backend.app.main:app --host 0.0.0.0 --port ${PORT:-8000}
