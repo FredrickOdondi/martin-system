@@ -16,27 +16,27 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements
+# Copy requirements and install dependencies
 COPY requirements.txt .
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
-# Install Python dependencies
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+# Copy everything into a specific 'backend' folder inside the container
+# This exactly matches the 'from backend.app' imports in your code
+WORKDIR /app
+COPY . ./backend/
 
-# Copy application code
-COPY ./app ./app
-COPY ./scripts ./scripts
+# Ensure the backend folder is treated as a Python package
+RUN touch ./backend/__init__.py
 
-# Create necessary directories
-RUN mkdir -p /app/storage /app/logs /app/credentials /app/chroma_data
+# Set PYTHONPATH to the root so 'backend' is discoverable
+ENV PYTHONPATH=/app
 
 # Expose port
 EXPOSE 8000
 
-# Health check
+# Health check (matches the nested structure)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run the application
-# Use gunicorn with uvicorn worker for production stability
-CMD ["gunicorn", "app.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000"]
+# Run the application using the full package path
+CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,6 +1,8 @@
-# Railway Environment Variables Setup
+## Railway Setup Steps
 
-To deploy the **ECOWAS Summit TWG System** on Railway, you need to configure the following environment variables in the Railway dashboard.
+1.  **Delete existing services**: If Railway already created a single service named `martin-system`, **delete it** from the project dashboard. This allows Railway to see your `railway.json` and create the 4 separate services instead.
+2.  **Deploy**: Run `railway up` from your terminal.
+3.  **Environment Variables**: Add your secrets (API keys) to the **Backend** service.
 
 ## Required Variables (Backend)
 
@@ -16,6 +18,15 @@ To deploy the **ECOWAS Summit TWG System** on Railway, you need to configure the
 | `OPENAI_API_KEY` | Your OpenAI API Key | From OpenAI Dashboard |
 | `OPENAI_MODEL` | The model to use | `gpt-4-turbo-preview` |
 | `CORS_ORIGINS` | Allowed frontend URLs | Your Railway frontend URL |
+
+### Using Groq (Free & Fast Alternative to Ollama)
+If you don't want to use OpenAI or local Ollama, you can use **Groq** for free:
+1.  Get a key at [console.groq.com](https://console.groq.com/)
+2.  Set these variables in Railway:
+    *   `LLM_PROVIDER=openai`
+    *   `OPENAI_API_KEY=your_groq_api_key_here`
+    *   `OPENAI_BASE_URL=https://api.groq.com/openai/v1`
+    *   `OPENAI_MODEL=llama3-8b-8192`
 
 ## Required Variables (Frontend)
 
