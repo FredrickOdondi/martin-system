@@ -3,8 +3,8 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from backend.app.models.models import Notification, NotificationType
-from backend.app.core.ws_manager import ws_manager
+from app.models.models import Notification, NotificationType
+from app.core.ws_manager import ws_manager
 
 async def create_notification(
     db: AsyncSession,

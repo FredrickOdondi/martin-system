@@ -7,12 +7,12 @@ import datetime
 import io
 import csv
 
-from backend.app.core.database import get_db
-from backend.app.models.models import User, Meeting, ActionItem, Document, TWG, Project, MeetingStatus, ActionItemStatus, ProjectStatus
-from backend.app.api.deps import get_current_active_user
+from app.core.database import get_db
+from app.models.models import User, Meeting, ActionItem, Document, TWG, Project, MeetingStatus, ActionItemStatus, ProjectStatus
+from app.api.deps import get_current_active_user
 from sqlalchemy.orm import selectinload
-from backend.app.core.ws_manager import ws_manager
-from backend.app.utils.security import verify_token
+from app.core.ws_manager import ws_manager
+from app.utils.security import verify_token
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 

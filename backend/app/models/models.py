@@ -72,7 +72,8 @@ twg_members = Table(
     Base.metadata,
     Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
     Column("twg_id", Uuid, ForeignKey("twgs.id", ondelete="CASCADE"), primary_key=True),
-    Column("joined_at", DateTime, default=datetime.utcnow)
+    Column("joined_at", DateTime, default=datetime.utcnow),
+    extend_existing=True
 )
 
 meeting_participants = Table(
@@ -81,13 +82,15 @@ meeting_participants = Table(
     Column("meeting_id", Uuid, ForeignKey("meetings.id", ondelete="CASCADE"), primary_key=True),
     Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
     Column("rsvp_status", String(50), default="pending"), # pending, accepted, declined
-    Column("attended", Boolean, default=False)
+    Column("attended", Boolean, default=False),
+    extend_existing=True
 )
 
 # --- Models ---
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     full_name: Mapped[str] = mapped_column(String(255))
@@ -115,6 +118,7 @@ class User(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -130,6 +134,7 @@ class AuditLog(Base):
 
 class TWG(Base):
     __tablename__ = "twgs"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255))
@@ -150,6 +155,7 @@ class TWG(Base):
 
 class Meeting(Base):
     __tablename__ = "meetings"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
@@ -172,7 +178,8 @@ class Meeting(Base):
 
 class Agenda(Base):
     __tablename__ = "agendas"
-    
+    __table_args__ = {'extend_existing': True}
+
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     meeting_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("meetings.id"), unique=True)
     content: Mapped[str] = mapped_column(Text) # Markdown or HTML
@@ -183,7 +190,8 @@ class Agenda(Base):
 
 class Minutes(Base):
     __tablename__ = "minutes"
-    
+    __table_args__ = {'extend_existing': True}
+
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     meeting_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("meetings.id"), unique=True)
     content: Mapped[str] = mapped_column(Text) # Markdown or HTML
@@ -196,6 +204,7 @@ class Minutes(Base):
 
 class ActionItem(Base):
     __tablename__ = "action_items"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
@@ -213,6 +222,7 @@ class ActionItem(Base):
 
 class Project(Base):
     __tablename__ = "projects"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
@@ -231,6 +241,7 @@ class Project(Base):
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     twg_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("twgs.id"), nullable=True)
@@ -247,7 +258,8 @@ class Document(Base):
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
-    
+    __table_args__ = {'extend_existing': True}
+
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     token: Mapped[str] = mapped_column(String(512), unique=True, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
@@ -260,6 +272,7 @@ class RefreshToken(Base):
 
 class Notification(Base):
     __tablename__ = "notifications"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))

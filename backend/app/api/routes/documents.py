@@ -8,12 +8,12 @@ import os
 import shutil
 from datetime import datetime
 
-from backend.app.core.database import get_db
-from backend.app.models.models import Document, User, UserRole
-from backend.app.schemas.schemas import DocumentRead
-from backend.app.api.deps import get_current_active_user, has_twg_access
-from backend.app.core.knowledge_base import get_knowledge_base
-from backend.app.utils.document_processor import get_document_processor
+from app.core.database import get_db
+from app.models.models import Document, User, UserRole
+from app.schemas.schemas import DocumentRead
+from app.api.deps import get_current_active_user, has_twg_access
+from app.core.knowledge_base import get_knowledge_base
+from app.utils.document_processor import get_document_processor
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
@@ -59,7 +59,7 @@ async def upload_document(
             except ValueError:
                 # Not a UUID, try to resolve as pillar key
                 if twg_id in pillar_map:
-                    from backend.app.models.models import TWG
+                    from app.models.models import TWG
                     pillar_value = pillar_map[twg_id]
                     result = await db.execute(
                         select(TWG).where(TWG.pillar == pillar_value)

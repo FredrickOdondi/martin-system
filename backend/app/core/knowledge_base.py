@@ -333,7 +333,7 @@ class PineconeKnowledgeBase:
 _knowledge_base_instance: Optional[PineconeKnowledgeBase] = None
 
 
-from backend.app.core.config import settings
+from app.core.config import settings
 
 def get_knowledge_base() -> PineconeKnowledgeBase:
     """

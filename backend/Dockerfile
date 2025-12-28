@@ -26,9 +26,14 @@ RUN pip install --upgrade pip && \
 # Copy application code
 COPY ./app ./app
 COPY ./scripts ./scripts
+COPY ./alembic ./alembic
+COPY ./alembic.ini ./alembic.ini
+
+# Make scripts executable
+RUN chmod +x /app/scripts/*.sh
 
 # Create necessary directories
-RUN mkdir -p /app/storage /app/logs /app/credentials /app/chroma_data
+RUN mkdir -p /app/storage /app/logs /app/credentials /app/chroma_data /app/uploads /app/data
 
 # Expose port
 EXPOSE 8000
