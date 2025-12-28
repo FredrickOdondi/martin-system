@@ -1,6 +1,8 @@
-# Railway Environment Variables Setup
+## Railway Setup Steps
 
-To deploy the **ECOWAS Summit TWG System** on Railway, you need to configure the following environment variables in the Railway dashboard.
+1.  **Delete existing services**: If Railway already created a single service named `martin-system`, **delete it** from the project dashboard. This allows Railway to see your `railway.json` and create the 4 separate services instead.
+2.  **Deploy**: Run `railway up` from your terminal.
+3.  **Environment Variables**: Add your secrets (API keys) to the **Backend** service.
 
 ## Required Variables (Backend)
 
