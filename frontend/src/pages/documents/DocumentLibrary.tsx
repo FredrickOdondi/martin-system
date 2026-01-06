@@ -107,7 +107,16 @@ export default function DocumentLibrary() {
         try {
             setIngesting(docId)
             await documentService.ingestDocument(docId)
-            // Optionally update UI to show it's ingested
+
+            // Update local state to show as synced immediately
+            setDocuments(prevDocs =>
+                prevDocs.map(doc =>
+                    doc.id === docId
+                        ? { ...doc, ingested_at: new Date().toISOString() }
+                        : doc
+                )
+            )
+
             alert('Document successfully ingested into the Knowledge Base RAG!')
         } catch (error) {
             console.error('Ingestion failed:', error)
@@ -451,14 +460,21 @@ export default function DocumentLibrary() {
                                             {new Date(doc.created_at).toLocaleDateString()}
                                         </td>
                                         <td className="px-6 py-5 text-center">
-                                            <button
-                                                onClick={() => handleIngest(doc.id)}
-                                                disabled={ingesting === doc.id}
-                                                className={`p-2 rounded-lg transition-all ${ingesting === doc.id ? 'text-[#1152d4] animate-spin' : 'text-[#8a9dbd] hover:text-[#1152d4] hover:bg-blue-50'}`}
-                                                title="Ingest to RAG"
-                                            >
-                                                <span className="material-symbols-outlined text-[20px]">{ingesting === doc.id ? 'sync' : 'database_upload'}</span>
-                                            </button>
+                                            {doc.ingested_at ? (
+                                                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-50/50 text-[#1152d4] border border-blue-100">
+                                                    <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                                                    <span className="text-[10px] font-black uppercase tracking-wider">Synced</span>
+                                                </span>
+                                            ) : (
+                                                <button
+                                                    onClick={() => handleIngest(doc.id)}
+                                                    disabled={ingesting === doc.id}
+                                                    className={`p-2 rounded-lg transition-all ${ingesting === doc.id ? 'text-[#1152d4] animate-spin' : 'text-[#8a9dbd] hover:text-[#1152d4] hover:bg-blue-50'}`}
+                                                    title="Ingest to RAG"
+                                                >
+                                                    <span className="material-symbols-outlined text-[20px]">{ingesting === doc.id ? 'sync' : 'database_upload'}</span>
+                                                </button>
+                                            )}
                                         </td>
                                         <td className="px-6 py-5 text-center">
                                             <span className={`inline-flex items-center px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${doc.is_confidential ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'}`}>

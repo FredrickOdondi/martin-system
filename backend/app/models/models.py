@@ -242,6 +242,7 @@ class Document(Base):
     uploaded_by_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
     is_confidential: Mapped[bool] = mapped_column(Boolean, default=False)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    ingested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     
     # Relationships

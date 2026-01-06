@@ -11,6 +11,7 @@ export interface Document {
     is_confidential: boolean;
     metadata_json: Record<string, any> | null;
     created_at: string;
+    ingested_at?: string;
     uploaded_by?: User;
 }
 
