@@ -227,6 +227,17 @@ async def ingest_document(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {str(e)}")
 
+    # Update DB record with ingestion timestamp
+    db_doc.ingested_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(db_doc)
+
+    return {
+        "status": "success",
+        "chunks_ingested": upsert_result['total_upserted'],
+        "namespace": namespace
+    }
+
 @router.get("/search", response_model=List[dict])
 async def search_documents_content(
     query: str,

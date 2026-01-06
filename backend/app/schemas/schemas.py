@@ -206,6 +206,7 @@ class DocumentRead(DocumentBase):
     id: uuid.UUID
     file_path: str
     uploaded_by_id: uuid.UUID
+    ingested_at: Optional[datetime] = None
     created_at: datetime
 
 # --- Notification Schemas ---
