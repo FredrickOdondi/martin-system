@@ -11,6 +11,7 @@ from datetime import datetime
 import logging
 from pinecone import Pinecone, ServerlessSpec
 from tenacity import retry, stop_after_attempt, wait_exponential
+import openai
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,8 @@ class PineconeKnowledgeBase:
         index_name: str,
         embedding_model: str = "text-embedding-3-small",
         dimension: int = 1536,
-        namespace_prefix: str = "twg"
+        namespace_prefix: str = "twg",
+        openai_api_key: Optional[str] = None
     ):
         """
         Initialize Pinecone knowledge base.
@@ -57,6 +59,11 @@ class PineconeKnowledgeBase:
         # Initialize Pinecone client
         self.pc = Pinecone(api_key=api_key)
         
+        # Initialize OpenAI client if key is provided
+        self.openai_client = None
+        if openai_api_key:
+            self.openai_client = openai.Client(api_key=openai_api_key)
+            
         # Get or create index
         self.index = self._get_or_create_index()
         
@@ -117,7 +124,7 @@ class PineconeKnowledgeBase:
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(min=1, max=10))
     def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
         """
-        Generate embeddings for a list of texts using Ollama (nomic-embed-text).
+        Generate embeddings for a list of texts using OpenAI or Ollama.
         
         Args:
             texts: List of text strings to embed
@@ -125,6 +132,28 @@ class PineconeKnowledgeBase:
         Returns:
             List of embedding vectors
         """
+        # Check if using OpenAI model and client is available
+        if self.embedding_model.startswith("text-embedding") and self.openai_client:
+            try:
+                # OpenAI Embeddings
+                embeddings = []
+                
+                # OpenAI has a batch size limit, process in chunks if needed
+                # For now, simplistic implementation
+                response = self.openai_client.embeddings.create(
+                    model=self.embedding_model,
+                    input=texts,
+                    encoding_format="float"
+                )
+                
+                # Extract embeddings in order
+                return [data.embedding for data in response.data]
+                
+            except Exception as e:
+                logger.error(f"OpenAI embedding error: {e}")
+                raise
+        
+        # Fallback to Ollama (local development)
         try:
             import requests
             embeddings = []
@@ -137,7 +166,7 @@ class PineconeKnowledgeBase:
                 response = requests.post(
                     'http://localhost:11434/api/embeddings',
                     json={
-                        'model': self.embedding_model,
+                        'model': self.embedding_model if not self.embedding_model.startswith("text-embedding") else "nomic-embed-text",
                         'prompt': safe_text
                     }
                 )
@@ -150,7 +179,7 @@ class PineconeKnowledgeBase:
                     logger.error(f"Ollama error for model {self.embedding_model}: {error_msg}")
                     raise Exception(f"Ollama embedding failed: {error_msg}")
             
-            logger.debug(f"Generated {len(embeddings)} embeddings using {self.embedding_model}")
+            logger.debug(f"Generated {len(embeddings)} embeddings using Ollama")
             return embeddings
             
         except Exception as e:
@@ -360,7 +389,8 @@ def get_knowledge_base() -> PineconeKnowledgeBase:
             environment=environment,
             index_name=index_name,
             embedding_model=embedding_model,
-            dimension=dimension
+            dimension=dimension,
+            openai_api_key=settings.OPENAI_API_KEY
         )
     
     return _knowledge_base_instance
