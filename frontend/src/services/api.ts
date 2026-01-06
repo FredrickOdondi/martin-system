@@ -4,12 +4,19 @@ import { logout } from '../store/slices/authSlice';
 
 // Create axios instance with base URL
 // In VITE, we use import.meta.env for environment variables
-let apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+let apiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1').trim();
 
 // Fix Mixed Content: Force HTTPS for Railway production URLs
-if (apiUrl.includes('railway.app') && apiUrl.startsWith('http://')) {
-    apiUrl = apiUrl.replace('http://', 'https://');
+// This handles both http:// URLs and ensures railway.app always uses https://
+if (apiUrl.toLowerCase().includes('railway.app')) {
+    // Remove any existing protocol
+    apiUrl = apiUrl.replace(/^https?:\/\//i, '');
+    // Add https://
+    apiUrl = 'https://' + apiUrl;
 }
+
+// Debug logging (will be visible in browser console)
+console.log('[API Config] Final API URL:', apiUrl);
 
 const API_URL = apiUrl;
 
