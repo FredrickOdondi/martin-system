@@ -298,3 +298,4 @@ Verify `VITE_API_URL` in `.env` matches backend URL.
 ## License
 
 Proprietary - ECOWAS Summit 2026
+# Force rebuild
