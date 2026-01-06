@@ -4,7 +4,14 @@ import { logout } from '../store/slices/authSlice';
 
 // Create axios instance with base URL
 // In VITE, we use import.meta.env for environment variables
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+let apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+
+// Fix Mixed Content: Force HTTPS for Railway production URLs
+if (apiUrl.includes('railway.app') && apiUrl.startsWith('http://')) {
+    apiUrl = apiUrl.replace('http://', 'https://');
+}
+
+const API_URL = apiUrl;
 
 const api = axios.create({
     baseURL: API_URL,
