@@ -11,9 +11,14 @@ app = FastAPI(
 
 # Set up CORS
 # Convert CORS_ORIGINS to list if it's a string
+# Convert CORS_ORIGINS to list if it's a string
 cors_origins = settings.CORS_ORIGINS
 if isinstance(cors_origins, str):
     cors_origins = [origin.strip() for origin in cors_origins.split(",")]
+
+# Force add production origin to ensure it's never missed
+if "https://frontend-production-1abb.up.railway.app" not in cors_origins:
+    cors_origins.append("https://frontend-production-1abb.up.railway.app")
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,6 +28,20 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
+
+@app.on_event("startup")
+async def startup_event():
+    import logging
+    logger = logging.getLogger("uvicorn.info")
+    logger.info("--- STARTUP DIAGNOSTICS ---")
+    logger.info(f"API_V1_STR: {settings.API_V1_STR}")
+    logger.info(f"CORS_ORIGINS: {cors_origins}")
+    
+    logger.info("REGISTERED ROUTES:")
+    url_list = [{"path": route.path, "name": route.name} for route in app.routes]
+    for route in url_list:
+        logger.info(f"  {route['path']} ({route['name']})")
+    logger.info("--- END STARTUP DIAGNOSTICS ---")
 
 # Register routers
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}")
