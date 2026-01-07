@@ -26,7 +26,8 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
             dispatch(fetchNotifications());
 
             const setupWebSocket = () => {
-                const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+                const envUrl = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1';
+                const baseUrl = envUrl.replace('localhost', '127.0.0.1');
                 const wsUrl = `${baseUrl.replace('http', 'ws')}/dashboard/ws?token=${token}`;
 
                 const socket = new WebSocket(wsUrl);

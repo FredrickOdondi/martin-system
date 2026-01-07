@@ -1,33 +1,40 @@
 import { Card, Badge } from '../../components/ui';
 
+import { useEffect, useState } from 'react';
+import { getConflicts, ConflictAlert, getDashboardStats, exportDashboardReport } from '../../services/dashboardService';
+
 export default function ConflictDashboard() {
-    // Mock Data for "God-view" - In real implementation, this comes from ConflictDetector service
-    const conflicts = [
-        {
-            id: 'c1',
-            type: 'semantic',
-            severity: 'high',
-            source: 'Energy TWG',
-            target: 'Minerals TWG',
-            description: 'Direct contradiction in "Smelting Power Source"',
-            detail: 'Energy mandates "100% Hydro" by 2026, Minerals specifies "Coal-fired captive power" for bauxite plants.',
-            status: 'Unresolved'
-        },
-        {
-            id: 'c2',
-            type: 'temporal',
-            severity: 'medium',
-            source: 'Logistics',
-            target: 'Protocol',
-            description: 'VIP Schedule Clash',
-            detail: 'Ministerial visit scheduled for both "Port Expansion" and "Summit Opening" simultaneously on Feb 12.',
-            status: 'In Negotiation'
-        }
-    ];
+    const [stats, setStats] = useState<any>(null);
+    const [conflicts, setConflicts] = useState<ConflictAlert[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const loadData = async () => {
+            try {
+                const [conflictsData, statsData] = await Promise.all([
+                    getConflicts(),
+                    getDashboardStats()
+                ]);
+                setConflicts(conflictsData);
+                setStats(statsData);
+            } catch (error) {
+                console.error("Failed to load dashboard data", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        loadData();
+    }, []);
+
+    // Calculate Weekly Packet progress from pipeline stats
+    const totalDeals = stats?.pipeline?.total || 1;
+    const completedDeals = (stats?.pipeline?.final_review || 0) + (stats?.pipeline?.signed || 0);
+    const packetCompletion = Math.round((completedDeals / totalDeals) * 100) || 0;
 
     const weeklyPacket = {
-        status: 'Drafting',
-        completion: 65,
+        completion: packetCompletion,
+        // Keep items static for now as they represent specific highlighted documents not yet in generic stats
         items: [
             { name: 'Session Prop: Green Hydrogen', status: 'Ready' },
             { name: 'Policy Note: Tariff Harmonization', status: 'Review' },
@@ -46,10 +53,22 @@ export default function ConflictDashboard() {
                     <p className="text-sm text-slate-500 dark:text-slate-400">Synthesis & Conflict Resolution Center</p>
                 </div>
                 <div className="flex gap-3">
-                    <button className="px-4 py-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl text-xs font-bold hover:shadow-lg transition-all">
+                    <button
+                        onClick={() => exportDashboardReport()}
+                        className="px-4 py-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl text-xs font-bold hover:shadow-lg transition-all active:scale-95"
+                    >
                         Generate Weekly Packet
                     </button>
-                    <button className="px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-900/30 rounded-xl text-xs font-bold hover:bg-red-100 dark:hover:bg-red-900/40 transition-all flex items-center gap-2">
+                    <button
+                        onClick={() => {
+                            setLoading(true);
+                            getConflicts().then(data => {
+                                setConflicts(data);
+                                setLoading(false);
+                            });
+                        }}
+                        className="px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border border-red-100 dark:border-red-900/30 rounded-xl text-xs font-bold hover:bg-red-100 dark:hover:bg-red-900/40 transition-all flex items-center gap-2 active:scale-95"
+                    >
                         <span className="material-symbols-outlined text-[16px]">warning</span>
                         Force Reconciliation
                     </button>
@@ -78,8 +97,8 @@ export default function ConflictDashboard() {
                                 <div key={i} className="flex items-center justify-between text-xs">
                                     <span className="text-slate-600 dark:text-slate-300 font-medium">{item.name}</span>
                                     <span className={`font-bold ${item.status === 'Ready' ? 'text-emerald-500' :
-                                            item.status === 'Review' ? 'text-amber-500' :
-                                                'text-slate-400'
+                                        item.status === 'Review' ? 'text-amber-500' :
+                                            'text-slate-400'
                                         }`}>{item.status}</span>
                                 </div>
                             ))}
@@ -97,11 +116,16 @@ export default function ConflictDashboard() {
                         </div>
                         <div className="flex items-center gap-4 mt-4">
                             <div className="flex-1 text-center p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20">
-                                <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">92%</div>
+                                <div className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                                    {/* Mock 'Resolved' as Total - Pending for now */}
+                                    {(stats?.metrics?.deals_in_pipeline || 0) + (stats?.metrics?.active_twgs || 0)}
+                                </div>
                                 <div className="text-[9px] font-black uppercase text-slate-400">Resolved</div>
                             </div>
                             <div className="flex-1 text-center p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20">
-                                <div className="text-lg font-bold text-amber-600 dark:text-amber-400">3</div>
+                                <div className="text-lg font-bold text-amber-600 dark:text-amber-400">
+                                    {stats?.metrics?.pending_approvals ?? '-'}
+                                </div>
                                 <div className="text-[9px] font-black uppercase text-slate-400">Pending</div>
                             </div>
                         </div>
@@ -118,15 +142,18 @@ export default function ConflictDashboard() {
                             </h3>
                         </div>
                         <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {loading && (
+                                <div className="p-8 text-center text-slate-500 italic">Scanning for conflicts...</div>
+                            )}
                             {conflicts.map((conflict) => (
-                                <div key={conflict.id} className="p-5 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
+                                <div key={conflict.id || Math.random()} className="p-5 hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors group">
                                     <div className="flex justify-between items-start mb-2">
                                         <div className="flex items-center gap-2">
-                                            <Badge variant={conflict.severity === 'high' ? 'danger' : 'warning'} className="uppercase text-[10px] font-black tracking-widest">
-                                                {conflict.type}
+                                            <Badge variant={conflict.severity === 'high' || conflict.severity === 'critical' ? 'danger' : 'warning'} className="uppercase text-[10px] font-black tracking-widest">
+                                                {conflict.conflict_type}
                                             </Badge>
                                             <span className="text-xs font-bold text-slate-500">
-                                                {conflict.source} vs {conflict.target}
+                                                {conflict.agents_involved.join(' vs ')}
                                             </span>
                                         </div>
                                         <button className="text-xs font-bold text-blue-600 hover:text-blue-700 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -135,7 +162,7 @@ export default function ConflictDashboard() {
                                     </div>
                                     <h4 className="font-bold text-slate-900 dark:text-white mb-2">{conflict.description}</h4>
                                     <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed bg-slate-50 dark:bg-slate-800 p-3 rounded-lg border border-slate-100 dark:border-slate-700">
-                                        "{conflict.detail}"
+                                        "{Object.entries(conflict.conflicting_positions || {}).map(([k, v]) => `${k}: ${v}`).join(' | ')}"
                                     </p>
                                     <div className="flex items-center gap-2 mt-4">
                                         <button className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition-colors">

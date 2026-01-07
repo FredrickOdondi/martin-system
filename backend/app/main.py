@@ -20,6 +20,10 @@ if isinstance(cors_origins, str):
 if "https://frontend-production-1abb.up.railway.app" not in cors_origins:
     cors_origins.append("https://frontend-production-1abb.up.railway.app")
 
+# Add IPv4 localhost variant to support 127.0.0.1 connections
+if "http://127.0.0.1:5173" not in cors_origins:
+    cors_origins.append("http://127.0.0.1:5173")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins if cors_origins else ["http://localhost:5173", "http://localhost:3000"],

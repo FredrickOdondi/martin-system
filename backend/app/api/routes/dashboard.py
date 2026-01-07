@@ -13,6 +13,8 @@ from backend.app.api.deps import get_current_active_user
 from sqlalchemy.orm import selectinload
 from backend.app.core.ws_manager import ws_manager
 from backend.app.utils.security import verify_token
+from backend.app.services.conflict_detector import ConflictDetector
+from backend.app.schemas.broadcast_messages import ConflictAlert
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -258,3 +260,52 @@ async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):
             # Handle incoming messages if needed, e.g., ping/pong
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket, user_id)
+
+@router.get("/conflicts", response_model=List[ConflictAlert])
+async def get_conflicts(
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Detect and return conflicts across all TWG workstreams.
+    Uses real-time pattern matching on Projects and Action Items.
+    """
+    # 1. Gather "Outputs" from each TWG (Proxied by Projects and Action Items)
+    query = select(TWG).options(
+        selectinload(TWG.projects),
+        selectinload(TWG.action_items)
+    )
+    result = await db.execute(query)
+    twgs = result.scalars().all()
+    
+    twg_outputs: Dict[str, str] = {}
+    
+    for twg in twgs:
+        # Aggregate text from projects and actions
+        # Aggregate text from projects and actions
+        # Exclude TWG name/pillar from analysis text to prevent false positives on keywords like 'Infrastructure'
+        output_text = ""
+        
+        if twg.projects:
+            output_text += "PROJECTS:\n"
+            for p in twg.projects:
+                output_text += f"- {p.name}: {p.description or ''} (Status: {p.status})\n"
+                
+        if twg.action_items:
+            output_text += "\nACTION ITEMS:\n"
+            for item in twg.action_items:
+                output_text += f"- {item.description} (Priority: {item.priority})\n"
+                
+        twg_outputs[twg.name] = output_text
+        
+    # 2. Run Detection
+    # Note: We instantiate a fresh detector for this request. 
+    # In a full production app, this might be a singleton or run periodically in background.
+    detector = ConflictDetector() 
+    
+    # We rely on pattern matching primarily if LLM is not configured globally or passed here
+    # If ConflictDetector default LLM is None, it skips semantic check.
+    
+    conflicts = detector.detect_conflicts(twg_outputs)
+    
+    return conflicts
