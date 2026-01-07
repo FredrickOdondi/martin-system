@@ -32,8 +32,27 @@ app.add_middleware(
 @app.on_event("startup")
 async def startup_event():
     import logging
+    import os
+    from alembic.config import Config
+    from alembic import command
+    
     logger = logging.getLogger("uvicorn.info")
     logger.info("--- STARTUP DIAGNOSTICS ---")
+    
+    # Run Database Migrations
+    try:
+        logger.info("Running database migrations...")
+        if os.path.exists("alembic.ini"):
+            alembic_cfg = Config("alembic.ini")
+            # Run upgrade head
+            command.upgrade(alembic_cfg, "head")
+            logger.info("Database migrations completed successfully!")
+        else:
+            logger.warning("alembic.ini not found! Skipping migrations.")
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+        # Continue startup
+    
     logger.info(f"API_V1_STR: {settings.API_V1_STR}")
     logger.info(f"CORS_ORIGINS: {cors_origins}")
     
