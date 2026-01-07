@@ -152,6 +152,9 @@ class TWG(Base):
     projects: Mapped[List["Project"]] = relationship(back_populates="twg")
     action_items: Mapped[List["ActionItem"]] = relationship(back_populates="twg")
     documents: Mapped[List["Document"]] = relationship(back_populates="twg")
+    
+    political_lead: Mapped[Optional["User"]] = relationship("User", foreign_keys=[political_lead_id])
+    technical_lead: Mapped[Optional["User"]] = relationship("User", foreign_keys=[technical_lead_id])
 
 class Meeting(Base):
     __tablename__ = "meetings"
@@ -267,6 +270,7 @@ class Document(Base):
     
     # Relationships
     twg: Mapped[Optional["TWG"]] = relationship(back_populates="documents")
+    uploaded_by: Mapped["User"] = relationship(foreign_keys=[uploaded_by_id])
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"

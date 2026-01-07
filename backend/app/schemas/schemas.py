@@ -13,11 +13,11 @@ class UserRole(str, enum.Enum):
     SECRETARIAT_LEAD = "secretariat_lead"
 
 class TWGPillar(str, enum.Enum):
-    ENERGY = "energy"
-    AGRIBUSINESS = "agribusiness"
-    MINERALS = "minerals"
-    DIGITAL = "digital"
-    LOGISTICS = "logistics"
+    ENERGY_INFRASTRUCTURE = "energy_infrastructure"
+    AGRICULTURE_FOOD_SYSTEMS = "agriculture_food_systems"
+    CRITICAL_MINERALS_INDUSTRIALIZATION = "critical_minerals_industrialization"
+    DIGITAL_ECONOMY_TRANSFORMATION = "digital_economy_transformation"
+    PROTOCOL_LOGISTICS = "protocol_logistics"
     RESOURCE_MOBILIZATION = "resource_mobilization"
 
 class MeetingStatus(str, enum.Enum):
@@ -114,8 +114,19 @@ class TWGUpdate(SchemaBase):
     political_lead_id: Optional[uuid.UUID] = None
     technical_lead_id: Optional[uuid.UUID] = None
 
+class TWGStats(SchemaBase):
+    meetings_held: int
+    open_actions: int
+    pipeline_projects: int
+    resources_count: int
+
 class TWGRead(TWGBase):
     id: uuid.UUID
+    political_lead: Optional["UserRead"] = None
+    technical_lead: Optional["UserRead"] = None
+    stats: Optional[TWGStats] = None
+    action_items: List["ActionItemRead"] = []
+    documents: List["DocumentRead"] = []
 
 # --- Meeting Schemas ---
 
@@ -220,6 +231,7 @@ class ActionItemCreate(ActionItemBase):
 
 class ActionItemRead(ActionItemBase):
     id: uuid.UUID
+    owner: Optional["UserRead"] = None
 
 # --- Project Schemas ---
 
@@ -258,6 +270,7 @@ class DocumentRead(DocumentBase):
     id: uuid.UUID
     file_path: str
     uploaded_by_id: uuid.UUID
+    uploaded_by: Optional["UserRead"] = None
     ingested_at: Optional[datetime] = None
     created_at: datetime
 
@@ -326,3 +339,6 @@ class AgentStatus(SchemaBase):
     swarm_ready: bool
     active_agents: List[str]
     version: str
+
+# Resolve forward references
+TWGRead.model_rebuild()

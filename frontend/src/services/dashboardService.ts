@@ -35,6 +35,18 @@ export interface TimelineItem {
     status: 'normal' | 'critical';
 }
 
+export interface ConflictAlert {
+    id: string;
+    conflict_type: string;
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    agents_involved: string[];
+    description: string;
+    conflicting_positions: Record<string, string>;
+    impact: string;
+    urgency: string;
+    status: 'pending' | 'in_negotiation' | 'resolved';
+}
+
 export const getDashboardStats = async (): Promise<DashboardStats> => {
     const response = await api.get('/dashboard/stats');
     return response.data;
@@ -42,6 +54,11 @@ export const getDashboardStats = async (): Promise<DashboardStats> => {
 
 export const getTimeline = async (): Promise<TimelineItem[]> => {
     const response = await api.get('/dashboard/timeline');
+    return response.data;
+};
+
+export const getConflicts = async (): Promise<ConflictAlert[]> => {
+    const response = await api.get('/dashboard/conflicts');
     return response.data;
 };
 

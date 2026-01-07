@@ -58,7 +58,7 @@ export function useStreamingChat() {
                 // Use fetch with streaming for SSE
                 abortControllerRef.current = new AbortController();
 
-                const token = localStorage.getItem('access_token');
+                const token = localStorage.getItem('token');
                 const response = await fetch('/api/v1/agents/chat/stream', {
                     method: 'POST',
                     headers: {

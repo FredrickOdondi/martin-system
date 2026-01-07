@@ -4,7 +4,9 @@ import { logout } from '../store/slices/authSlice';
 
 // Create axios instance with base URL
 // In VITE, we use import.meta.env for environment variables
-let apiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1').trim();
+// FORCE IPv4: Convert 'localhost' to '127.0.0.1' to avoid IPv6 connection refusals
+let envUrl = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1').trim();
+let apiUrl = envUrl.replace('localhost', '127.0.0.1');
 
 // Fix Mixed Content: Force HTTPS for Railway production URLs
 // This handles both http:// URLs and ensures railway.app always uses https://
@@ -88,4 +90,10 @@ export const meetings = {
 
     getMinutes: (id: string) => api.get(`/meetings/${id}/minutes`),
     updateMinutes: (id: string, data: { content: string, status?: string }) => api.post(`/meetings/${id}/minutes`, data),
+};
+
+export const twgs = {
+    list: (skip = 0, limit = 100) => api.get(`/twgs/?skip=${skip}&limit=${limit}`),
+    get: (id: string) => api.get(`/twgs/${id}`),
+    update: (id: string, data: any) => api.patch(`/twgs/${id}`, data),
 };
