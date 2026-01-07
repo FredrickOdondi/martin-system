@@ -198,7 +198,7 @@ export default function TwgAgent() {
                 const response = await axios.get(`/api/agents/commands/autocomplete`, {
                     params: { query }
                 });
-                setCommandSuggestions(response.data.suggestions);
+                setCommandSuggestions(response.data?.suggestions || []);
                 setAutocompleteType('command');
                 setSelectedSuggestionIndex(0);
                 return;
@@ -215,7 +215,7 @@ export default function TwgAgent() {
                 const response = await axios.get(`/api/agents/mentions/autocomplete`, {
                     params: { query }
                 });
-                setMentionSuggestions(response.data.suggestions);
+                setMentionSuggestions(response.data?.suggestions || []);
                 setAutocompleteType('mention');
                 setSelectedSuggestionIndex(0);
                 return;
@@ -863,7 +863,7 @@ export default function TwgAgent() {
 
                         <div className="relative bg-white dark:bg-[#0d121b] border-2 border-[#e7ebf3] dark:border-[#2d3748] rounded-2xl shadow-lg focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500 dark:focus-within:border-blue-400 transition-all">
                             {/* Command Autocomplete */}
-                            {autocompleteType === 'command' && commandSuggestions.length > 0 && (
+                            {autocompleteType === 'command' && (commandSuggestions || []).length > 0 && (
                                 <CommandAutocomplete
                                     suggestions={commandSuggestions}
                                     selectedIndex={selectedSuggestionIndex}
@@ -873,7 +873,7 @@ export default function TwgAgent() {
                             )}
 
                             {/* Mention Autocomplete */}
-                            {autocompleteType === 'mention' && mentionSuggestions.length > 0 && (
+                            {autocompleteType === 'mention' && (mentionSuggestions || []).length > 0 && (
                                 <MentionAutocomplete
                                     suggestions={mentionSuggestions}
                                     selectedIndex={selectedSuggestionIndex}
