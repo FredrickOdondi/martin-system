@@ -58,6 +58,12 @@ class NotificationType(str, enum.Enum):
     DOCUMENT = "document"
     TASK = "task"
 
+class DocumentStage(str, enum.Enum):
+    ZERO_DRAFT = "zero_draft"
+    RAP_MODE = "rap_mode"
+    DECLARATION_TXT = "declaration_txt"
+    FINAL = "final"
+
 # --- Base Schema ---
 
 class SchemaBase(BaseModel):
@@ -195,6 +201,7 @@ class DocumentBase(SchemaBase):
     twg_id: Optional[uuid.UUID] = None
     file_name: str
     file_type: str
+    stage: DocumentStage = DocumentStage.FINAL
     is_confidential: bool = False
     metadata_json: Optional[dict] = None
 

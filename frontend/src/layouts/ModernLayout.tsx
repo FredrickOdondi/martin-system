@@ -4,7 +4,7 @@ import { logout } from '../store/slices/authSlice';
 import { toggleTheme } from '../store/slices/themeSlice';
 import { fetchNotifications, addNotification } from '../store/slices/notificationsSlice';
 import { UserRole } from '../types/auth';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface ModernLayoutProps {
     children: React.ReactNode;
@@ -19,6 +19,7 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
     const unreadCount = useAppSelector((state) => state.notifications.unreadCount);
     const token = useAppSelector((state) => state.auth.token);
     const socketRef = useRef<WebSocket | null>(null);
+    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
     useEffect(() => {
         if (token) {
@@ -65,7 +66,7 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
     const isActive = (path: string) => location.pathname === path;
 
     return (
-        <div className="font-display bg-background-light dark:bg-background-dark text-[#0d121b] dark:text-white min-h-screen flex flex-col">
+        <div className="font-display bg-background-light dark:bg-background-dark text-[#0d121b] dark:text-white h-screen overflow-hidden flex flex-col">
             {/* Top Navbar */}
             <header className="sticky top-0 z-50 w-full bg-white dark:bg-[#1a202c] border-b border-[#e7ebf3] dark:border-[#2d3748]">
                 <div className="px-6 lg:px-10 py-3 flex items-center justify-between gap-6">
@@ -144,101 +145,133 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
             {/* Main Content with Sidebar */}
             <div className="flex-1 flex overflow-hidden">
                 {/* Left Sidebar Navigation */}
-                <aside className="w-64 bg-white dark:bg-[#1a202c] border-r border-[#e7ebf3] dark:border-[#2d3748] hidden lg:block shrink-0">
-                    <div className="p-6 space-y-6">
-                        <div>
-                            <div className="text-xs font-bold text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider mb-3">
-                                Navigation
-                            </div>
-                            <div className="space-y-1">
-                                <button
-                                    onClick={() => navigate('/dashboard')}
-                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/dashboard')
-                                        ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
-                                        : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
-                                        }`}
-                                >
-                                    <span className="material-symbols-outlined text-[20px]">dashboard</span>
-                                    <span>Dashboard</span>
-                                </button>
-                                <button
-                                    onClick={() => navigate('/twgs')}
-                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/twgs')
-                                        ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
-                                        : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
-                                        }`}
-                                >
-                                    <span className="material-symbols-outlined text-[20px]">groups</span>
-                                    <span>TWGs</span>
-                                </button>
-                                <button
-                                    onClick={() => navigate('/documents')}
-                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/documents')
-                                        ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
-                                        : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
-                                        }`}
-                                >
-                                    <span className="material-symbols-outlined text-[20px]">folder</span>
-                                    <span>Documents</span>
-                                </button>
-                                <button
-                                    onClick={() => navigate('/notifications')}
-                                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/notifications')
-                                        ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
-                                        : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
-                                        }`}
-                                >
-                                    <span className="material-symbols-outlined text-[20px]">notifications</span>
-                                    <span>Notifications</span>
-                                    {unreadCount > 0 && (
-                                        <span className="ml-auto bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                                            {unreadCount > 99 ? '99+' : unreadCount}
-                                        </span>
-                                    )}
-                                </button>
-                            </div>
-                        </div>
-
-                        {isAdmin && (
+                <aside className={`bg-white dark:bg-[#1a202c] border-r border-[#e7ebf3] dark:border-[#2d3748] hidden lg:block shrink-0 transition-all duration-300 ${isSidebarCollapsed ? 'w-20' : 'w-64'}`}>
+                    <div className={`flex flex-col h-full ${isSidebarCollapsed ? 'p-3' : 'p-6'} transition-all duration-300`}>
+                        <div className="flex-1 space-y-6 overflow-y-auto custom-scrollbar">
                             <div>
-                                <div className="text-xs font-bold text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider mb-3">
-                                    Admin
-                                </div>
+                                {!isSidebarCollapsed && (
+                                    <div className="text-xs font-bold text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider mb-3 px-3 transition-opacity duration-300">
+                                        Navigation
+                                    </div>
+                                )}
                                 <div className="space-y-1">
                                     <button
-                                        onClick={() => navigate('/admin/team')}
-                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/admin/team')
+                                        onClick={() => navigate('/dashboard')}
+                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/dashboard')
                                             ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
                                             : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
-                                            }`}
+                                            } ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
+                                        title={isSidebarCollapsed ? "Dashboard" : ""}
                                     >
-                                        <span className="material-symbols-outlined text-[20px]">badge</span>
-                                        <span>Team</span>
+                                        <span className="material-symbols-outlined text-[20px]">dashboard</span>
+                                        {!isSidebarCollapsed && <span>Dashboard</span>}
                                     </button>
                                     <button
-                                        onClick={() => navigate('/settings')}
-                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/settings')
+                                        onClick={() => navigate('/twgs')}
+                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/twgs')
                                             ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
                                             : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
-                                            }`}
+                                            } ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
+                                        title={isSidebarCollapsed ? "TWGs" : ""}
                                     >
-                                        <span className="material-symbols-outlined text-[20px]">settings</span>
-                                        <span>Settings</span>
+                                        <span className="material-symbols-outlined text-[20px]">groups</span>
+                                        {!isSidebarCollapsed && <span>TWGs</span>}
+                                    </button>
+                                    <button
+                                        onClick={() => navigate('/documents')}
+                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/documents')
+                                            ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
+                                            : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
+                                            } ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
+                                        title={isSidebarCollapsed ? "Documents" : ""}
+                                    >
+                                        <span className="material-symbols-outlined text-[20px]">folder</span>
+                                        {!isSidebarCollapsed && <span>Documents</span>}
+                                    </button>
+                                    <button
+                                        onClick={() => navigate('/notifications')}
+                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/notifications')
+                                            ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
+                                            : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
+                                            } ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
+                                        title={isSidebarCollapsed ? "Notifications" : ""}
+                                    >
+                                        <div className="relative">
+                                            <span className="material-symbols-outlined text-[20px]">notifications</span>
+                                            {unreadCount > 0 && isSidebarCollapsed && (
+                                                <span className="absolute -top-1 -right-1 size-2 bg-red-500 rounded-full"></span>
+                                            )}
+                                        </div>
+                                        {!isSidebarCollapsed && (
+                                            <>
+                                                <span>Notifications</span>
+                                                {unreadCount > 0 && (
+                                                    <span className="ml-auto bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
+                                                        {unreadCount > 99 ? '99+' : unreadCount}
+                                                    </span>
+                                                )}
+                                            </>
+                                        )}
                                     </button>
                                 </div>
                             </div>
-                        )}
 
-                        <div className="pt-6 mt-6 border-t border-[#e7ebf3] dark:border-[#2d3748]">
+                            {isAdmin && (
+                                <div>
+                                    {!isSidebarCollapsed && (
+                                        <div className="text-xs font-bold text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider mb-3 px-3 transition-opacity duration-300">
+                                            Admin
+                                        </div>
+                                    )}
+                                    <div className="space-y-1">
+                                        <button
+                                            onClick={() => navigate('/admin/team')}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/admin/team')
+                                                ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
+                                                : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
+                                                } ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
+                                            title={isSidebarCollapsed ? "Team" : ""}
+                                        >
+                                            <span className="material-symbols-outlined text-[20px]">badge</span>
+                                            {!isSidebarCollapsed && <span>Team</span>}
+                                        </button>
+                                        <button
+                                            onClick={() => navigate('/settings')}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/settings')
+                                                ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
+                                                : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
+                                                } ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
+                                            title={isSidebarCollapsed ? "Settings" : ""}
+                                        >
+                                            <span className="material-symbols-outlined text-[20px]">settings</span>
+                                            {!isSidebarCollapsed && <span>Settings</span>}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="pt-3 mt-3 border-t border-[#e7ebf3] dark:border-[#2d3748] space-y-1">
+                            <button
+                                onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium text-sm text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748] transition-colors ${isSidebarCollapsed ? 'justify-center !px-2' : 'justify-end'}`}
+                                title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
+                            >
+                                <span className="material-symbols-outlined">
+                                    {isSidebarCollapsed ? 'last_page' : 'first_page'}
+                                </span>
+                            </button>
+
                             <button
                                 onClick={() => {
                                     dispatch(logout());
                                     navigate('/login');
                                 }}
-                                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-bold text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
+                                title={isSidebarCollapsed ? "Sign Out" : ""}
                             >
                                 <span className="material-symbols-outlined text-[20px]">logout</span>
-                                <span>Sign Out</span>
+                                {!isSidebarCollapsed && <span>Sign Out</span>}
                             </button>
                         </div>
                     </div>
