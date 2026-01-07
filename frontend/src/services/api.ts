@@ -68,3 +68,24 @@ api.interceptors.response.use(
 );
 
 export default api;
+
+export const meetings = {
+    list: (skip = 0, limit = 100) => api.get(`/meetings/?skip=${skip}&limit=${limit}`),
+    get: (id: string) => api.get(`/meetings/${id}`),
+    create: (data: any) => api.post('/meetings/', data),
+    update: (id: string, data: any) => api.patch(`/meetings/${id}`, data),
+    schedule: (id: string) => api.post(`/meetings/${id}/schedule`),
+
+    // Operational Tools
+    getAgenda: (id: string) => api.get(`/meetings/${id}/agenda`),
+    updateAgenda: (id: string, data: { content: string }) => api.post(`/meetings/${id}/agenda`, data),
+
+    addParticipants: (id: string, participants: Array<{ user_id?: string, email?: string, name?: string }>) =>
+        api.post(`/meetings/${id}/participants`, participants),
+
+    updateRsvp: (meetingId: string, participantId: string, status: string) =>
+        api.put(`/meetings/${meetingId}/participants/${participantId}/rsvp`, { rsvp_status: status }),
+
+    getMinutes: (id: string) => api.get(`/meetings/${id}/minutes`),
+    updateMinutes: (id: string, data: { content: string, status?: string }) => api.post(`/meetings/${id}/minutes`, data),
+};

@@ -5,8 +5,13 @@ from typing import List
 import uuid
 
 from backend.app.core.database import get_db
-from backend.app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesStatus
-from backend.app.schemas.schemas import MeetingCreate, MeetingRead, MeetingUpdate, MinutesCreate, MinutesUpdate, MinutesRead
+from backend.app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesStatus, MeetingParticipant, RsvpStatus, ActionItem, TWG
+from backend.app.schemas.schemas import (
+    MeetingCreate, MeetingRead, MeetingUpdate, 
+    MinutesCreate, MinutesUpdate, MinutesRead,
+    AgendaCreate, AgendaRead, AgendaUpdate,
+    MeetingParticipantRead, MeetingParticipantCreate, MeetingParticipantUpdate
+)
 from backend.app.api.deps import get_current_active_user, require_facilitator, require_twg_access, has_twg_access
 from backend.app.services.email_service import email_service
 from sqlalchemy.orm import selectinload
@@ -53,6 +58,11 @@ async def list_meetings(
         user_twg_ids = [twg.id for twg in current_user.twgs]
         query = query.where(Meeting.twg_id.in_(user_twg_ids))
         
+    query = query.options(
+        selectinload(Meeting.participants),
+        selectinload(Meeting.twg)
+    )
+        
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -65,7 +75,13 @@ async def get_meeting(
     """
     Get meeting details.
     """
-    result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+    query = select(Meeting).where(Meeting.id == meeting_id).options(
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+        selectinload(Meeting.agenda),
+        selectinload(Meeting.minutes),
+        selectinload(Meeting.twg)
+    )
+    result = await db.execute(query)
     db_meeting = result.scalar_one_or_none()
     if not db_meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
@@ -199,9 +215,10 @@ async def schedule_meeting_trigger(
     """
     # Verify meeting exists and access rights
     query = select(Meeting).where(Meeting.id == meeting_id).options(
-        selectinload(Meeting.participants),
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
         selectinload(Meeting.twg)
     )
+
     result = await db.execute(query)
     db_meeting = result.scalar_one_or_none()
     
@@ -218,10 +235,20 @@ async def schedule_meeting_trigger(
     db_meeting.status = MeetingStatus.SCHEDULED
     
     # Send emails
-    participant_emails = [u.email for u in db_meeting.participants]
+    participant_emails = []
+    # db_meeting.participants is now List[MeetingParticipant] objects
+    for p in db_meeting.participants:
+        if p.user:
+            participant_emails.append(p.user.email)
+        elif p.email:
+            participant_emails.append(p.email)
+            
+    # Remove duplicates
+    participant_emails = list(set(participant_emails))
     
     try:
-        await email_service.send_meeting_invite(
+        if participant_emails:
+            await email_service.send_meeting_invite(
             to_emails=participant_emails,
             subject=f"INVITATION: {db_meeting.title}",
             template_name="meeting_invite.html",
@@ -248,3 +275,117 @@ async def schedule_meeting_trigger(
 
     await db.commit()
     return {"status": "successfully scheduled", "emails_sent": len(participant_emails)}
+
+@router.post("/{meeting_id}/participants", response_model=List[MeetingParticipantRead])
+async def add_participants(
+    meeting_id: uuid.UUID,
+    participants: List[MeetingParticipantCreate],
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Add participants (users or external guests) to a meeting.
+    """
+    # Verify meeting
+    result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+    db_meeting = result.scalar_one_or_none()
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+        
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    new_participants = []
+    
+    # Check existing (simple check to avoid obvious dupes in this batch, DB constraints handles strict uniqueness if set)
+    # Ideally should fetch existing and filter.
+    
+    for p in participants:
+         # Create
+         db_p = MeetingParticipant(
+             meeting_id=meeting_id,
+             user_id=p.user_id,
+             name=p.name,
+             email=p.email,
+             rsvp_status=RsvpStatus.PENDING
+         )
+         db.add(db_p)
+         new_participants.append(db_p)
+         
+    await db.commit()
+    
+    # Refresh to get IDs
+    for p in new_participants:
+        await db.refresh(p)
+        
+    return new_participants
+
+@router.post("/{meeting_id}/agenda", response_model=AgendaRead)
+async def upsert_agenda(
+    meeting_id: uuid.UUID,
+    agenda_in: AgendaCreate,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create or Update meeting agenda.
+    """
+    # Verify meeting
+    result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+    db_meeting = result.scalar_one_or_none()
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+        
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Check existing
+    result = await db.execute(select(Agenda).where(Agenda.meeting_id == meeting_id))
+    db_agenda = result.scalar_one_or_none()
+    
+    if db_agenda:
+        db_agenda.content = agenda_in.content
+    else:
+        db_agenda = Agenda(meeting_id=meeting_id, content=agenda_in.content)
+        db.add(db_agenda)
+        
+    await db.commit()
+    await db.refresh(db_agenda)
+    return db_agenda
+
+@router.put("/{meeting_id}/participants/{participant_id}/rsvp", response_model=MeetingParticipantRead)
+async def update_participant_rsvp(
+    meeting_id: uuid.UUID,
+    participant_id: uuid.UUID,
+    rsvp_in: MeetingParticipantUpdate, # Just status
+    current_user: User = Depends(require_facilitator), # Facilitator override aka "Fallback"
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Manually update a participant's RSVP status (RSVP Fallback).
+    """
+    # Verify meeting
+    result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+    db_meeting = result.scalar_one_or_none()
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+        
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    # Get participant
+    result = await db.execute(select(MeetingParticipant).where(MeetingParticipant.id == participant_id))
+    db_p = result.scalar_one_or_none()
+    
+    if not db_p:
+        raise HTTPException(status_code=404, detail="Participant not found")
+        
+    if db_p.meeting_id != meeting_id:
+        raise HTTPException(status_code=400, detail="Participant does not belong to this meeting")
+        
+    if rsvp_in.rsvp_status:
+        db_p.rsvp_status = rsvp_in.rsvp_status
+        
+    await db.commit()
+    await db.refresh(db_p)
+    return db_p
