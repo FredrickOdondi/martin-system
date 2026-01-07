@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import ModernLayout from '../../layouts/ModernLayout';
 import { getDashboardStats, getTimeline, exportDashboardReport, DashboardStats, TimelineItem } from '../../services/dashboardService';
 
 export default function Dashboard() {
+    const navigate = useNavigate();
     const [stats, setStats] = useState<DashboardStats | null>(null);
     const [timeline, setTimeline] = useState<TimelineItem[]>([]);
     const [loading, setLoading] = useState(true);
@@ -297,7 +299,10 @@ export default function Dashboard() {
                                             </div>
                                         </div>
                                         <div className="flex justify-end pt-2 border-t border-[#f0f2f5] dark:border-[#2d3748]">
-                                            <button className="text-sm text-primary font-medium hover:text-blue-700 flex items-center gap-1">
+                                            <button
+                                                onClick={() => navigate(`/workspace/${twg.id}`)}
+                                                className="text-sm text-primary font-medium hover:text-blue-700 flex items-center gap-1"
+                                            >
                                                 View TWG Details <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
                                             </button>
                                         </div>

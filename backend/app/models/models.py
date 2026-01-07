@@ -65,6 +65,12 @@ class NotificationType(str, enum.Enum):
     DOCUMENT = "document"
     TASK = "task"
 
+class DocumentStage(str, enum.Enum):
+    ZERO_DRAFT = "zero_draft"
+    RAP_MODE = "rap_mode"
+    DECLARATION_TXT = "declaration_txt"
+    FINAL = "final"
+
 # --- Association Tables ---
 
 twg_members = Table(
@@ -240,6 +246,7 @@ class Document(Base):
     file_path: Mapped[str] = mapped_column(String(512))
     file_type: Mapped[str] = mapped_column(String(255))  # MIME type can be long
     uploaded_by_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
+    stage: Mapped[DocumentStage] = mapped_column(Enum(DocumentStage), default=DocumentStage.FINAL)
     is_confidential: Mapped[bool] = mapped_column(Boolean, default=False)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     ingested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
