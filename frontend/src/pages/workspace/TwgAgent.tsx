@@ -5,6 +5,7 @@ import { MentionAutocomplete } from '../../components/agent/MentionAutocomplete'
 import EmailApprovalModal, { EmailApprovalRequest, EmailDraft } from '../../components/agent/EmailApprovalModal';
 import SettingsModal from '../../components/agent/SettingsModal';
 import { CommandAutocompleteResult } from '../../types/agent';
+import ModernLayout from '../../layouts/ModernLayout';
 import axios from 'axios';
 
 interface Message {
@@ -399,49 +400,8 @@ export default function TwgAgent() {
     };
 
     return (
-        <div className="font-display bg-background-light dark:bg-background-dark text-[#0d121b] dark:text-white h-screen flex flex-col overflow-hidden">
-            {/* Top Navbar */}
-            <header className="sticky top-0 z-50 w-full bg-white dark:bg-[#1a202c] border-b border-[#e7ebf3] dark:border-[#2d3748] shrink-0">
-                <div className="px-6 lg:px-10 py-3 flex items-center justify-between gap-6">
-                    <div className="flex items-center gap-8">
-                        {/* Brand */}
-                        <div className="flex items-center gap-3">
-                            <div className="size-8 rounded-full bg-[#1152d4]/10 flex items-center justify-center text-[#1152d4]">
-                                <span className="material-symbols-outlined">shield_person</span>
-                            </div>
-                            <h2 className="text-lg font-bold leading-tight tracking-[-0.015em] hidden sm:block">ECOWAS Summit TWG Support</h2>
-                        </div>
-                        {/* Search */}
-                        <div className="hidden md:flex items-center bg-[#f0f2f5] dark:bg-[#2d3748] rounded-lg h-10 w-64 px-3 gap-2">
-                            <span className="material-symbols-outlined text-[#4c669a] dark:text-[#a0aec0]">search</span>
-                            <input
-                                className="bg-transparent border-none outline-none text-sm w-full placeholder:text-[#4c669a] dark:placeholder:text-[#a0aec0] text-[#0d121b] dark:text-white focus:ring-0 p-0"
-                                placeholder="Search Workspace..."
-                                type="text"
-                            />
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                        {/* Nav Links */}
-                        <nav className="hidden lg:flex items-center gap-6">
-                            <a className="text-[#4c669a] dark:text-[#a0aec0] hover:text-[#1152d4] dark:hover:text-white text-sm font-medium transition-colors" href="/dashboard">Dashboard</a>
-                            <a className="text-[#1152d4] dark:text-white text-sm font-medium transition-colors" href="/twgs">TWGs</a>
-                            <a className="text-[#4c669a] dark:text-[#a0aec0] hover:text-[#1152d4] dark:hover:text-white text-sm font-medium transition-colors" href="#">Reports</a>
-                            <a className="text-[#4c669a] dark:text-[#a0aec0] hover:text-[#1152d4] dark:hover:text-white text-sm font-medium transition-colors" href="#">Settings</a>
-                        </nav>
-                        {/* User Profile */}
-                        <div className="flex items-center gap-4 border-l border-[#e7ebf3] dark:border-[#2d3748] pl-6">
-                            <button className="relative text-[#4c669a] dark:text-[#a0aec0] hover:text-[#1152d4] dark:hover:text-white transition-colors">
-                                <span className="material-symbols-outlined">notifications</span>
-                            </button>
-                            <div className="h-10 w-10 rounded-full bg-cover bg-center border border-[#e7ebf3] dark:border-[#2d3748] bg-gray-300"></div>
-                        </div>
-                    </div>
-                </div>
-            </header>
-
-            {/* Main Content */}
-            <main className="flex-1 flex overflow-hidden">
+        <ModernLayout>
+            <div className="h-[calc(100vh-140px)] flex overflow-hidden">
                 {/* Sidebar */}
                 <aside className={`${isSidebarCollapsed ? 'w-0' : 'w-80'} bg-white dark:bg-[#1a202c] border-r border-[#e7ebf3] dark:border-[#2d3748] flex flex-col transition-all duration-300 overflow-hidden hidden lg:flex`}>
                     <div className="p-6 border-b border-[#e7ebf3] dark:border-[#2d3748]">
@@ -951,27 +911,27 @@ export default function TwgAgent() {
                         </div>
                     </div>
                 </div>
-            </main>
 
-            {/* Email Approval Modal */}
-            {showApprovalModal && pendingEmailApproval && (
-                <EmailApprovalModal
-                    approvalRequest={pendingEmailApproval}
-                    onApprove={handleApproveEmail}
-                    onDecline={handleDeclineEmail}
-                    onClose={() => {
-                        setShowApprovalModal(false);
-                        setPendingEmailApproval(null);
-                    }}
-                />
-            )}
+                {/* Email Approval Modal */}
+                {showApprovalModal && pendingEmailApproval && (
+                    <EmailApprovalModal
+                        approvalRequest={pendingEmailApproval}
+                        onApprove={handleApproveEmail}
+                        onDecline={handleDeclineEmail}
+                        onClose={() => {
+                            setShowApprovalModal(false);
+                            setPendingEmailApproval(null);
+                        }}
+                    />
+                )}
 
-            {/* Settings Modal */}
-            {showSettingsModal && (
-                <SettingsModal
-                    onClose={() => setShowSettingsModal(false)}
-                />
-            )}
-        </div>
+                {/* Settings Modal */}
+                {showSettingsModal && (
+                    <SettingsModal
+                        onClose={() => setShowSettingsModal(false)}
+                    />
+                )}
+            </div>
+        </ModernLayout>
     );
 }
