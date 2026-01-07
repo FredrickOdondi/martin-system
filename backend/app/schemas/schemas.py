@@ -25,6 +25,11 @@ class MeetingStatus(str, enum.Enum):
     CANCELLED = "cancelled"
     COMPLETED = "completed"
 
+class RsvpStatus(str, enum.Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+
 class MinutesStatus(str, enum.Enum):
     DRAFT = "draft"
     REVIEW = "review"
@@ -136,8 +141,48 @@ class MeetingUpdate(SchemaBase):
     meeting_type: Optional[str] = None
     transcript: Optional[str] = None
 
+# --- Meeting Participant Schema ---
+
+class MeetingParticipantRead(SchemaBase):
+    id: uuid.UUID
+    meeting_id: uuid.UUID
+    user_id: Optional[uuid.UUID] = None
+    name: Optional[str] = None
+    email: Optional[str] = None
+    rsvp_status: RsvpStatus = RsvpStatus.PENDING
+    attended: bool = False
+    
+    # Nested user details if available
+    user: Optional["UserRead"] = None
+
+class MeetingParticipantCreate(SchemaBase):
+    user_id: Optional[uuid.UUID] = None
+    email: Optional[EmailStr] = None
+    name: Optional[str] = None
+
+class MeetingParticipantUpdate(SchemaBase):
+    rsvp_status: Optional[RsvpStatus] = None
+
 class MeetingRead(MeetingBase):
     id: uuid.UUID
+    participants: List[MeetingParticipantRead] = []
+
+# --- Agenda Schemas ---
+
+class AgendaBase(SchemaBase):
+    content: str
+
+class AgendaCreate(AgendaBase):
+    pass
+
+class AgendaUpdate(SchemaBase):
+    content: Optional[str] = None
+
+class AgendaRead(AgendaBase):
+    id: uuid.UUID
+    meeting_id: uuid.UUID
+    created_at: datetime
+
 
 # --- Minutes Schemas ---
 
