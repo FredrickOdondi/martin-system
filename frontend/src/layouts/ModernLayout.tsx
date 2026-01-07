@@ -189,6 +189,17 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
                                         {!isSidebarCollapsed && <span>Documents</span>}
                                     </button>
                                     <button
+                                        onClick={() => navigate('/schedule')}
+                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/schedule')
+                                            ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
+                                            : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
+                                            } ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
+                                        title={isSidebarCollapsed ? "Schedule" : ""}
+                                    >
+                                        <span className="material-symbols-outlined text-[20px]">calendar_month</span>
+                                        {!isSidebarCollapsed && <span>Schedule</span>}
+                                    </button>
+                                    <button
                                         onClick={() => navigate('/notifications')}
                                         className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/notifications')
                                             ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
