@@ -45,8 +45,6 @@ async def list_twgs(
     query_options = [
         selectinload(TWG.political_lead),
         selectinload(TWG.technical_lead),
-        selectinload(TWG.action_items),
-        selectinload(TWG.documents),
     ]
     
     # We will need to perform separate queries or use scalar subqueries for stats.

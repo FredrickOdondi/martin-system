@@ -13,6 +13,7 @@ export interface User {
     organization?: string;
     is_active: boolean;
     assigned_twg_id?: string;
+    twg_ids: string[];
     avatar?: string;
 }
 

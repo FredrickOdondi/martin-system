@@ -6,6 +6,7 @@ export interface UserUpdateData {
     role?: UserRole;
     organization?: string;
     is_active?: boolean;
+    twg_ids?: string[];
 }
 
 export const userService = {

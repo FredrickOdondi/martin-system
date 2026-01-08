@@ -1,4 +1,6 @@
 import { Card, Badge, Avatar } from '../../components/ui'
+import { useSelector } from 'react-redux';
+import { RootState } from '../../store';
 import ConflictDashboard from '../../components/admin/ConflictDashboard'
 import PolicyFactory from '../../components/workspace/PolicyFactory'
 import CopilotChat from '../../components/workspace/CopilotChat'
@@ -11,6 +13,7 @@ import CreateMeetingModal from '../../components/schedule/CreateMeetingModal'
 export default function TwgWorkspace() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
+    const user = useSelector((state: RootState) => state.auth.user);
     const twgId = id || ''; // meaningful fallback or error handling?
 
     // Real Data State
@@ -226,8 +229,8 @@ export default function TwgWorkspace() {
                     {/* Content switching */}
                     {activeTab === 'overview' && (
                         <>
-                            {/* Admin Conflict Dashboard */}
-                            <ConflictDashboard />
+                            {/* Admin Conflict Dashboard - Restricted Visibility */}
+                            {user?.role === 'admin' && <ConflictDashboard />}
 
                             <div className="grid grid-cols-12 gap-6">
                                 {/* Meeting Tracker */}

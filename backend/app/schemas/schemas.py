@@ -32,6 +32,7 @@ class RsvpStatus(str, enum.Enum):
 
 class MinutesStatus(str, enum.Enum):
     DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
     REVIEW = "review"
     APPROVED = "approved"
     FINAL = "final"
@@ -68,6 +69,25 @@ class DocumentStage(str, enum.Enum):
     RAP_MODE = "rap_mode"
     DECLARATION_TXT = "declaration_txt"
     FINAL = "final"
+
+class ConflictType(str, enum.Enum):
+    SCHEDULE_CLASH = "schedule_clash"
+    RESOURCE_CONSTRAINT = "resource_constraint"
+    POLICY_MISALIGNMENT = "policy_misalignment"
+    DEPENDENCY_BLOCKER = "dependency_blocker"
+
+class ConflictSeverity(str, enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+class ConflictStatus(str, enum.Enum):
+    DETECTED = "detected"
+    NEGOTIATING = "negotiating"
+    ESCALATED = "escalated"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
 
 # --- Base Schema ---
 
@@ -125,8 +145,7 @@ class TWGRead(TWGBase):
     political_lead: Optional["UserRead"] = None
     technical_lead: Optional["UserRead"] = None
     stats: Optional[TWGStats] = None
-    action_items: List["ActionItemRead"] = []
-    documents: List["DocumentRead"] = []
+    # Removed action_items and documents to prevent MissingGreenlet errors
 
 # --- Meeting Schemas ---
 
@@ -151,6 +170,14 @@ class MeetingUpdate(SchemaBase):
     status: Optional[MeetingStatus] = None
     meeting_type: Optional[str] = None
     transcript: Optional[str] = None
+
+class MeetingCancel(SchemaBase):
+    reason: Optional[str] = None
+    notify_participants: bool = True
+
+class MeetingUpdateNotification(SchemaBase):
+    changes: List[str] = []
+    notify_participants: bool = True
 
 # --- Meeting Participant Schema ---
 
@@ -270,7 +297,7 @@ class DocumentRead(DocumentBase):
     id: uuid.UUID
     file_path: str
     uploaded_by_id: uuid.UUID
-    uploaded_by: Optional["UserRead"] = None
+    # Removed uploaded_by to prevent MissingGreenlet errors
     ingested_at: Optional[datetime] = None
     created_at: datetime
 
@@ -337,8 +364,33 @@ class AgentTaskRequest(SchemaBase):
 class AgentStatus(SchemaBase):
     status: str
     swarm_ready: bool
-    active_agents: List[str]
     version: str
+
+# --- Conflict Schemas ---
+
+class ConflictBase(SchemaBase):
+    conflict_type: ConflictType
+    severity: ConflictSeverity
+    description: str
+    agents_involved: List[str] # List of agent names
+    conflicting_positions: dict # Key: agent name, Value: position description
+    status: ConflictStatus = ConflictStatus.DETECTED
+    resolution_log: Optional[List[dict]] = None
+    human_action_required: bool = False
+
+class ConflictCreate(ConflictBase):
+    pass
+
+class ConflictUpdate(SchemaBase):
+    status: Optional[ConflictStatus] = None
+    resolution_log: Optional[List[dict]] = None
+    human_action_required: Optional[bool] = None
+    resolved_at: Optional[datetime] = None
+
+class ConflictRead(ConflictBase):
+    id: uuid.UUID
+    detected_at: datetime
+    resolved_at: Optional[datetime] = None
 
 # Resolve forward references
 TWGRead.model_rebuild()

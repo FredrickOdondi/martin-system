@@ -39,6 +39,7 @@ class RsvpStatus(str, enum.Enum):
 
 class MinutesStatus(str, enum.Enum):
     DRAFT = "draft"
+    PENDING_APPROVAL = "pending_approval"
     REVIEW = "review"
     APPROVED = "approved"
     FINAL = "final"
@@ -69,6 +70,25 @@ class NotificationType(str, enum.Enum):
     MESSAGE = "message"
     DOCUMENT = "document"
     TASK = "task"
+
+class ConflictType(str, enum.Enum):
+    SCHEDULE_CLASH = "schedule_clash"
+    RESOURCE_CONSTRAINT = "resource_constraint"
+    POLICY_MISALIGNMENT = "policy_misalignment"
+    DEPENDENCY_BLOCKER = "dependency_blocker"
+
+class ConflictSeverity(str, enum.Enum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
+class ConflictStatus(str, enum.Enum):
+    DETECTED = "detected"
+    NEGOTIATING = "negotiating"
+    ESCALATED = "escalated"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
 
 # --- Association Tables ---
 
@@ -120,6 +140,10 @@ class User(Base):
     twgs: Mapped[List["TWG"]] = relationship(
         secondary=twg_members, back_populates="members"
     )
+
+    @property
+    def twg_ids(self) -> List[uuid.UUID]:
+        return [twg.id for twg in self.twgs]
     owned_action_items: Mapped[List["ActionItem"]] = relationship(back_populates="owner")
     meeting_participations: Mapped[List["MeetingParticipant"]] = relationship(back_populates="user")
     notifications: Mapped[List["Notification"]] = relationship(
@@ -157,6 +181,9 @@ class TWG(Base):
     technical_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
     # Relationships
+    political_lead: Mapped[Optional["User"]] = relationship("User", foreign_keys=[political_lead_id])
+    technical_lead: Mapped[Optional["User"]] = relationship("User", foreign_keys=[technical_lead_id])
+
     members: Mapped[List["User"]] = relationship(
         secondary=twg_members, back_populates="twgs"
     )
@@ -267,6 +294,7 @@ class Document(Base):
     
     # Relationships
     twg: Mapped[Optional["TWG"]] = relationship(back_populates="documents")
+    uploaded_by: Mapped["User"] = relationship("User", foreign_keys=[uploaded_by_id])
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
@@ -297,3 +325,21 @@ class Notification(Base):
 
     # Relationships
     user: Mapped["User"] = relationship(back_populates="notifications")
+
+class Conflict(Base):
+    __tablename__ = "conflicts"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    conflict_type: Mapped[ConflictType] = mapped_column(Enum(ConflictType))
+    severity: Mapped[ConflictSeverity] = mapped_column(Enum(ConflictSeverity))
+    description: Mapped[str] = mapped_column(Text)
+    agents_involved: Mapped[List[str]] = mapped_column(JSON) # List of agent names
+    conflicting_positions: Mapped[dict] = mapped_column(JSON) # Key: agent name, Value: position description
+    
+    status: Mapped[ConflictStatus] = mapped_column(Enum(ConflictStatus), default=ConflictStatus.DETECTED)
+    resolution_log: Mapped[Optional[List[dict]]] = mapped_column(JSON, nullable=True) # History of negotiation
+    human_action_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

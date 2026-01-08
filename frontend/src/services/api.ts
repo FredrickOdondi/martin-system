@@ -77,10 +77,14 @@ export const meetings = {
     create: (data: any) => api.post('/meetings/', data),
     update: (id: string, data: any) => api.patch(`/meetings/${id}`, data),
     schedule: (id: string) => api.post(`/meetings/${id}/schedule`),
+    conflictCheck: (id: string) => api.post(`/meetings/${id}/conflict-check`),
+    cancel: (id: string, reason?: string) => api.post(`/meetings/${id}/cancel`, { reason, notify_participants: true }),
+    notifyUpdate: (id: string, changes: string[]) => api.post(`/meetings/${id}/notify-update`, { changes, notify_participants: true }),
 
     // Operational Tools
     getAgenda: (id: string) => api.get(`/meetings/${id}/agenda`),
     updateAgenda: (id: string, data: { content: string }) => api.post(`/meetings/${id}/agenda`, data),
+    generateAgenda: (id: string) => api.post(`/meetings/${id}/agenda/generate`),
 
     addParticipants: (id: string, participants: Array<{ user_id?: string, email?: string, name?: string }>) =>
         api.post(`/meetings/${id}/participants`, participants),
@@ -90,11 +94,15 @@ export const meetings = {
 
     getMinutes: (id: string) => api.get(`/meetings/${id}/minutes`),
     updateMinutes: (id: string, data: { content: string, status?: string }) => api.post(`/meetings/${id}/minutes`, data),
+    generateMinutes: (id: string) => api.post(`/meetings/${id}/minutes/generate`),
+    submitMinutesForApproval: (id: string) => api.post(`/meetings/${id}/minutes/submit-for-approval`),
+    approveMinutes: (id: string) => api.post(`/meetings/${id}/minutes/approve`),
 
     // Action Items
     getActionItems: (meetingId: string) => api.get(`/meetings/${meetingId}/action-items`),
     createActionItem: (meetingId: string, data: any) => api.post(`/meetings/${meetingId}/action-items`, data),
-    updateActionItem: (meetingId: string, actionId: string, data: any) => api.patch(`/action-items/${actionId}`, data),
+    extractActions: (meetingId: string) => api.post(`/meetings/${meetingId}/extract-actions`),
+    updateActionItem: (actionId: string, data: any) => api.patch(`/action-items/${actionId}`, data),
 
     // Documents
     getDocuments: (meetingId: string) => api.get(`/meetings/${meetingId}/documents`),

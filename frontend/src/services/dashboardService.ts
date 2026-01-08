@@ -42,9 +42,10 @@ export interface ConflictAlert {
     agents_involved: string[];
     description: string;
     conflicting_positions: Record<string, string>;
-    impact: string;
-    urgency: string;
-    status: 'pending' | 'in_negotiation' | 'resolved';
+    status: 'detected' | 'negotiating' | 'escalated' | 'resolved' | 'dismissed';
+    resolution_log?: Array<{ action: string; user?: string; resolution: string; timestamp: string }>;
+    human_action_required: boolean;
+    detected_at: string;
 }
 
 export const getDashboardStats = async (): Promise<DashboardStats> => {

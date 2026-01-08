@@ -14,7 +14,30 @@ from sqlalchemy.orm import selectinload
 from app.core.ws_manager import ws_manager
 from app.utils.security import verify_token
 
+from app.schemas.schemas import ConflictRead
+
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+# ... (existing code)
+
+@router.get("/conflicts", response_model=List[ConflictRead])
+async def get_conflicts(
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Get current conflicts/inconsistencies detected by the Supervisor.
+    """
+    from app.models.models import Conflict, ConflictStatus
+    
+    result = await db.execute(
+        select(Conflict)
+        .where(Conflict.status != ConflictStatus.RESOLVED)
+        .where(Conflict.status != ConflictStatus.DISMISSED)
+        .order_by(desc(Conflict.detected_at))
+    )
+    conflicts = result.scalars().all()
+    return conflicts
 
 @router.get("/stats", response_model=Dict[str, Any])
 async def get_dashboard_stats(
@@ -24,40 +47,69 @@ async def get_dashboard_stats(
     """
     Get aggregated statistics for the Command Center dashboard.
     """
+    # Scope by TWG if not admin
+    from app.models.models import UserRole
+    is_admin = current_user.role == UserRole.ADMIN
+    user_twg_ids = [t.id for t in current_user.twgs] if not is_admin else []
+
     # 1. Meeting Stats
-    total_meetings_res = await db.execute(select(func.count(Meeting.id)))
+    q_total = select(func.count(Meeting.id))
+    q_completed = select(func.count(Meeting.id)).where(Meeting.status == MeetingStatus.COMPLETED)
+    q_upcoming = select(func.count(Meeting.id)).where(Meeting.status == MeetingStatus.SCHEDULED)
+    
+    if not is_admin:
+        q_total = q_total.where(Meeting.twg_id.in_(user_twg_ids))
+        q_completed = q_completed.where(Meeting.twg_id.in_(user_twg_ids))
+        q_upcoming = q_upcoming.where(Meeting.twg_id.in_(user_twg_ids))
+        
+    total_meetings_res = await db.execute(q_total)
     total_meetings = total_meetings_res.scalar() or 0
     
-    completed_res = await db.execute(select(func.count(Meeting.id)).where(Meeting.status == MeetingStatus.COMPLETED))
+    completed_res = await db.execute(q_completed)
     completed_meetings = completed_res.scalar() or 0
     
-    upcoming_res = await db.execute(select(func.count(Meeting.id)).where(Meeting.status == MeetingStatus.SCHEDULED))
+    upcoming_res = await db.execute(q_upcoming)
     upcoming_meetings = upcoming_res.scalar() or 0
     
-    # Next Plenary Calculation
-    next_plenary_res = await db.execute(
-        select(Meeting)
-        .where(
+    # Next Plenary Calculation (Global Event, maybe visible to all? Spec says "cross-TWG outputs" restricted. 
+    # But Plenary is usually for everyone. Let's start restricted.)
+    q_plenary = select(Meeting).where(
             Meeting.status == MeetingStatus.SCHEDULED,
             or_(Meeting.title.ilike("%plenary%"), Meeting.title.ilike("%summit%"))
-        )
-        .order_by(Meeting.scheduled_at)
-        .limit(1)
-    )
+        ).order_by(Meeting.scheduled_at).limit(1)
+        
+    next_plenary_res = await db.execute(q_plenary)
     next_plenary = next_plenary_res.scalar_one_or_none()
     
     # 2. Action Item Stats
-    total_items_res = await db.execute(select(func.count(ActionItem.id)))
+    q_items = select(func.count(ActionItem.id))
+    q_items_comp = select(func.count(ActionItem.id)).where(ActionItem.status == ActionItemStatus.COMPLETED)
+    q_items_pend = select(func.count(ActionItem.id)).where(ActionItem.status == ActionItemStatus.PENDING)
+    
+    if not is_admin:
+        # Action Items linked to Meetings linked to TWGs
+        # Or ActionItems have twg_id? Let's check model. 
+        # ActionItem has meeting_id. Meeting has twg_id.
+        # This requires a join.
+        q_items = q_items.join(Meeting).where(Meeting.twg_id.in_(user_twg_ids))
+        q_items_comp = q_items_comp.join(Meeting).where(Meeting.twg_id.in_(user_twg_ids))
+        q_items_pend = q_items_pend.join(Meeting).where(Meeting.twg_id.in_(user_twg_ids))
+
+    total_items_res = await db.execute(q_items)
     total_items = total_items_res.scalar() or 0
     
-    completed_items_res = await db.execute(select(func.count(ActionItem.id)).where(ActionItem.status == ActionItemStatus.COMPLETED))
+    completed_items_res = await db.execute(q_items_comp)
     completed_items = completed_items_res.scalar() or 0
     
-    pending_approvals_res = await db.execute(select(func.count(ActionItem.id)).where(ActionItem.status == ActionItemStatus.PENDING))
+    pending_approvals_res = await db.execute(q_items_pend)
     pending_approvals = pending_approvals_res.scalar() or 0
     
     # 3. Project / Pipeline Stats
-    projects_res = await db.execute(select(Project))
+    q_projects = select(Project)
+    if not is_admin:
+        q_projects = q_projects.where(Project.twg_id.in_(user_twg_ids))
+        
+    projects_res = await db.execute(q_projects)
     projects = projects_res.scalars().all()
     
     pipeline_stats = {
@@ -69,13 +121,15 @@ async def get_dashboard_stats(
     }
     
     # 4. TWG Summary
-    twgs_res = await db.execute(
-        select(TWG)
-        .options(
+    q_twgs = select(TWG).options(
             selectinload(TWG.projects),
             selectinload(TWG.meetings)
         )
-    )
+    
+    if not is_admin:
+        q_twgs = q_twgs.where(TWG.id.in_(user_twg_ids))
+        
+    twgs_res = await db.execute(q_twgs)
     twgs = twgs_res.scalars().all()
     twg_stats = []
     
@@ -145,12 +199,17 @@ async def get_global_timeline(
     Get a unified timeline of recent and upcoming events.
     """
     # Fetch upcoming meetings and project deadlines
+    # Fetch upcoming meetings and project deadlines
+    from app.models.models import UserRole
+    is_admin = current_user.role == UserRole.ADMIN
+    user_twg_ids = [t.id for t in current_user.twgs] if not is_admin else []
+    
+    q_meetings = select(Meeting).options(selectinload(Meeting.twg)).where(Meeting.scheduled_at >= datetime.datetime.utcnow())
+    if not is_admin:
+        q_meetings = q_meetings.where(Meeting.twg_id.in_(user_twg_ids))
+        
     meetings_res = await db.execute(
-        select(Meeting)
-        .options(selectinload(Meeting.twg))
-        .where(Meeting.scheduled_at >= datetime.datetime.utcnow())
-        .order_by(Meeting.scheduled_at)
-        .limit(limit)
+        q_meetings.order_by(Meeting.scheduled_at).limit(limit)
     )
     meetings = meetings_res.scalars().all()
     
@@ -240,6 +299,37 @@ async def export_dashboard_report(
             "Access-Control-Expose-Headers": "Content-Disposition"
         }
     )
+
+@router.post("/conflicts/{conflict_id}/resolve")
+async def resolve_conflict(
+    conflict_id: str,
+    resolution: str,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Resolve a conflict manually.
+    """
+    from app.models.models import Conflict, ConflictStatus
+    import uuid
+    
+    result = await db.execute(select(Conflict).where(Conflict.id == uuid.UUID(conflict_id)))
+    conflict = result.scalar_one_or_none()
+    
+    if not conflict:
+        raise HTTPException(status_code=404, detail="Conflict not found")
+        
+    conflict.status = ConflictStatus.RESOLVED
+    conflict.resolution_log = (conflict.resolution_log or []) + [{"action": "resolved_by_user", "user": current_user.email, "resolution": resolution, "timestamp": datetime.datetime.utcnow().isoformat()}]
+    conflict.resolved_at = datetime.datetime.utcnow()
+    
+    await db.commit()
+    await db.refresh(conflict)
+    
+    # Notify connected clients via WebSocket
+    await ws_manager.broadcast_json({"type": "conflict_resolved", "id": str(conflict.id)})
+    
+    return conflict
 
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = None):

@@ -1,9 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
 import ModernLayout from '../../layouts/ModernLayout'
 import documentService, { Document, SearchResult } from '../../services/documentService'
+import { useAppSelector } from '../../hooks/useRedux'
+import { UserRole } from '../../types/auth'
+import { twgs as twgService } from '../../services/api'
 
 
-export default function DocumentLibrary() {
+export default function DocumentLibrary({ twgId }: { twgId?: string } = {}) {
     const [documents, setDocuments] = useState<Document[]>([])
     const [loading, setLoading] = useState(true)
     const [uploading, setUploading] = useState(false)
@@ -23,7 +26,7 @@ export default function DocumentLibrary() {
     const [uploadStep, setUploadStep] = useState<'initial' | 'ready_to_ingest' | 'ingesting' | 'complete'>('initial')
     const [uploadedDocId, setUploadedDocId] = useState<string | null>(null)
     const [selectedFile, setSelectedFile] = useState<File | null>(null)
-    const [selectedTwgId, setSelectedTwgId] = useState<string>('')
+    const [selectedTwgId, setSelectedTwgId] = useState<string>(twgId || '')
     const [isConfidential, setIsConfidential] = useState(false)
 
     // Selection & Pagination State
@@ -32,6 +35,29 @@ export default function DocumentLibrary() {
     const itemsPerPage = 10
 
     const fileInputRef = useRef<HTMLInputElement>(null)
+
+    // Get current user for RBAC filtering
+    const currentUser = useAppSelector((state) => state.auth.user)
+    const isAdmin = currentUser?.role === UserRole.ADMIN || currentUser?.role === UserRole.SECRETARIAT_LEAD
+    const userTwgIds = currentUser?.twg_ids || []
+
+    // Fetch user's TWGs for dropdown
+    const [allTwgs, setAllTwgs] = useState<any[]>([])
+
+    useEffect(() => {
+        const fetchTwgs = async () => {
+            try {
+                const response = await twgService.list()
+                setAllTwgs(response.data)
+            } catch (error) {
+                console.error('Failed to fetch TWGs:', error)
+            }
+        }
+        fetchTwgs()
+    }, [])
+
+    // Filter TWGs based on user role
+    const availableTwgs = isAdmin ? allTwgs : allTwgs.filter((t: any) => userTwgIds.includes(t.id))
 
     useEffect(() => {
         fetchData()
@@ -582,16 +608,25 @@ export default function DocumentLibrary() {
                                         <select
                                             value={selectedTwgId}
                                             onChange={(e) => setSelectedTwgId(e.target.value)}
-                                            className="w-full px-4 py-3 rounded-xl border border-[#cfd7e7] dark:border-[#4a5568] bg-white dark:bg-[#2d3748] text-sm font-bold text-[#4c669a] focus:outline-none focus:ring-2 focus:ring-[#1152d4]/20 appearance-none transition-all"
+                                            disabled={!!twgId}
+                                            className={`w-full px-4 py-3 rounded-xl border border-[#cfd7e7] dark:border-[#4a5568] text-sm font-bold focus:outline-none focus:ring-2 focus:ring-[#1152d4]/20 appearance-none transition-all ${twgId ? 'bg-gray-100 dark:bg-[#2d3748] text-[#8a9dbd] cursor-not-allowed' : 'bg-white dark:bg-[#2d3748] text-[#4c669a]'}`}
                                         >
                                             <option value="" disabled>Select Target Knowledge Base...</option>
-                                            <option value="global">Global Secretariat (General)</option>
-                                            <option value="energy">Energy & Infrastructure</option>
-                                            <option value="agriculture">Agriculture & Food Systems</option>
-                                            <option value="minerals">Critical Minerals & Industrialization</option>
-                                            <option value="digital">Digital Economy & Transformation</option>
-                                            <option value="protocol">Protocol & Logistics</option>
-                                            <option value="resource_mobilization">Resource Mobilization</option>
+                                            {isAdmin && <option value="global">Global Secretariat (General)</option>}
+                                            {isAdmin ? (
+                                                <>
+                                                    <option value="energy">Energy & Infrastructure</option>
+                                                    <option value="agriculture">Agriculture & Food Systems</option>
+                                                    <option value="minerals">Critical Minerals & Industrialization</option>
+                                                    <option value="digital">Digital Economy & Transformation</option>
+                                                    <option value="protocol">Protocol & Logistics</option>
+                                                    <option value="resource_mobilization">Resource Mobilization</option>
+                                                </>
+                                            ) : (
+                                                availableTwgs.map((twg: any) => (
+                                                    <option key={twg.id} value={twg.id}>{twg.name}</option>
+                                                ))
+                                            )}
                                         </select>
                                     </div>
 
