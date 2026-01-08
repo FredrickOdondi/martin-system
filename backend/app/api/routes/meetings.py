@@ -9,7 +9,8 @@ from app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesS
 from app.schemas.schemas import (
     MeetingCreate, MeetingRead, MeetingUpdate,
     MinutesCreate, MinutesUpdate, MinutesRead,
-    AgendaCreate, AgendaRead, AgendaUpdate
+    AgendaCreate, AgendaRead, AgendaUpdate,
+    MeetingParticipantRead, MeetingParticipantUpdate
 )
 from app.api.deps import get_current_active_user, require_facilitator, require_twg_access, has_twg_access
 from app.services.email_service import email_service
