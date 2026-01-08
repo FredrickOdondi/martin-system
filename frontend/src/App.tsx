@@ -15,21 +15,20 @@ import TwgAgent from './pages/workspace/TwgAgent'
 import ActionTracker from './pages/actions/ActionTracker'
 import KnowledgeBase from './pages/knowledge/KnowledgeBase'
 import DealPipeline from './pages/workspace/DealPipeline'
+// import ProjectDetails from './pages/workspace/ProjectDetails'
+// import ProjectMemo from './pages/workspace/ProjectMemo'
 import UserProfile from './pages/profile/UserProfile'
 import AgentAssistant from './pages/assistant/AgentAssistant'
 import SummitSchedule from './pages/schedule/SummitSchedule'
 import DocumentLibrary from './pages/documents/DocumentLibrary'
 import NotificationCenter from './pages/notifications/NotificationCenter'
 import TeamManagement from './pages/admin/TeamManagement'
-import PendingApproval from './pages/auth/PendingApproval'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function HomeRedirect() {
     const user = useAppSelector((state) => state.auth.user)
 
-    if (!user?.is_active) {
-        return <Navigate to="/pending-approval" replace />
-    }
+    // Admin approval disabled - all users are active
 
     if (user?.role === UserRole.FACILITATOR || user?.role === UserRole.MEMBER) {
         return <Navigate to="/workspace/energy-twg" replace />
@@ -88,7 +87,7 @@ function App() {
             <Route path="/register" element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/pending-approval" element={<PendingApproval />} />
+            {/* Pending approval route removed - admin approval disabled */}
 
             {/* Home Redirect */}
             <Route path="/" element={<HomeRedirect />} />
@@ -154,7 +153,16 @@ function App() {
                     <AgentAssistant />
                 </ProtectedRoute>
             } />
-
+            <Route path="/actions" element={
+                <ProtectedRoute>
+                    <ActionTracker />
+                </ProtectedRoute>
+            } />
+            <Route path="/assistant" element={
+                <ProtectedRoute>
+                    <AgentAssistant />
+                </ProtectedRoute>
+            } />
             <Route path="/admin/team" element={
                 <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
                     <TeamManagement />

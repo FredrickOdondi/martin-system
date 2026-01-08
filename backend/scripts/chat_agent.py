@@ -24,25 +24,28 @@ project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from loguru import logger
-from app.agents.supervisor import create_supervisor
-from app.agents.energy_agent import create_energy_agent
-from app.agents.agriculture_agent import create_agriculture_agent
-from app.agents.minerals_agent import create_minerals_agent
-from app.agents.digital_agent import create_digital_agent
-from app.agents.protocol_agent import create_protocol_agent
-from app.agents.resource_mobilization_agent import create_resource_mobilization_agent
+
+# ALL AGENTS NOW USE LANGGRAPH!
+from app.agents.langgraph_supervisor import create_langgraph_supervisor
+from app.agents.langgraph_energy_agent import create_langgraph_energy_agent
+from app.agents.langgraph_agriculture_agent import create_langgraph_agriculture_agent
+from app.agents.langgraph_minerals_agent import create_langgraph_minerals_agent
+from app.agents.langgraph_digital_agent import create_langgraph_digital_agent
+from app.agents.langgraph_protocol_agent import create_langgraph_protocol_agent
+from app.agents.langgraph_resource_mobilization_agent import create_langgraph_resource_mobilization_agent
+
 from app.agents.prompts import list_agents
 
 
-# Agent factory mapping
+# Agent factory mapping - ALL USING LANGGRAPH NOW!
 AGENT_FACTORY = {
-    "supervisor": create_supervisor_with_tools,
-    "energy": create_energy_agent,
-    "agriculture": create_agriculture_agent,
-    "minerals": create_minerals_agent,
-    "digital": create_digital_agent,
-    "protocol": create_protocol_agent,
-    "resource_mobilization": create_resource_mobilization_agent,
+    "supervisor": create_langgraph_supervisor,
+    "energy": create_langgraph_energy_agent,
+    "agriculture": create_langgraph_agriculture_agent,
+    "minerals": create_langgraph_minerals_agent,
+    "digital": create_langgraph_digital_agent,
+    "protocol": create_langgraph_protocol_agent,
+    "resource_mobilization": create_langgraph_resource_mobilization_agent,
 }
 
 
@@ -203,11 +206,14 @@ Examples:
         else:
             print("ℹ️  Using in-memory storage (use --no-redis to change)")
 
-        # If supervisor, show registered agents
+        # If supervisor, show registered agents and LangGraph info
         if args.agent == "supervisor" and hasattr(agent, 'get_supervisor_status'):
             status = agent.get_supervisor_status()
-            if status['delegation_enabled']:
-                print(f"✓ Supervisor has {status['agent_count']} TWG agents registered:")
+            print(f"\n✨ {status.get('supervisor_type', 'LangGraph StateGraph')} initialized!")
+            print(f"   LangGraph version: {status.get('langgraph_version', '1.0.5+')}")
+            print(f"   Checkpointing: {status.get('checkpointing_enabled', 'Enabled')}")
+            if status.get('graph_built'):
+                print(f"✓ State graph compiled with {status['agent_count']} TWG agents:")
                 for twg in status['registered_agents']:
                     print(f"  - {twg}")
 
@@ -503,19 +509,16 @@ Examples:
             try:
                 print(f"\033[92m{args.agent.title()}:\033[0m ", end="", flush=True)
 
-                # Use chat_with_tools for supervisor (async), smart_chat or regular chat for others
-                if args.agent == "supervisor" and hasattr(agent, 'chat_with_tools'):
-                    response = asyncio.run(agent.chat_with_tools(user_input))
-                elif args.agent == "supervisor" and hasattr(agent, 'smart_chat'):
-                    response = agent.smart_chat(user_input)
-                else:
-                    response = agent.chat(user_input)
+                # LangGraph supervisor uses .chat() directly
+                response = agent.chat(user_input)
 
                 print(response)
                 print()  # Empty line for readability
 
             except Exception as e:
                 print(f"\n❌ Error: {e}\n")
+                import traceback
+                traceback.print_exc()
 
     except KeyboardInterrupt:
         print("\n\nGoodbye!")
