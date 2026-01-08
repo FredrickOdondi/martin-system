@@ -92,7 +92,7 @@ loguru==0.7.2
 sentry-sdk[fastapi]==1.40.0
 
 # Data Processing
-pandas==2.2.0
+pandas>=2.2.2
 numpy>=2.4.0
 
 # Document Ingestion

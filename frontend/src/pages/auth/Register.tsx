@@ -27,6 +27,7 @@ export default function Register() {
     useEffect(() => {
         // Initialize Google Login
         if (window.google) {
+            console.log("[DEBUG] Current Origin:", window.location.origin);
             window.google.accounts.id.initialize({
                 client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
                 callback: handleGoogleLogin,

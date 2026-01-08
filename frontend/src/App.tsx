@@ -20,6 +20,7 @@ import ProjectMemo from './pages/ProjectMemo'
 import UserProfile from './pages/profile/UserProfile'
 import AgentAssistant from './pages/assistant/AgentAssistant'
 import SummitSchedule from './pages/schedule/SummitSchedule'
+import MeetingDetail from './pages/schedule/MeetingDetail'
 import DocumentLibrary from './pages/documents/DocumentLibrary'
 import NotificationCenter from './pages/notifications/NotificationCenter'
 import TeamManagement from './pages/admin/TeamManagement'
@@ -131,6 +132,11 @@ function App() {
             <Route path="/schedule" element={
                 <ProtectedRoute>
                     <SummitSchedule />
+                </ProtectedRoute>
+            } />
+            <Route path="/meetings/:id" element={
+                <ProtectedRoute>
+                    <MeetingDetail />
                 </ProtectedRoute>
             } />
             <Route path="/knowledge-base" element={

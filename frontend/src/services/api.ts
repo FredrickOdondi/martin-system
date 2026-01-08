@@ -90,6 +90,21 @@ export const meetings = {
 
     getMinutes: (id: string) => api.get(`/meetings/${id}/minutes`),
     updateMinutes: (id: string, data: { content: string, status?: string }) => api.post(`/meetings/${id}/minutes`, data),
+
+    // Action Items
+    getActionItems: (meetingId: string) => api.get(`/meetings/${meetingId}/action-items`),
+    createActionItem: (meetingId: string, data: any) => api.post(`/meetings/${meetingId}/action-items`, data),
+    updateActionItem: (meetingId: string, actionId: string, data: any) => api.patch(`/action-items/${actionId}`, data),
+
+    // Documents
+    getDocuments: (meetingId: string) => api.get(`/meetings/${meetingId}/documents`),
+    uploadDocument: (meetingId: string, file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        return api.post(`/meetings/${meetingId}/documents`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+    },
 };
 
 export const twgs = {
