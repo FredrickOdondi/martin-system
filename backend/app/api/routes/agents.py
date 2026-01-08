@@ -5,10 +5,10 @@ import uuid
 import asyncio
 import json
 
-from backend.app.api.deps import get_current_active_user
-from backend.app.models.models import User
-from backend.app.schemas.schemas import AgentChatRequest, AgentChatResponse, AgentTaskRequest, AgentStatus
-from backend.app.schemas.chat_messages import (
+from app.api.deps import get_current_active_user
+from app.models.models import User
+from app.schemas.schemas import AgentChatRequest, AgentChatResponse, AgentTaskRequest, AgentStatus
+from app.schemas.chat_messages import (
     EnhancedChatRequest,
     EnhancedChatResponse,
     ChatMessage,
@@ -16,11 +16,12 @@ from backend.app.schemas.chat_messages import (
     AgentSuggestion,
     ToolExecution
 )
-from backend.app.agents.supervisor_with_tools import SupervisorWithTools
-from backend.app.services.command_parser import CommandParser, MessageParseType
-from backend.app.services.email_approval_service import get_email_approval_service
-from backend.app.services.gmail_service import get_gmail_service
-from backend.app.schemas.email_approval import (
+# Use LangGraph supervisor via API adapter
+from app.agents.supervisor_api_adapter import SupervisorWithTools
+from app.services.command_parser import CommandParser, MessageParseType
+from app.services.email_approval_service import get_email_approval_service
+from app.services.gmail_service import get_gmail_service
+from app.schemas.email_approval import (
     EmailApprovalRequest,
     EmailApprovalResponse,
     EmailApprovalResult
@@ -303,8 +304,7 @@ async def stream_chat(
             elif parsed["type"] == MessageParseType.MENTION:
                 # Send agent routing event
                 agent_ids = parsed["agent_mentions"]
-                status_msg = f"Routing to {', '.join(agent_ids)} agent(s)..."
-                yield f"data: {json.dumps({'type': 'agent_routing', 'agents': agent_ids, 'status': status_msg})}\n\n"
+                yield f"data: {json.dumps({'type': 'agent_routing', 'agents': agent_ids, 'status': f'Routing to {', '.join(agent_ids)} agent(s)...'})}\n\n"
 
                 # Execute with mentioned agent
                 response_text = await handle_mention(supervisor, parsed)
@@ -654,7 +654,7 @@ async def send_project_memo_email(
         logger.info(f"Using supervisor agent to send project memo email to {request.to_email}")
 
         # Import the send_email tool function
-        from backend.app.tools.email_tools import send_email
+        from app.tools.email_tools import send_email
 
         # Format the email body with the memo content
         full_body = f"{request.body}\n\n{'='*80}\n\n{request.memo_content}"

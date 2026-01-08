@@ -64,7 +64,7 @@ def upgrade() -> None:
     sa.Column('file_type', sa.String(length=50), nullable=False),
     sa.Column('uploaded_by_id', sa.UUID(), nullable=False),
     sa.Column('is_confidential', sa.Boolean(), nullable=False),
-    sa.Column('metadata_json', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('metadata_json', sa.JSON(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['twg_id'], ['twgs.id'], ),
     sa.ForeignKeyConstraint(['uploaded_by_id'], ['users.id'], ),
@@ -92,7 +92,7 @@ def upgrade() -> None:
     sa.Column('currency', sa.String(length=10), nullable=False),
     sa.Column('readiness_score', sa.Float(), nullable=False),
     sa.Column('status', sa.Enum('IDENTIFIED', 'VETTING', 'BANKABLE', 'PRESENTED', name='projectstatus'), nullable=False),
-    sa.Column('metadata_json', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
+    sa.Column('metadata_json', sa.JSON(), nullable=True),
     sa.ForeignKeyConstraint(['twg_id'], ['twgs.id'], ),
     sa.PrimaryKeyConstraint('id')
     )

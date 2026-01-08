@@ -7,9 +7,9 @@ from sqlalchemy import String, DateTime, Enum, ForeignKey, Column, Table, Text, 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 try:
-    from backend.app.core.database import Base
+    from app.core.database import Base
 except ImportError:
-    from backend.app.core.database import Base
+    from app.core.database import Base
 
 # --- Enums ---
 
@@ -38,11 +38,6 @@ class MinutesStatus(str, enum.Enum):
     APPROVED = "approved"
     FINAL = "final"
 
-class RsvpStatus(str, enum.Enum):
-    PENDING = "pending"
-    ACCEPTED = "accepted"
-    DECLINED = "declined"
-
 class ActionItemStatus(str, enum.Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
@@ -70,12 +65,6 @@ class NotificationType(str, enum.Enum):
     DOCUMENT = "document"
     TASK = "task"
 
-class DocumentStage(str, enum.Enum):
-    ZERO_DRAFT = "zero_draft"
-    RAP_MODE = "rap_mode"
-    DECLARATION_TXT = "declaration_txt"
-    FINAL = "final"
-
 # --- Association Tables ---
 
 twg_members = Table(
@@ -87,13 +76,21 @@ twg_members = Table(
     extend_existing=True
 )
 
-# meeting_participants table replaced by MeetingParticipant model below
-
+meeting_participants = Table(
+    "meeting_participants",
+    Base.metadata,
+    Column("meeting_id", Uuid, ForeignKey("meetings.id", ondelete="CASCADE"), primary_key=True),
+    Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
+    Column("rsvp_status", String(50), default="pending"), # pending, accepted, declined
+    Column("attended", Boolean, default=False),
+    extend_existing=True
+)
 
 # --- Models ---
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     full_name: Mapped[str] = mapped_column(String(255))
@@ -110,8 +107,9 @@ class User(Base):
         secondary=twg_members, back_populates="members"
     )
     owned_action_items: Mapped[List["ActionItem"]] = relationship(back_populates="owner")
-    meeting_participations: Mapped[List["MeetingParticipant"]] = relationship(back_populates="user")
-
+    meetings: Mapped[List["Meeting"]] = relationship(
+        secondary=meeting_participants, back_populates="participants"
+    )
     notifications: Mapped[List["Notification"]] = relationship(
         back_populates="user", cascade="all, delete-orphan", order_by="Notification.created_at.desc()"
     )
@@ -120,6 +118,7 @@ class User(Base):
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
@@ -135,6 +134,7 @@ class AuditLog(Base):
 
 class TWG(Base):
     __tablename__ = "twgs"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(255))
@@ -152,12 +152,10 @@ class TWG(Base):
     projects: Mapped[List["Project"]] = relationship(back_populates="twg")
     action_items: Mapped[List["ActionItem"]] = relationship(back_populates="twg")
     documents: Mapped[List["Document"]] = relationship(back_populates="twg")
-    
-    political_lead: Mapped[Optional["User"]] = relationship("User", foreign_keys=[political_lead_id])
-    technical_lead: Mapped[Optional["User"]] = relationship("User", foreign_keys=[technical_lead_id])
 
 class Meeting(Base):
     __tablename__ = "meetings"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
@@ -171,15 +169,17 @@ class Meeting(Base):
     
     # Relationships
     twg: Mapped["TWG"] = relationship(back_populates="meetings")
-    participants: Mapped[List["MeetingParticipant"]] = relationship(back_populates="meeting", cascade="all, delete-orphan")
-
+    participants: Mapped[List["User"]] = relationship(
+        secondary=meeting_participants, back_populates="meetings"
+    )
     agenda: Mapped[Optional["Agenda"]] = relationship(back_populates="meeting", uselist=False)
     minutes: Mapped[Optional["Minutes"]] = relationship(back_populates="meeting", uselist=False)
     action_items: Mapped[List["ActionItem"]] = relationship(back_populates="meeting")
 
 class Agenda(Base):
     __tablename__ = "agendas"
-    
+    __table_args__ = {'extend_existing': True}
+
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     meeting_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("meetings.id"), unique=True)
     content: Mapped[str] = mapped_column(Text) # Markdown or HTML
@@ -190,7 +190,8 @@ class Agenda(Base):
 
 class Minutes(Base):
     __tablename__ = "minutes"
-    
+    __table_args__ = {'extend_existing': True}
+
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     meeting_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("meetings.id"), unique=True)
     content: Mapped[str] = mapped_column(Text) # Markdown or HTML
@@ -201,25 +202,9 @@ class Minutes(Base):
     # Relationships
     meeting: Mapped["Meeting"] = relationship(back_populates="minutes")
 
-class MeetingParticipant(Base):
-    __tablename__ = "meeting_participants"
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
-    meeting_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("meetings.id", ondelete="CASCADE"))
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=True) 
-    
-    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    rsvp_status: Mapped[RsvpStatus] = mapped_column(Enum(RsvpStatus), default=RsvpStatus.PENDING)
-    attended: Mapped[bool] = mapped_column(Boolean, default=False)
-    
-    # Relationships
-    meeting: Mapped["Meeting"] = relationship(back_populates="participants")
-    user: Mapped[Optional["User"]] = relationship(back_populates="meeting_participations")
-
-
 class ActionItem(Base):
     __tablename__ = "action_items"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
@@ -237,6 +222,7 @@ class ActionItem(Base):
 
 class Project(Base):
     __tablename__ = "projects"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
@@ -255,6 +241,7 @@ class Project(Base):
 
 class Document(Base):
     __tablename__ = "documents"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     twg_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("twgs.id"), nullable=True)
@@ -262,19 +249,17 @@ class Document(Base):
     file_path: Mapped[str] = mapped_column(String(512))
     file_type: Mapped[str] = mapped_column(String(255))  # MIME type can be long
     uploaded_by_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
-    stage: Mapped[DocumentStage] = mapped_column(Enum(DocumentStage), default=DocumentStage.FINAL)
     is_confidential: Mapped[bool] = mapped_column(Boolean, default=False)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
-    ingested_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     
     # Relationships
     twg: Mapped[Optional["TWG"]] = relationship(back_populates="documents")
-    uploaded_by: Mapped["User"] = relationship(foreign_keys=[uploaded_by_id])
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
-    
+    __table_args__ = {'extend_existing': True}
+
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     token: Mapped[str] = mapped_column(String(512), unique=True, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
@@ -287,6 +272,7 @@ class RefreshToken(Base):
 
 class Notification(Base):
     __tablename__ = "notifications"
+    __table_args__ = {'extend_existing': True}
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
