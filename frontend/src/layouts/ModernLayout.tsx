@@ -225,6 +225,17 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
                                             </>
                                         )}
                                     </button>
+                                    <button
+                                        onClick={() => navigate('/deal-pipeline')}
+                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/deal-pipeline')
+                                            ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
+                                            : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
+                                            } ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
+                                        title={isSidebarCollapsed ? "Deal Pipeline" : ""}
+                                    >
+                                        <span className="material-symbols-outlined text-[20px]">work</span>
+                                        {!isSidebarCollapsed && <span>Deal Pipeline</span>}
+                                    </button>
                                 </div>
                             </div>
 

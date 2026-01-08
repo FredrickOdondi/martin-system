@@ -5,10 +5,10 @@ from sqlalchemy import select, desc
 from typing import List, Optional
 import uuid
 
-from backend.app.core.database import get_db
+from app.core.database import get_db
 from app.models.models import Project, User, UserRole
-from backend.app.schemas.schemas import ProjectCreate, ProjectRead
-from backend.app.api.deps import get_current_active_user, require_facilitator, has_twg_access
+from app.schemas.schemas import ProjectCreate, ProjectRead
+from app.api.deps import get_current_active_user, require_facilitator, has_twg_access
 
 router = APIRouter(prefix="/projects", tags=["Projects"])
 

@@ -7,8 +7,8 @@ Provides endpoints for user authentication and authorization.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.database import get_db
-from backend.app.schemas.auth import (
+from app.core.database import get_db
+from app.schemas.auth import (
     UserRegister,
     UserLogin,
     GoogleLogin,
@@ -19,8 +19,8 @@ from backend.app.schemas.auth import (
     UserResponse,
     UserWithToken
 )
-from backend.app.services.auth_service import AuthService
-from backend.app.api.deps import get_current_active_user
+from app.services.auth_service import AuthService
+from app.api.deps import get_current_active_user
 from app.models.models import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
