@@ -16,7 +16,8 @@ from app.schemas.chat_messages import (
     AgentSuggestion,
     ToolExecution
 )
-from app.agents.supervisor_with_tools import SupervisorWithTools
+# Use LangGraph supervisor via API adapter
+from app.agents.supervisor_api_adapter import SupervisorWithTools
 from app.services.command_parser import CommandParser, MessageParseType
 from app.services.email_approval_service import get_email_approval_service
 from app.services.gmail_service import get_gmail_service

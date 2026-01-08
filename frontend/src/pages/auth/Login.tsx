@@ -51,11 +51,8 @@ export default function Login() {
             navigate('/dashboard');
         } catch (err: any) {
             console.error('Google login failed', err);
-            if (err.response?.status === 403) {
-                navigate('/pending-approval');
-            } else {
-                setLoginError('Google authentication failed. Please try again.');
-            }
+            // Admin approval disabled - show error instead
+            setLoginError('Google authentication failed. Please try again.');
         } finally {
             setIsLoading(false);
         }
@@ -93,13 +90,10 @@ export default function Login() {
             navigate('/dashboard')
         } catch (err: any) {
             console.error('Login failed', err)
-            if (err.response?.status === 403) {
-                navigate('/pending-approval')
-            } else {
-                const errorMessage = err.response?.data?.detail || 'Invalid email or password. Please try again.'
-                setLoginError(errorMessage)
-                dispatch(setError(errorMessage))
-            }
+            // Admin approval disabled - show error message directly
+            const errorMessage = err.response?.data?.detail || 'Invalid email or password. Please try again.'
+            setLoginError(errorMessage)
+            dispatch(setError(errorMessage))
         } finally {
             setIsLoading(false)
         }

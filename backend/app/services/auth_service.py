@@ -98,7 +98,7 @@ class AuthService:
             full_name=user_data.full_name,
             role=UserRole.TWG_MEMBER, # Default to TWG MEMBER, must be promoted by admin
             organization=user_data.organization,
-            is_active=False # Must be approved by admin
+            is_active=True # Auto-approve on registration (admin approval disabled)
         )
         
         self.db.add(new_user)
@@ -206,7 +206,7 @@ class AuthService:
                     hashed_password="oauth_user_no_password",
                     full_name=full_name,
                     role=UserRole.TWG_MEMBER,
-                    is_active=False
+                    is_active=True # Auto-approve Google OAuth users
                 )
                 self.db.add(user)
                 await self.db.commit()

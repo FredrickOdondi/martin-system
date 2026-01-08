@@ -23,15 +23,12 @@ import SummitSchedule from './pages/schedule/SummitSchedule'
 import DocumentLibrary from './pages/documents/DocumentLibrary'
 import NotificationCenter from './pages/notifications/NotificationCenter'
 import TeamManagement from './pages/admin/TeamManagement'
-import PendingApproval from './pages/auth/PendingApproval'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function HomeRedirect() {
     const user = useAppSelector((state) => state.auth.user)
 
-    if (!user?.is_active) {
-        return <Navigate to="/pending-approval" replace />
-    }
+    // Admin approval disabled - all users are active
 
     if (user?.role === UserRole.FACILITATOR || user?.role === UserRole.MEMBER) {
         return <Navigate to="/workspace/energy-twg" replace />
@@ -90,7 +87,7 @@ function App() {
             <Route path="/register" element={<Register />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
-            <Route path="/pending-approval" element={<PendingApproval />} />
+            {/* Pending approval route removed - admin approval disabled */}
 
             {/* Home Redirect */}
             <Route path="/" element={<HomeRedirect />} />

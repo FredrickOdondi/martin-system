@@ -58,8 +58,15 @@ class Settings(BaseSettings):
         description="LLM request timeout in seconds"
     )
     
-    # OpenAI (from Auth implementation)
-    LLM_PROVIDER: str = "openai"
+    # LLM Provider Configuration
+    LLM_PROVIDER: str = "groq"
+    LLM_MODEL: str = "llama-3.3-70b-versatile"
+    LLM_MAX_TOKENS: int = 4000
+
+    # Groq
+    GROQ_API_KEY: Optional[str] = None
+
+    # OpenAI
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-4-turbo-preview"
 
