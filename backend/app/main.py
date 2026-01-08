@@ -24,6 +24,10 @@ if "https://frontend-production-1abb.up.railway.app" not in cors_origins:
 if "http://127.0.0.1:5173" not in cors_origins:
     cors_origins.append("http://127.0.0.1:5173")
 
+# Add localhost variant
+if "http://localhost:5173" not in cors_origins:
+    cors_origins.append("http://localhost:5173")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins if cors_origins else ["http://localhost:5173", "http://localhost:3000"],
@@ -59,6 +63,9 @@ async def startup_event():
     
     logger.info(f"API_V1_STR: {settings.API_V1_STR}")
     logger.info(f"CORS_ORIGINS: {cors_origins}")
+    logger.info(f"GOOGLE_CLIENT_ID Loaded: {bool(settings.GOOGLE_CLIENT_ID)}")
+    if settings.GOOGLE_CLIENT_ID:
+        logger.info(f"GOOGLE_CLIENT_ID Prefix: {settings.GOOGLE_CLIENT_ID[:10]}...")
     
     logger.info("REGISTERED ROUTES:")
     url_list = [{"path": route.path, "name": route.name} for route in app.routes]

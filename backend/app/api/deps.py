@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 import uuid
 
 from backend.app.core.database import get_db
-from backend.app.models.models import User, UserRole
+from app.models.models import User, UserRole
 from backend.app.utils.security import verify_token
 from backend.app.services.auth_service import AuthService
 

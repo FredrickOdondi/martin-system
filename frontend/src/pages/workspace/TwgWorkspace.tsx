@@ -3,14 +3,14 @@ import ConflictDashboard from '../../components/admin/ConflictDashboard'
 import PolicyFactory from '../../components/workspace/PolicyFactory'
 import CopilotChat from '../../components/workspace/CopilotChat'
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { meetings, twgs } from '../../services/api'
 import ModernLayout from '../../layouts/ModernLayout'
 import CreateMeetingModal from '../../components/schedule/CreateMeetingModal'
-import MeetingDetail from '../../pages/schedule/MeetingDetail'
 
 export default function TwgWorkspace() {
     const { id } = useParams<{ id: string }>();
+    const navigate = useNavigate();
     const twgId = id || ''; // meaningful fallback or error handling?
 
     // Real Data State
@@ -20,7 +20,6 @@ export default function TwgWorkspace() {
 
     // Modal State
     const [isScheduling, setIsScheduling] = useState(false)
-    const [viewingMeetingId, setViewingMeetingId] = useState<string | null>(null)
 
     // Load Meetings
     const loadMeetings = async () => {
@@ -293,7 +292,7 @@ export default function TwgWorkspace() {
                                                             </td>
                                                             <td className="px-6 py-4 text-right">
                                                                 <button
-                                                                    onClick={() => setViewingMeetingId(m.id)}
+                                                                    onClick={() => navigate(`/meetings/${m.id}`)}
                                                                     className="text-[10px] font-black text-blue-600 hover:text-blue-700 uppercase tracking-widest transition-all"
                                                                 >
                                                                     View Details
@@ -401,12 +400,6 @@ export default function TwgWorkspace() {
                 twgId={twgId}
                 onSuccess={loadMeetings}
             />
-            {viewingMeetingId && (
-                <MeetingDetail
-                    meetingId={viewingMeetingId!}
-                    onClose={() => setViewingMeetingId(null)}
-                />
-            )}
         </ModernLayout>
     )
 }

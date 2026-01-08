@@ -6,7 +6,7 @@ from typing import List
 import uuid
 
 from backend.app.core.database import get_db
-from backend.app.models.models import TWG, User, UserRole, Meeting, Project, ActionItem, Document, MeetingStatus, ActionItemStatus
+from app.models.models import TWG, User, UserRole, Meeting, Project, ActionItem, Document, MeetingStatus, ActionItemStatus
 from backend.app.schemas.schemas import TWGCreate, TWGRead, TWGUpdate
 from backend.app.api.deps import get_current_active_user, require_admin, require_facilitator
 

@@ -13,7 +13,7 @@ import uuid
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-from backend.app.models.models import User, RefreshToken, UserRole
+from app.models.models import User, RefreshToken, UserRole
 from backend.app.schemas.auth import UserRegister, UserLogin
 from backend.app.utils.security import (
     hash_password,
@@ -231,11 +231,18 @@ class AuthService:
             
             return user, access_token, refresh_token_str
             
-        except ValueError:
+        except ValueError as e:
             # Invalid token
+            print(f"Google Auth ValueError: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid Google ID token"
+            )
+        except Exception as e:
+            print(f"Google Auth Unexpected Error: {type(e).__name__}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Google authentication failed: {str(e)}"
             )
     
     async def refresh_access_token(self, refresh_token_str: str) -> str:

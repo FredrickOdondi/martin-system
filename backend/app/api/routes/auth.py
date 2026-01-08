@@ -21,7 +21,7 @@ from backend.app.schemas.auth import (
 )
 from backend.app.services.auth_service import AuthService
 from backend.app.api.deps import get_current_active_user
-from backend.app.models.models import User
+from app.models.models import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 

@@ -32,6 +32,11 @@ class MeetingStatus(str, enum.Enum):
     CANCELLED = "cancelled"
     COMPLETED = "completed"
 
+class RsvpStatus(str, enum.Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+
 class MinutesStatus(str, enum.Enum):
     DRAFT = "draft"
     REVIEW = "review"
@@ -76,15 +81,24 @@ twg_members = Table(
     extend_existing=True
 )
 
-meeting_participants = Table(
-    "meeting_participants",
-    Base.metadata,
-    Column("meeting_id", Uuid, ForeignKey("meetings.id", ondelete="CASCADE"), primary_key=True),
-    Column("user_id", Uuid, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True),
-    Column("rsvp_status", String(50), default="pending"), # pending, accepted, declined
-    Column("attended", Boolean, default=False),
-    extend_existing=True
-)
+# MeetingParticipant Class (Association Object)
+class MeetingParticipant(Base):
+    __tablename__ = "meeting_participants"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    meeting_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("meetings.id", ondelete="CASCADE"))
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    
+    rsvp_status: Mapped[RsvpStatus] = mapped_column(Enum(RsvpStatus), default=RsvpStatus.PENDING)
+    attended: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+
+    # Relationships
+    meeting: Mapped["Meeting"] = relationship(back_populates="participants")
+    user: Mapped[Optional["User"]] = relationship(back_populates="meeting_participations")
 
 # --- Models ---
 
@@ -107,9 +121,7 @@ class User(Base):
         secondary=twg_members, back_populates="members"
     )
     owned_action_items: Mapped[List["ActionItem"]] = relationship(back_populates="owner")
-    meetings: Mapped[List["Meeting"]] = relationship(
-        secondary=meeting_participants, back_populates="participants"
-    )
+    meeting_participations: Mapped[List["MeetingParticipant"]] = relationship(back_populates="user")
     notifications: Mapped[List["Notification"]] = relationship(
         back_populates="user", cascade="all, delete-orphan", order_by="Notification.created_at.desc()"
     )
@@ -169,8 +181,8 @@ class Meeting(Base):
     
     # Relationships
     twg: Mapped["TWG"] = relationship(back_populates="meetings")
-    participants: Mapped[List["User"]] = relationship(
-        secondary=meeting_participants, back_populates="meetings"
+    participants: Mapped[List["MeetingParticipant"]] = relationship(
+        "MeetingParticipant", back_populates="meeting", cascade="all, delete-orphan"
     )
     agenda: Mapped[Optional["Agenda"]] = relationship(back_populates="meeting", uselist=False)
     minutes: Mapped[Optional["Minutes"]] = relationship(back_populates="meeting", uselist=False)

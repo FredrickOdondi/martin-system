@@ -5,7 +5,7 @@ from typing import List
 import uuid
 
 from backend.app.core.database import get_db
-from backend.app.models.models import ActionItem, User, UserRole
+from app.models.models import ActionItem, User, UserRole
 from backend.app.schemas.schemas import ActionItemCreate, ActionItemRead
 from backend.app.api.deps import get_current_active_user, require_facilitator, has_twg_access
 

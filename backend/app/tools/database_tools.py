@@ -13,7 +13,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.database import AsyncSessionLocal
-from backend.app.models.models import TWG, Meeting, ActionItem, Project, User
+from app.models.models import TWG, Meeting, ActionItem, Project, User
 
 logger = logging.getLogger(__name__)
 

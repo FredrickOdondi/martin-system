@@ -11,7 +11,7 @@ from sqlalchemy import select, update, delete
 import uuid
 
 from backend.app.core.database import get_db
-from backend.app.models.models import User, UserRole
+from app.models.models import User, UserRole
 from backend.app.schemas.auth import UserResponse, UserUpdate
 from backend.app.api.deps import require_admin
 

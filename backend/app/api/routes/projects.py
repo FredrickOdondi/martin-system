@@ -6,7 +6,7 @@ from typing import List, Optional
 import uuid
 
 from backend.app.core.database import get_db
-from backend.app.models.models import Project, User, UserRole
+from app.models.models import Project, User, UserRole
 from backend.app.schemas.schemas import ProjectCreate, ProjectRead
 from backend.app.api.deps import get_current_active_user, require_facilitator, has_twg_access
 
@@ -137,7 +137,7 @@ async def update_project_score(
     
     # Auto-update status based on score thresholds (Example logic)
     if score >= 80.0:
-        from backend.app.models.models import ProjectStatus
+        from app.models.models import ProjectStatus
         db_project.status = ProjectStatus.BANKABLE
         
     await db.commit()

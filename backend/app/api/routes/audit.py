@@ -5,7 +5,7 @@ from typing import List, Optional
 import uuid
 
 from backend.app.core.database import get_db
-from backend.app.models.models import AuditLog, User
+from app.models.models import AuditLog, User
 from backend.app.schemas.schemas import AuditLogRead
 from backend.app.api.deps import require_admin
 
