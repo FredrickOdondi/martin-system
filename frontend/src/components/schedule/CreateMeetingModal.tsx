@@ -37,8 +37,7 @@ export default function CreateMeetingModal({ isOpen, onClose, twgId, onSuccess }
                 scheduled_at: scheduledAt.toISOString(),
                 duration_minutes: parseInt(formData.duration),
                 location: formData.location,
-                status: 'draft', // Start as draft
-                participants: [] // Empty initially
+                meeting_type: formData.type
             });
 
             onSuccess();

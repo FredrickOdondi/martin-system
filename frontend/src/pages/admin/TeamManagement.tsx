@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { userService, UserUpdateData } from '../../services/userService'
 import { twgs as twgService } from '../../services/api'
+import api from '../../services/api'
 import { User, UserRole } from '../../types/auth'
 import { Avatar } from '../../components/ui'
 import { toast } from 'react-toastify'
@@ -18,6 +19,26 @@ export default function TeamManagement() {
     // Governance State
     const [twgs, setTwgs] = useState<any[]>([])
     const [loadingTwgs, setLoadingTwgs] = useState(false)
+
+    // Team Assignment Modal State
+    const [isTeamModalOpen, setIsTeamModalOpen] = useState(false)
+    const [editingUser, setEditingUser] = useState<User | null>(null)
+    const [selectedTwgs, setSelectedTwgs] = useState<string[]>([])
+
+    // Track if we're enforcing TWG selection (for facilitator role)
+    const [enforceTwgSelection, setEnforceTwgSelection] = useState(false)
+    const [previousRole, setPreviousRole] = useState<UserRole | null>(null)
+
+    // Invite User Modal State
+    const [isInviteModalOpen, setIsInviteModalOpen] = useState(false)
+    const [inviteForm, setInviteForm] = useState({
+        email: '',
+        full_name: '',
+        role: UserRole.MEMBER,
+        organization: '',
+        twg_ids: [] as string[]
+    })
+    const [tempPassword, setTempPassword] = useState<string | null>(null)
 
     useEffect(() => {
         loadUsers()
@@ -78,6 +99,27 @@ export default function TeamManagement() {
         }
     }
 
+    const handleRoleChange = async (user: User, newRole: UserRole) => {
+        // If changing to FACILITATOR or MEMBER, prompt for TWG assignment
+        if (newRole === UserRole.FACILITATOR || newRole === UserRole.MEMBER) {
+            // Store the previous role in case they cancel
+            setPreviousRole(user.role)
+            // First update the role
+            await handleUpdateUser(user.id, { role: newRole })
+            // Mark that we're enforcing TWG selection for facilitators
+            setEnforceTwgSelection(newRole === UserRole.FACILITATOR)
+            // Then open the teams modal
+            toast.info(newRole === UserRole.FACILITATOR
+                ? 'Facilitators must be assigned to at least one TWG'
+                : 'Please assign TWGs for this user'
+            )
+            openTeamModal({ ...user, role: newRole })
+        } else {
+            // For ADMIN or SECRETARIAT_LEAD, just update the role
+            await handleUpdateUser(user.id, { role: newRole })
+        }
+    }
+
     const handleDeleteUser = async (userId: string) => {
         if (!window.confirm('Are you sure you want to delete this user?')) return
         try {
@@ -89,6 +131,84 @@ export default function TeamManagement() {
             console.error('Failed to delete user:', error)
             toast.error(message)
         }
+    }
+
+    const openTeamModal = (user: User) => {
+        setEditingUser(user)
+        setSelectedTwgs(user.twg_ids || [])
+        setIsTeamModalOpen(true)
+        if (twgs.length === 0) {
+            loadTwgs()
+        }
+    }
+
+    const handleSaveTeams = async () => {
+        if (!editingUser) return
+
+        // If enforcing TWG selection (facilitator) and no TWGs selected, show error
+        if (enforceTwgSelection && selectedTwgs.length === 0) {
+            toast.error('Facilitators must be assigned to at least one TWG')
+            return
+        }
+
+        try {
+            await userService.updateUser(editingUser.id, { twg_ids: selectedTwgs })
+            toast.success('Teams updated successfully')
+            setIsTeamModalOpen(false)
+            setEnforceTwgSelection(false)
+            setPreviousRole(null)
+            loadUsers()
+        } catch (error) {
+            console.error('Failed to update teams', error)
+            toast.error('Failed to update teams')
+        }
+    }
+
+    const handleCancelTeamModal = async () => {
+        // If we were enforcing TWG selection (facilitator) and they cancel, revert to MEMBER
+        if (enforceTwgSelection && editingUser) {
+            await handleUpdateUser(editingUser.id, { role: UserRole.MEMBER })
+            toast.warning('Role changed to Member (read-only) - no TWG assignment required')
+        }
+        setIsTeamModalOpen(false)
+        setEnforceTwgSelection(false)
+        setPreviousRole(null)
+        loadUsers()
+    }
+
+    const toggleTwgSelection = (twgId: string) => {
+        setSelectedTwgs(prev =>
+            prev.includes(twgId)
+                ? prev.filter(id => id !== twgId)
+                : [...prev, twgId]
+        )
+    }
+
+    const handleInviteUser = async () => {
+        try {
+            const response = await api.post('/users/invite', {
+                ...inviteForm,
+                send_email: false // Email not implemented yet
+            })
+            setTempPassword(response.data.temporary_password)
+            toast.success(`User invited! Temporary password: ${response.data.temporary_password}`)
+            loadUsers()
+        } catch (error: any) {
+            const message = error.response?.data?.detail || 'Failed to invite user'
+            toast.error(message)
+        }
+    }
+
+    const resetInviteForm = () => {
+        setInviteForm({
+            email: '',
+            full_name: '',
+            role: UserRole.MEMBER,
+            organization: '',
+            twg_ids: []
+        })
+        setTempPassword(null)
+        setIsInviteModalOpen(false)
     }
 
     const filteredUsers = users.filter(user =>
@@ -121,9 +241,12 @@ export default function TeamManagement() {
                         <span className="material-symbols-outlined text-sm">refresh</span>
                         Refresh
                     </button>
-                    <button className="px-4 py-2 bg-[#1152d4] hover:bg-[#0e44b1] text-white rounded-lg text-sm font-bold transition-all shadow-md shadow-blue-500/20 flex items-center gap-2">
-                        <span className="material-symbols-outlined text-sm">person_add</span>
-                        Add Member
+                    <button
+                        onClick={() => setIsInviteModalOpen(true)}
+                        className="px-4 py-2 bg-[#1152d4] hover:bg-[#0e44b1] text-white rounded-lg text-sm font-bold transition-all shadow-md shadow-blue-500/20 flex items-center gap-2"
+                    >
+                        <span className="material-symbols-outlined text-sm">mail</span>
+                        Invite User
                     </button>
                 </div>
             </div>
@@ -199,7 +322,7 @@ export default function TeamManagement() {
                                                 <select
                                                     className="bg-white dark:bg-[#2d3748] border border-[#e7ebf3] dark:border-[#4a5568] text-xs font-medium rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-[#1152d4]/20 text-[#0d121b] dark:text-white"
                                                     value={user.role}
-                                                    onChange={(e) => handleUpdateUser(user.id, { role: e.target.value as UserRole })}
+                                                    onChange={(e) => handleRoleChange(user, e.target.value as UserRole)}
                                                 >
                                                     {Object.values(UserRole).map((role) => (
                                                         <option key={role} value={role}>
@@ -230,6 +353,13 @@ export default function TeamManagement() {
                                                         <span className="material-symbols-outlined text-[20px]">
                                                             {user.is_active ? 'person_off' : 'person_check'}
                                                         </span>
+                                                    </button>
+                                                    <button
+                                                        onClick={() => openTeamModal(user)}
+                                                        className="p-2 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                                        title="Manage Teams"
+                                                    >
+                                                        <span className="material-symbols-outlined text-[20px]">groups</span>
                                                     </button>
                                                     <button
                                                         onClick={() => handleDeleteUser(user.id)}
@@ -320,6 +450,173 @@ export default function TeamManagement() {
                     </div>
                 )
             }
+
+            {/* Manage Teams Modal */}
+            {isTeamModalOpen && editingUser && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white dark:bg-[#1a202c] rounded-2xl shadow-2xl w-full max-w-md border border-[#e7ebf3] dark:border-[#2d3748] overflow-hidden">
+                        <div className="p-6 border-b border-[#e7ebf3] dark:border-[#2d3748]">
+                            <h3 className="text-xl font-bold text-[#0d121b] dark:text-white">Manage Teams</h3>
+                            <p className="text-sm text-[#4c669a] dark:text-[#a0aec0]">Assign TWGs for {editingUser.full_name}</p>
+                        </div>
+
+                        <div className="p-6 max-h-[60vh] overflow-y-auto space-y-3">
+                            {loadingTwgs ? (
+                                <div className="flex justify-center py-8">
+                                    <div className="w-6 h-6 border-2 border-[#1152d4] border-t-transparent rounded-full animate-spin"></div>
+                                </div>
+                            ) : (
+                                twgs.map(twg => (
+                                    <label key={twg.id} className="flex items-center gap-3 p-3 rounded-xl border border-[#e7ebf3] dark:border-[#2d3748] hover:bg-gray-50 dark:hover:bg-[#2d3748]/50 cursor-pointer transition-colors">
+                                        <input
+                                            type="checkbox"
+                                            checked={selectedTwgs.includes(twg.id)}
+                                            onChange={() => toggleTwgSelection(twg.id)}
+                                            className="w-5 h-5 rounded border-gray-300 text-[#1152d4] focus:ring-[#1152d4]"
+                                        />
+                                        <div>
+                                            <div className="font-bold text-[#0d121b] dark:text-white text-sm">{twg.name}</div>
+                                            <div className="text-xs text-[#4c669a] dark:text-[#a0aec0] uppercase">{twg.pillar?.replace(/_/g, ' ')}</div>
+                                        </div>
+                                    </label>
+                                ))
+                            )}
+                        </div>
+
+                        <div className="p-6 bg-gray-50 dark:bg-[#2d3748]/30 flex justify-end gap-3">
+                            <button
+                                onClick={handleCancelTeamModal}
+                                className="px-4 py-2 text-sm font-bold text-[#4c669a] hover:text-[#0d121b] dark:text-[#a0aec0] dark:hover:text-white transition-colors"
+                            >
+                                {enforceTwgSelection ? 'Cancel (Revert to Member)' : 'Cancel'}
+                            </button>
+                            <button
+                                onClick={handleSaveTeams}
+                                disabled={enforceTwgSelection && selectedTwgs.length === 0}
+                                className="px-4 py-2 bg-[#1152d4] hover:bg-[#0e44b1] text-white text-sm font-bold rounded-lg shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {enforceTwgSelection && selectedTwgs.length === 0 ? 'Select at least 1 TWG' : 'Save Changes'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Invite User Modal */}
+            {isInviteModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                    <div className="bg-white dark:bg-[#1a202c] rounded-2xl shadow-2xl w-full max-w-lg border border-[#e7ebf3] dark:border-[#2d3748] overflow-hidden">
+                        <div className="p-6 border-b border-[#e7ebf3] dark:border-[#2d3748]">
+                            <h3 className="text-xl font-bold text-[#0d121b] dark:text-white">Invite New User</h3>
+                            <p className="text-sm text-[#4c669a] dark:text-[#a0aec0]">Create account and assign access</p>
+                        </div>
+
+                        {tempPassword ? (
+                            <div className="p-6 space-y-4">
+                                <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+                                    <p className="text-sm font-bold text-green-800 dark:text-green-400 mb-2">✓ User Created Successfully!</p>
+                                    <p className="text-xs text-green-700 dark:text-green-500 mb-3">Share this temporary password with the user. They must change it on first login.</p>
+                                    <div className="bg-white dark:bg-[#2d3748] p-3 rounded-lg font-mono text-sm break-all">
+                                        {tempPassword}
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={resetInviteForm}
+                                    className="w-full px-4 py-2 bg-[#1152d4] hover:bg-[#0e44b1] text-white text-sm font-bold rounded-lg"
+                                >
+                                    Done
+                                </button>
+                            </div>
+                        ) : (
+                            <>
+                                <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+                                    <div>
+                                        <label className="block text-sm font-bold text-[#0d121b] dark:text-white mb-2">Email *</label>
+                                        <input
+                                            type="email"
+                                            value={inviteForm.email}
+                                            onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })}
+                                            className="w-full px-3 py-2 bg-white dark:bg-[#2d3748] border border-[#e7ebf3] dark:border-[#4a5568] rounded-lg text-sm"
+                                            placeholder="user@example.com"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-[#0d121b] dark:text-white mb-2">Full Name *</label>
+                                        <input
+                                            type="text"
+                                            value={inviteForm.full_name}
+                                            onChange={(e) => setInviteForm({ ...inviteForm, full_name: e.target.value })}
+                                            className="w-full px-3 py-2 bg-white dark:bg-[#2d3748] border border-[#e7ebf3] dark:border-[#4a5568] rounded-lg text-sm"
+                                            placeholder="John Doe"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-[#0d121b] dark:text-white mb-2">Role *</label>
+                                        <select
+                                            value={inviteForm.role}
+                                            onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value as UserRole })}
+                                            className="w-full px-3 py-2 bg-white dark:bg-[#2d3748] border border-[#e7ebf3] dark:border-[#4a5568] rounded-lg text-sm"
+                                        >
+                                            {Object.values(UserRole).map(role => (
+                                                <option key={role} value={role}>{role.replace(/_/g, ' ').toUpperCase()}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-[#0d121b] dark:text-white mb-2">Organization</label>
+                                        <input
+                                            type="text"
+                                            value={inviteForm.organization}
+                                            onChange={(e) => setInviteForm({ ...inviteForm, organization: e.target.value })}
+                                            className="w-full px-3 py-2 bg-white dark:bg-[#2d3748] border border-[#e7ebf3] dark:border-[#4a5568] rounded-lg text-sm"
+                                            placeholder="Optional"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-bold text-[#0d121b] dark:text-white mb-2">Assign to TWGs</label>
+                                        <div className="space-y-2 max-h-40 overflow-y-auto">
+                                            {twgs.map(twg => (
+                                                <label key={twg.id} className="flex items-center gap-2 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-[#2d3748]/50 cursor-pointer">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={inviteForm.twg_ids.includes(twg.id)}
+                                                        onChange={(e) => {
+                                                            setInviteForm({
+                                                                ...inviteForm,
+                                                                twg_ids: e.target.checked
+                                                                    ? [...inviteForm.twg_ids, twg.id]
+                                                                    : inviteForm.twg_ids.filter(id => id !== twg.id)
+                                                            })
+                                                        }}
+                                                        className="w-4 h-4 rounded border-gray-300 text-[#1152d4]"
+                                                    />
+                                                    <span className="text-sm text-[#0d121b] dark:text-white">{twg.name}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="p-6 bg-gray-50 dark:bg-[#2d3748]/30 flex justify-end gap-3">
+                                    <button
+                                        onClick={resetInviteForm}
+                                        className="px-4 py-2 text-sm font-bold text-[#4c669a] hover:text-[#0d121b] dark:text-[#a0aec0] dark:hover:text-white"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button
+                                        onClick={handleInviteUser}
+                                        disabled={!inviteForm.email || !inviteForm.full_name}
+                                        className="px-4 py-2 bg-[#1152d4] hover:bg-[#0e44b1] text-white text-sm font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                    >
+                                        Create & Invite
+                                    </button>
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
+            )}
         </ModernLayout >
     )
 }

@@ -24,7 +24,8 @@ def upgrade() -> None:
     op.alter_column('meeting_participants', 'rsvp_status',
                existing_type=sa.VARCHAR(length=50),
                type_=sa.Enum('PENDING', 'ACCEPTED', 'DECLINED', name='rsvpstatus'),
-               existing_nullable=False)
+               existing_nullable=False,
+               postgresql_using="rsvp_status::text::rsvpstatus")
     # ### end Alembic commands ###
 
 

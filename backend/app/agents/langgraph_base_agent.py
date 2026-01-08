@@ -15,6 +15,8 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
 from app.services.groq_llm_service import get_llm_service
 from app.agents.prompts import get_prompt
+from app.core.knowledge_base import get_knowledge_base
+from app.agents.utils import get_twg_id_by_agent_id
 
 
 # Helper function for message accumulation
@@ -99,6 +101,19 @@ class LangGraphBaseAgent:
 
         # Get LLM service
         self.llm = get_llm_service()
+        
+        # Get Knowledge Base (RAG)
+        try:
+            self.kb = get_knowledge_base()
+        except Exception as e:
+            logger.warning(f"[{agent_id}] Knowledge Base not available: {e}")
+            self.kb = None
+            
+        # Resolve TWG ID for RAG context scoping
+        from app.agents.utils import get_twg_id_by_agent_id # Import locally to avoid circulars if any
+        self.twg_id = get_twg_id_by_agent_id(agent_id)
+        if self.twg_id:
+            logger.info(f"[{agent_id}] RAG Enabled. Scoped to TWG: {self.twg_id}")
 
         # LangGraph components
         self.graph = None
@@ -144,6 +159,41 @@ class LangGraphBaseAgent:
         Subclasses can override for preprocessing, tool calls, etc.
         """
         logger.debug(f"[{self.agent_id}] Processing query: {state['query'][:100]}...")
+        
+        # --- RAG RETRIEVAL ---
+        if self.twg_id and self.kb:
+            try:
+                # Search specifically in this TWG's namespace
+                namespace = f"twg-{self.twg_id}"
+                results = self.kb.search(
+                    query=state['query'], 
+                    namespace=namespace, 
+                    top_k=2 # Reduced from 3 to save tokens
+                )
+                
+                if results:
+                    # Format context with strict truncation
+                    # Assuming 4 chars per token, 2500 chars is ~625 tokens per doc
+                    # Total context ~1250 tokens, leaving plenty of room
+                    context_parts = []
+                    for r in results:
+                        file_name = r['metadata'].get('file_name', 'Unknown')
+                        text = r['metadata'].get('text', '') or ''
+                        # Truncate text to 2500 chars to avoid 413 errors
+                        truncated_text = text[:2500] + "..." if len(text) > 2500 else text
+                        context_parts.append(f"[Document: {file_name}]\n{truncated_text}")
+
+                    context_text = "\n\n".join(context_parts)
+                    
+                    # Store in state
+                    state['context'] = {"retrieved_docs": context_text, "source": namespace}
+                    logger.info(f"[{self.agent_id}] Retrieved {len(results)} docs from {namespace}")
+                else:
+                    logger.info(f"[{self.agent_id}] No relevant docs found in {namespace}")
+                    
+            except Exception as e:
+                logger.error(f"[{self.agent_id}] RAG Search failed: {e}")
+                
         return state
 
     def _generate_response_node(self, state: AgentConversationState) -> AgentConversationState:
@@ -168,14 +218,28 @@ class LangGraphBaseAgent:
                     elif isinstance(msg, AIMessage):
                         history.append({"role": "assistant", "content": msg.content})
 
+                # Inject RAG context into System Prompt for history-aware chat
+                sys_prompt = self.system_prompt
+                context = state.get("context")
+                if context and "retrieved_docs" in context:
+                    sys_prompt = f"{self.system_prompt}\n\nRelevant Context from Knowledge Base:\n{context['retrieved_docs']}"
+                    logger.debug(f"[{self.agent_id}] Injected RAG context into system prompt")
+
                 response = self.llm.chat_with_history(
                     messages=history,
-                    system_prompt=self.system_prompt
+                    system_prompt=sys_prompt
                 )
             else:
                 # No history or first message
+                # Prepare prompt with RAG context if available
+                final_prompt = query
+                context = state.get("context")
+                if context and "retrieved_docs" in context:
+                    final_prompt = f"Background Information (Use this to answer if relevant):\n{context['retrieved_docs']}\n\nUser Question: {query}"
+                    logger.info(f"[{self.agent_id}] Injected RAG context into prompt")
+
                 response = self.llm.chat(
-                    prompt=query,
+                    prompt=final_prompt,
                     system_prompt=self.system_prompt
                 )
 

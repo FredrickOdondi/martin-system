@@ -10,10 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete
 import uuid
 
+from sqlalchemy.orm import selectinload
 from app.core.database import get_db
-from app.models.models import User, UserRole
+from app.models.models import User, UserRole, TWG
 from app.schemas.auth import UserResponse, UserUpdate
 from app.api.deps import require_admin
+from app.schemas.user_invite import UserInvite, UserInviteResponse
+import secrets
+import string
 
 router = APIRouter(prefix="/users", tags=["User Management"])
 
@@ -32,7 +36,7 @@ async def list_users(
     
     Admins can filter by active status and role.
     """
-    query = select(User).offset(skip).limit(limit)
+    query = select(User).options(selectinload(User.twgs)).offset(skip).limit(limit)
     
     if is_active is not None:
         query = query.where(User.is_active == is_active)
@@ -79,7 +83,11 @@ async def update_user(
     """
     Update a user's details, role, or active status.
     """
-    query = select(User).where(User.id == user_id)
+    """
+    Update a user's details, role, or active status.
+    """
+    # Eager load TWGs to enable relationship update
+    query = select(User).where(User.id == user_id).options(selectinload(User.twgs))
     result = await db.execute(query)
     user = result.scalar_one_or_none()
     
@@ -103,6 +111,15 @@ async def update_user(
             )
 
     update_data = user_update.model_dump(exclude_unset=True)
+    
+    # Update TWG assignments if provided
+    if user_update.twg_ids is not None:
+        twg_query = select(TWG).where(TWG.id.in_(user_update.twg_ids))
+        twg_res = await db.execute(twg_query)
+        new_twgs = twg_res.scalars().all()
+        user.twgs = new_twgs  # Update relationship
+        
+    update_data = user_update.model_dump(exclude_unset=True, exclude={'twg_ids'})
     
     for field, value in update_data.items():
         setattr(user, field, value)
@@ -142,3 +159,69 @@ async def delete_user(
     await db.commit()
     
     return None
+
+
+@router.post("/invite", response_model=UserInviteResponse, status_code=status.HTTP_201_CREATED)
+async def invite_user(
+    invite_data: UserInvite,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin)
+):
+    """
+    Invite a new user (Admin only).
+    
+    Creates a user account with a temporary password and optionally sends
+    an invitation email.
+    """
+    from app.services.auth_service import AuthService
+    from app.schemas.auth import UserRegister
+    
+    # Generate secure temporary password
+    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
+    temp_password = ''.join(secrets.choice(alphabet) for _ in range(16))
+    
+    # Check if user already exists
+    existing = await db.execute(select(User).where(User.email == invite_data.email))
+    if existing.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User with this email already exists"
+        )
+    
+    # Create user via auth service
+    auth_service = AuthService(db)
+    user_register = UserRegister(
+        email=invite_data.email,
+        password=temp_password,
+        full_name=invite_data.full_name,
+        organization=invite_data.organization
+    )
+    
+    user, _, _ = await auth_service.register_user(user_register)
+    
+    # Update role
+    user.role = invite_data.role
+    
+    # Assign TWGs if provided
+    if invite_data.twg_ids:
+        twg_query = select(TWG).where(TWG.id.in_(invite_data.twg_ids))
+        twg_res = await db.execute(twg_query)
+        user.twgs = twg_res.scalars().all()
+    
+    await db.commit()
+    await db.refresh(user)
+    
+    # TODO: Send invitation email with temporary password
+    # For now, just return the password (admin must communicate it)
+    invite_sent = False
+    if invite_data.send_email:
+        # Email sending logic would go here
+        # invite_sent = await send_invite_email(user.email, temp_password)
+        pass
+    
+    return UserInviteResponse(
+        user_id=user.id,
+        email=user.email,
+        temporary_password=temp_password,
+        invite_sent=invite_sent
+    )

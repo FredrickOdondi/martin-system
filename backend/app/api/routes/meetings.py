@@ -5,12 +5,13 @@ from typing import List
 import uuid
 
 from app.core.database import get_db
-from app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesStatus, MeetingParticipant, RsvpStatus, ActionItem, TWG, Document
+from app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesStatus, MeetingParticipant, RsvpStatus, ActionItem, TWG, Document, MeetingStatus
 from app.schemas.schemas import (
     MeetingCreate, MeetingRead, MeetingUpdate,
     MinutesCreate, MinutesUpdate, MinutesRead,
     AgendaCreate, AgendaRead, AgendaUpdate,
-    MeetingParticipantRead, MeetingParticipantUpdate
+    MeetingParticipantRead, MeetingParticipantUpdate, MeetingParticipantCreate,
+    MeetingCancel, MeetingUpdateNotification
 )
 from app.api.deps import get_current_active_user, require_facilitator, require_twg_access, has_twg_access
 from app.services.email_service import email_service
@@ -30,15 +31,34 @@ async def create_meeting(
     Requires FACILITATOR or ADMIN role.
     User must have access to the TWG.
     """
-    # Check if facilitator has access to this TWG
-    if not has_twg_access(current_user, meeting_in.twg_id):
-        raise HTTPException(status_code=403, detail="You do not have access to manage meetings for this TWG")
+    import traceback
+    from datetime import timezone
+    from sqlalchemy.orm import selectinload
+    try:
+        # Check if facilitator has access to this TWG
+        if not has_twg_access(current_user, meeting_in.twg_id):
+            raise HTTPException(status_code=403, detail="You do not have access to manage meetings for this TWG")
 
-    db_meeting = Meeting(**meeting_in.model_dump())
-    db.add(db_meeting)
-    await db.commit()
-    await db.refresh(db_meeting)
-    return db_meeting
+        # Ensure scheduled_at is naive UTC
+        if meeting_in.scheduled_at and meeting_in.scheduled_at.tzinfo:
+             meeting_in.scheduled_at = meeting_in.scheduled_at.astimezone(timezone.utc).replace(tzinfo=None)
+
+        db_meeting = Meeting(**meeting_in.model_dump())
+        db.add(db_meeting)
+        await db.commit()
+        
+        # Eagerly load relationships to avoid MissingGreenlet during serialization
+        result = await db.execute(
+            select(Meeting)
+            .options(selectinload(Meeting.participants))
+            .where(Meeting.id == db_meeting.id)
+        )
+        db_meeting = result.scalar_one()
+        return db_meeting
+    except Exception as e:
+        with open("debug_error.log", "w") as f:
+            f.write(traceback.format_exc())
+        raise e
 
 @router.get("/", response_model=List[MeetingRead])
 async def list_meetings(
@@ -215,7 +235,7 @@ async def schedule_meeting_trigger(
     """
     # Verify meeting exists and access rights
     query = select(Meeting).where(Meeting.id == meeting_id).options(
-        selectinload(Meeting.participants),
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
         selectinload(Meeting.twg)
     )
 
@@ -236,10 +256,15 @@ async def schedule_meeting_trigger(
 
     # Send emails
     participant_emails = []
-    # db_meeting.participants is now List[User] objects
-    for user in db_meeting.participants:
-        if user.email:
-            participant_emails.append(user.email)
+    
+    # Iterate through MeetingParticipant objects
+    for participant in db_meeting.participants:
+        # Check if registered user
+        if participant.user and participant.user.email:
+             participant_emails.append(participant.user.email)
+        # Check if external guest with email
+        elif participant.email:
+             participant_emails.append(participant.email)
             
     # Remove duplicates
     participant_emails = list(set(participant_emails))
@@ -257,7 +282,7 @@ async def schedule_meeting_trigger(
                 "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC"),
                 "location": db_meeting.location or "Virtual",
                 "pillar_name": db_meeting.twg.pillar.value,
-                "portal_url": "https://summit.ecowas.int/twg/portal" # Placeholder
+                "portal_url": "http://localhost:5173/schedule"  # TODO: Use settings.FRONTEND_URL in production
             },
             meeting_details={
                 "title": db_meeting.title,
@@ -267,27 +292,319 @@ async def schedule_meeting_trigger(
             }
         )
     except Exception as e:
-        # Log error but don't fail the whole request? 
-        # Actually, for scheduling, we want to know if it failed.
+        # Log full traceback for debugging
+        import traceback
+        with open("debug_error.log", "w") as f:
+            f.write(f"Schedule Meeting Error:\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to send invitations: {str(e)}")
 
     await db.commit()
+    await db.commit()
     return {"status": "successfully scheduled", "emails_sent": len(participant_emails)}
 
-# TODO: Refactor participant management to work with many-to-many User relationship
-# The MeetingParticipant model no longer exists - participants are now User objects
-# @router.post("/{meeting_id}/participants", response_model=List[MeetingParticipantRead])
-# async def add_participants(
-#     meeting_id: uuid.UUID,
-#     participants: List[MeetingParticipantCreate],
-#     current_user: User = Depends(require_facilitator),
-#     db: AsyncSession = Depends(get_db)
-# ):
-#     """
-#     Add participants (users or external guests) to a meeting.
-#     """
-#     # Needs refactoring for new model structure
-#     pass
+
+@router.post("/{meeting_id}/cancel", status_code=status.HTTP_200_OK)
+async def cancel_meeting(
+    meeting_id: uuid.UUID,
+    cancel_data: MeetingCancel,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Cancel a meeting and send cancellation notices with ICS cancellation.
+    """
+    query = select(Meeting).where(Meeting.id == meeting_id).options(
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+        selectinload(Meeting.twg)
+    )
+    result = await db.execute(query)
+    db_meeting = result.scalar_one_or_none()
+
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Update status to cancelled
+    db_meeting.status = MeetingStatus.CANCELLED
+    
+    emails_sent = 0
+    if cancel_data.notify_participants and db_meeting.participants:
+        # Collect emails
+        participant_emails = []
+        for participant in db_meeting.participants:
+            if participant.user and participant.user.email:
+                participant_emails.append(participant.user.email)
+            elif participant.email:
+                participant_emails.append(participant.email)
+        
+        participant_emails = list(set(participant_emails))
+
+        if participant_emails:
+            from app.services.email_service import email_service
+            try:
+                await email_service.send_meeting_cancellation(
+                    to_emails=participant_emails,
+                    template_context={
+                        "user_name": "Valued Participant",
+                        "meeting_title": db_meeting.title,
+                        "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d") if db_meeting.scheduled_at else "TBD",
+                        "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC") if db_meeting.scheduled_at else "TBD",
+                        "location": db_meeting.location or "Virtual",
+                        "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "TWG",
+                        "reason": cancel_data.reason,
+                        "portal_url": "http://localhost:5173/schedule"
+                    },
+                    meeting_details={
+                        "title": db_meeting.title,
+                        "start_time": db_meeting.scheduled_at or datetime.now(),
+                        "duration": db_meeting.duration_minutes,
+                        "location": db_meeting.location
+                    },
+                    reason=cancel_data.reason
+                )
+                emails_sent = len(participant_emails)
+            except Exception as e:
+                # Log but don't fail the cancellation
+                print(f"Failed to send cancellation emails: {str(e)}")
+
+    await db.commit()
+    return {"status": "cancelled", "emails_sent": emails_sent}
+
+
+@router.post("/{meeting_id}/notify-update", status_code=status.HTTP_200_OK)
+async def notify_meeting_update(
+    meeting_id: uuid.UUID,
+    update_data: MeetingUpdateNotification,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Send an update notification to participants with updated ICS details.
+    This should be called after modifying meeting details.
+    """
+    query = select(Meeting).where(Meeting.id == meeting_id).options(
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+        selectinload(Meeting.twg)
+    )
+    result = await db.execute(query)
+    db_meeting = result.scalar_one_or_none()
+
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    emails_sent = 0
+    if update_data.notify_participants and db_meeting.participants:
+        # Collect emails
+        participant_emails = []
+        for participant in db_meeting.participants:
+            if participant.user and participant.user.email:
+                participant_emails.append(participant.user.email)
+            elif participant.email:
+                participant_emails.append(participant.email)
+        
+        participant_emails = list(set(participant_emails))
+
+        if participant_emails:
+            from app.services.email_service import email_service
+            try:
+                await email_service.send_meeting_update(
+                    to_emails=participant_emails,
+                    template_context={
+                        "user_name": "Valued Participant",
+                        "meeting_title": db_meeting.title,
+                        "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d") if db_meeting.scheduled_at else "TBD",
+                        "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC") if db_meeting.scheduled_at else "TBD",
+                        "location": db_meeting.location or "Virtual",
+                        "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "TWG",
+                        "changes": update_data.changes,
+                        "portal_url": "http://localhost:5173/schedule"
+                    },
+                    meeting_details={
+                        "title": db_meeting.title,
+                        "start_time": db_meeting.scheduled_at or datetime.now(),
+                        "duration": db_meeting.duration_minutes,
+                        "location": db_meeting.location
+                    },
+                    changes=update_data.changes
+                )
+                emails_sent = len(participant_emails)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to send update emails: {str(e)}")
+
+    return {"status": "notification_sent", "emails_sent": emails_sent}
+
+
+@router.post("/{meeting_id}/conflict-check")
+async def check_meeting_conflicts(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Check for scheduling conflicts before sending invites.
+    Scans for:
+    - VIP double-bookings (same participant in two meetings at same time)
+    - Venue conflicts (same location booked at same time)
+    - TWG member overlaps (key members in conflicting meetings)
+    
+    This is the Supervisor Agent's "Air Traffic Control" function.
+    """
+    from datetime import timedelta
+    
+    # Get the meeting with participants
+    result = await db.execute(
+        select(Meeting)
+        .options(
+            selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+            selectinload(Meeting.twg)
+        )
+        .where(Meeting.id == meeting_id)
+    )
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check if meeting has a scheduled time
+    if not db_meeting.scheduled_at:
+        return {
+            "meeting_id": str(meeting_id),
+            "conflicts": [],
+            "has_conflicts": False,
+            "can_proceed": True,
+            "message": "Meeting has no scheduled time - skipping conflict check"
+        }
+    
+    conflicts = []
+    meeting_start = db_meeting.scheduled_at
+    meeting_end = meeting_start + timedelta(minutes=db_meeting.duration_minutes or 60)
+    
+    # Get all other meetings that overlap in time
+    overlapping_query = select(Meeting).options(
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+        selectinload(Meeting.twg)
+    ).where(
+        Meeting.id != meeting_id,
+        Meeting.scheduled_at < meeting_end,
+        (Meeting.scheduled_at + timedelta(minutes=60)) > meeting_start  # Approximate end time
+    )
+    
+    overlapping_result = await db.execute(overlapping_query)
+    overlapping_meetings = overlapping_result.scalars().all()
+    
+    # Build list of participant emails/IDs for this meeting
+    this_meeting_participants = set()
+    for p in db_meeting.participants:
+        if p.user_id:
+            this_meeting_participants.add(str(p.user_id))
+        if p.email:
+            this_meeting_participants.add(p.email.lower())
+    
+    for other_meeting in overlapping_meetings:
+        # Check 1: Venue conflicts
+        if db_meeting.location and other_meeting.location:
+            if db_meeting.location.lower().strip() == other_meeting.location.lower().strip():
+                conflicts.append({
+                    "type": "venue_conflict",
+                    "severity": "high",
+                    "message": f"Venue '{db_meeting.location}' is already booked",
+                    "conflicting_meeting": {
+                        "id": str(other_meeting.id),
+                        "title": other_meeting.title,
+                        "time": other_meeting.scheduled_at.isoformat() if other_meeting.scheduled_at else None,
+                        "twg": other_meeting.twg.name if other_meeting.twg else None
+                    }
+                })
+        
+        # Check 2: Participant double-booking
+        other_participants = set()
+        for p in other_meeting.participants:
+            if p.user_id:
+                other_participants.add(str(p.user_id))
+            if p.email:
+                other_participants.add(p.email.lower())
+        
+        overlapping_people = this_meeting_participants & other_participants
+        if overlapping_people:
+            # Determine if any are VIPs (for now, treat all as important)
+            for person_id in overlapping_people:
+                # Try to find the name
+                person_name = person_id
+                for p in db_meeting.participants:
+                    if str(p.user_id) == person_id or (p.email and p.email.lower() == person_id):
+                        person_name = p.user.full_name if p.user else (p.name or p.email)
+                        break
+                
+                conflicts.append({
+                    "type": "participant_conflict",
+                    "severity": "high",
+                    "message": f"'{person_name}' is scheduled for another meeting at this time",
+                    "conflicting_meeting": {
+                        "id": str(other_meeting.id),
+                        "title": other_meeting.title,
+                        "time": other_meeting.scheduled_at.isoformat() if other_meeting.scheduled_at else None,
+                        "twg": other_meeting.twg.name if other_meeting.twg else None
+                    }
+                })
+    
+    return {
+        "meeting_id": str(meeting_id),
+        "conflicts": conflicts,
+        "has_conflicts": len(conflicts) > 0,
+        "can_proceed": True,  # Allow override with acknowledgment
+        "message": f"Found {len(conflicts)} potential conflict(s)" if conflicts else "No conflicts detected"
+    }
+
+@router.post("/{meeting_id}/participants", response_model=List[MeetingParticipantRead])
+async def add_participants(
+    meeting_id: uuid.UUID,
+    participants: List[MeetingParticipantCreate],
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Add participants (users or external guests) to a meeting.
+    """
+    # Verify meeting exists
+    result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+        
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    new_participants = []
+    
+    for p_in in participants:
+         # logic to check duplicates could go here
+         
+         db_p = MeetingParticipant(
+             meeting_id=meeting_id,
+             user_id=p_in.user_id,
+             email=p_in.email,
+             name=p_in.name,
+             rsvp_status=RsvpStatus.PENDING
+         )
+         db.add(db_p)
+         new_participants.append(db_p)
+         
+    await db.commit()
+    
+    # Refresh to return
+    for p in new_participants:
+        await db.refresh(p)
+        
+    return new_participants
 
 @router.post("/{meeting_id}/agenda", response_model=AgendaRead)
 async def upsert_agenda(
@@ -321,6 +638,60 @@ async def upsert_agenda(
     await db.commit()
     await db.refresh(db_agenda)
     return db_agenda
+
+
+@router.post("/{meeting_id}/agenda/generate")
+async def generate_agenda(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate a draft agenda using AI agent based on meeting context and TWG pillar.
+    """
+    from app.agents.langgraph_base_agent import create_langgraph_agent
+    
+    # Get meeting with TWG info
+    result = await db.execute(
+        select(Meeting)
+        .options(selectinload(Meeting.twg))
+        .where(Meeting.id == meeting_id)
+    )
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Determine agent based on TWG pillar
+    pillar = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
+    agent_id = pillar.split("_")[0]  # e.g., "energy" from "energy_infrastructure"
+    
+    # Create agent and generate agenda
+    agent = create_langgraph_agent(agent_id=agent_id, session_id=str(meeting_id))
+    
+    prompt = f"""Generate a professional meeting agenda for the following TWG session:
+
+Meeting Title: {db_meeting.title}
+Date: {db_meeting.scheduled_at.strftime('%Y-%m-%d %H:%M UTC') if db_meeting.scheduled_at else 'TBD'}
+Duration: {db_meeting.duration_minutes} minutes
+Location: {db_meeting.location or 'Virtual'}
+TWG Pillar: {pillar}
+
+Create a structured agenda with:
+1. Opening/Welcome (5 min)
+2. Review of previous action items (10 min)
+3. Main discussion topics relevant to the {pillar} pillar (use ECOWAS Vision 2050 context)
+4. Action items and next steps
+5. Closing remarks
+
+Format as a clean, numbered list ready for distribution."""
+
+    generated_content = agent.chat(prompt)
+    
+    return {"generated_agenda": generated_content}
 
 
 @router.put("/{meeting_id}/participants/{participant_id}/rsvp", response_model=MeetingParticipantRead)
@@ -487,6 +858,158 @@ async def create_or_update_minutes(
         return db_minutes
 
 
+@router.post("/{meeting_id}/minutes/generate")
+async def generate_minutes(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate draft meeting minutes using AI agent based on transcript or agenda.
+    """
+    from app.agents.langgraph_base_agent import create_langgraph_agent
+    
+    # Get meeting with TWG and agenda info
+    result = await db.execute(
+        select(Meeting)
+        .options(selectinload(Meeting.twg), selectinload(Meeting.agenda))
+        .where(Meeting.id == meeting_id)
+    )
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Determine agent based on TWG pillar
+    pillar = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
+    agent_id = pillar.split("_")[0]
+    
+    # Create agent and generate minutes
+    agent = create_langgraph_agent(agent_id=agent_id, session_id=str(meeting_id))
+    
+    # Use transcript if available, otherwise use agenda
+    context = db_meeting.transcript if db_meeting.transcript else ""
+    agenda_content = db_meeting.agenda.content if db_meeting.agenda else ""
+    
+    prompt = f"""Generate professional meeting minutes for the following TWG session:
+
+Meeting Title: {db_meeting.title}
+Date: {db_meeting.scheduled_at.strftime('%Y-%m-%d %H:%M UTC') if db_meeting.scheduled_at else 'TBD'}
+Duration: {db_meeting.duration_minutes} minutes
+Location: {db_meeting.location or 'Virtual'}
+TWG Pillar: {pillar}
+
+Agenda:
+{agenda_content}
+
+{f"Transcript/Notes:{chr(10)}{context}" if context else "No transcript available - generate based on typical ECOWAS TWG proceedings."}
+
+Create structured meeting minutes with:
+1. Meeting Header (Title, Date, Location, Attendees placeholder)
+2. Opening and Welcome
+3. Discussion Points (based on agenda or transcript)
+4. Key Decisions Made
+5. Action Items (with Owner and Due Date placeholders)
+6. Next Steps
+7. Closing
+
+Format professionally for official ECOWAS documentation."""
+
+    generated_content = agent.chat(prompt)
+    
+    return {"generated_minutes": generated_content}
+
+
+@router.post("/{meeting_id}/minutes/submit-for-approval")
+async def submit_minutes_for_approval(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Submit minutes for approval. Changes status from DRAFT to PENDING_APPROVAL.
+    Human oversight gate: Nothing is finalized until explicitly approved.
+    """
+    # Get meeting and minutes
+    result = await db.execute(
+        select(Meeting)
+        .options(selectinload(Meeting.minutes))
+        .where(Meeting.id == meeting_id)
+    )
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if not db_meeting.minutes:
+        raise HTTPException(status_code=400, detail="No minutes to submit")
+    
+    if db_meeting.minutes.status != MinutesStatus.DRAFT:
+        raise HTTPException(status_code=400, detail=f"Minutes must be in DRAFT status to submit. Current: {db_meeting.minutes.status.value}")
+    
+    # Update status
+    db_meeting.minutes.status = MinutesStatus.PENDING_APPROVAL
+    await db.commit()
+    await db.refresh(db_meeting.minutes)
+    
+    return {
+        "message": "Minutes submitted for approval",
+        "status": db_meeting.minutes.status.value,
+        "meeting_id": str(meeting_id)
+    }
+
+
+@router.post("/{meeting_id}/minutes/approve")
+async def approve_minutes(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(require_facilitator),  # Could be require_admin for stricter control
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Approve minutes. Changes status from PENDING_APPROVAL to APPROVED.
+    This is the human oversight gate - nothing is official until approved.
+    """
+    # Get meeting and minutes
+    result = await db.execute(
+        select(Meeting)
+        .options(selectinload(Meeting.minutes))
+        .where(Meeting.id == meeting_id)
+    )
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if not db_meeting.minutes:
+        raise HTTPException(status_code=400, detail="No minutes to approve")
+    
+    if db_meeting.minutes.status != MinutesStatus.PENDING_APPROVAL:
+        raise HTTPException(status_code=400, detail=f"Minutes must be PENDING_APPROVAL to approve. Current: {db_meeting.minutes.status.value}")
+    
+    # Approve
+    db_meeting.minutes.status = MinutesStatus.APPROVED
+    await db.commit()
+    await db.refresh(db_meeting.minutes)
+    
+    # TODO: Optionally send notification email to participants
+    
+    return {
+        "message": "Minutes approved",
+        "status": db_meeting.minutes.status.value,
+        "meeting_id": str(meeting_id),
+        "approved_by": current_user.full_name
+    }
+
+
 # ==================== ACTION ITEMS ENDPOINTS ====================
 
 @router.get("/{meeting_id}/action-items", response_model=List[dict])
@@ -568,6 +1091,128 @@ async def create_action_item(
         },
         "dueDate": db_action.due_date.strftime("%b %d, %Y") if db_action.due_date else None,
         "status": db_action.status.value if db_action.status else "pending"
+    }
+
+
+@router.post("/{meeting_id}/extract-actions")
+async def extract_action_items(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Use AI to extract action items from meeting minutes and create ActionItem records.
+    """
+    from app.agents.langgraph_base_agent import create_langgraph_agent
+    import json
+    import re
+    
+    # Get meeting with minutes
+    result = await db.execute(
+        select(Meeting)
+        .options(selectinload(Meeting.twg), selectinload(Meeting.minutes))
+        .where(Meeting.id == meeting_id)
+    )
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    minutes_content = ""
+    if db_meeting.minutes:
+        minutes_content = db_meeting.minutes.content
+    elif db_meeting.transcript:
+        minutes_content = db_meeting.transcript
+    
+    if not minutes_content:
+        raise HTTPException(status_code=400, detail="No minutes or transcript available to extract actions from")
+    
+    # Create agent to extract action items
+    pillar = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
+    agent_id = pillar.split("_")[0]
+    agent = create_langgraph_agent(agent_id=agent_id, session_id=str(meeting_id))
+    
+    prompt = f"""Extract action items from the following meeting minutes.
+
+Meeting: {db_meeting.title}
+
+Minutes:
+{minutes_content}
+
+Return ONLY a JSON array of action items, each with:
+- "description": the action item text
+- "owner": suggested owner name (or "TBD" if unclear)
+- "due_date": suggested due date in YYYY-MM-DD format (or null if unclear)
+
+Example format:
+[
+  {{"description": "Draft energy policy framework", "owner": "TBD", "due_date": "2026-02-01"}},
+  {{"description": "Review ECOWAS Vision 2050 alignment", "owner": "TBD", "due_date": null}}
+]
+
+Return ONLY valid JSON, no markdown or other text."""
+
+    response = agent.chat(prompt)
+    
+    # Parse the JSON from response
+    try:
+        # Try to find JSON array in the response
+        json_match = re.search(r'\[.*\]', response, re.DOTALL)
+        if json_match:
+            extracted_items = json.loads(json_match.group())
+        else:
+            extracted_items = json.loads(response)
+    except json.JSONDecodeError:
+        return {"extracted_actions": [], "raw_response": response, "error": "Could not parse JSON"}
+    
+    # Auto-create ActionItem records
+    created_items = []
+    for item in extracted_items:
+        try:
+            from datetime import datetime, timedelta
+            
+            # Parse due date or default to 2 weeks from now
+            due_date = None
+            if item.get("due_date"):
+                try:
+                    due_date = datetime.fromisoformat(item["due_date"])
+                except:
+                    due_date = datetime.utcnow() + timedelta(days=14)
+            else:
+                due_date = datetime.utcnow() + timedelta(days=14)
+            
+            db_action = ActionItem(
+                twg_id=db_meeting.twg_id,
+                meeting_id=meeting_id,
+                description=item.get("description", ""),
+                owner_id=current_user.id,  # Default to current user, can be reassigned
+                due_date=due_date,
+                status="PENDING"
+            )
+            db.add(db_action)
+            created_items.append({
+                "description": item.get("description"),
+                "owner": item.get("owner", "TBD"),
+                "due_date": due_date.isoformat() if due_date else None,
+                "created": True
+            })
+        except Exception as e:
+            created_items.append({
+                "description": item.get("description"),
+                "error": str(e),
+                "created": False
+            })
+    
+    await db.commit()
+    
+    return {
+        "extracted_actions": extracted_items,
+        "created_items": created_items,
+        "meeting_id": str(meeting_id),
+        "message": f"Created {len([i for i in created_items if i.get('created')])} action items"
     }
 
 

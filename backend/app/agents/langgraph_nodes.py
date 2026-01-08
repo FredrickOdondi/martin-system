@@ -207,6 +207,32 @@ I have consulted {len(responses)} TWG agents and received these responses:
     output += "-" * 70 + "\n"
     output += synthesis + "\n"
 
+    # --- CONFLICT DETECTION LAYER ---
+    # In a production system, this would be a separate node possibly running in parallel
+    if len(responses) > 1:
+        logger.info("[SYNTHESIS] Running Conflict Detection Layer...")
+        conflict_prompt = f"""
+        Review the responses above for any direct contradictions, schedule clashes, or resource conflicts.
+        
+        Responses:
+        {chr(10).join([f"{k}: {v}" for k, v in responses.items()])}
+        
+        If a significant conflict exists, respond with "CONFLICT DETECTED" and a brief explanation.
+        Otherwise, respond "NO CONFLICT".
+        """
+        
+        try:
+            # We use the same agent for detection for now
+            conflict_check = supervisor_agent.chat(conflict_prompt)
+            
+            if "CONFLICT DETECTED" in conflict_check.upper():
+                output += f"\n\n⚠️ CONFLICT PROTOCOL ACTIVATED:\n"
+                output += conflict_check
+                logger.warning(f"Conflict Detected: {conflict_check}")
+                # Future: await save_conflict_to_db(...)
+        except Exception as e:
+            logger.error(f"Conflict detection failed: {e}")
+
     state["synthesized_response"] = synthesis
     state["final_response"] = output
 
