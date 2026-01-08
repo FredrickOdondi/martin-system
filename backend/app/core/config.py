@@ -25,13 +25,6 @@ class Settings(BaseSettings):
         description="Database connection string"
     )
 
-    @field_validator("DATABASE_URL", mode="before")
-    @classmethod
-    def assemble_database_url(cls, v: Optional[str]) -> str:
-        if v and v.startswith("postgresql://"):
-            return v.replace("postgresql://", "postgresql+asyncpg://")
-        return v or "sqlite+aiosqlite:///./ecowas_db.sqlite"
-
     # Redis
     REDIS_URL: Optional[str] = Field(
         default=None,
@@ -65,8 +58,15 @@ class Settings(BaseSettings):
         description="LLM request timeout in seconds"
     )
     
-    # OpenAI (from Auth implementation)
-    LLM_PROVIDER: str = Field(default="openai", description="AI provider (openai or ollama)")
+    # LLM Provider Configuration
+    LLM_PROVIDER: str = "groq"
+    LLM_MODEL: str = "llama-3.3-70b-versatile"
+    LLM_MAX_TOKENS: int = 4000
+
+    # Groq
+    GROQ_API_KEY: Optional[str] = None
+
+    # OpenAI
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-4-turbo-preview"
 
@@ -169,7 +169,7 @@ class Settings(BaseSettings):
 
     # CORS
     CORS_ORIGINS: Union[str, List[str]] = Field(
-        default=["http://localhost:5173", "http://localhost:3000", "https://frontend-production-1abb.up.railway.app"],
+        default=["http://localhost:5173", "http://localhost:3000"],
         description="Allowed CORS origins"
     )
     

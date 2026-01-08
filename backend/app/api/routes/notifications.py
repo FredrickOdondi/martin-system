@@ -4,10 +4,10 @@ from sqlalchemy import select, update, delete
 from typing import List
 import uuid
 
-from backend.app.core.database import get_db
-from backend.app.models.models import Notification, User
-from backend.app.schemas.schemas import NotificationRead, NotificationUpdate
-from backend.app.api.deps import get_current_active_user
+from app.core.database import get_db
+from app.models.models import Notification, User
+from app.schemas.schemas import NotificationRead, NotificationUpdate
+from app.api.deps import get_current_active_user
 
 router = APIRouter(prefix="/notifications", tags=["Notifications"])
 

@@ -49,23 +49,17 @@ export default function Register() {
             const user = await authService.getCurrentUser();
 
             if (user) {
-                if (!user.is_active) {
-                    navigate('/pending-approval');
-                } else {
-                    dispatch(setCredentials({
-                        user: user,
-                        token: result.access_token
-                    }));
-                    navigate('/dashboard');
-                }
+                // Admin approval disabled - all users auto-activated
+                dispatch(setCredentials({
+                    user: user,
+                    token: result.access_token
+                }));
+                navigate('/dashboard');
             }
         } catch (err: any) {
             console.error('Google login failed', err);
-            if (err.response?.status === 403) {
-                navigate('/pending-approval');
-            } else {
-                setErrors(prev => ({ ...prev, general: 'Google authentication failed. Please try again.' }));
-            }
+            // Admin approval disabled - no pending approval redirect
+            setErrors(prev => ({ ...prev, general: 'Google authentication failed. Please try again.' }));
         } finally {
             setIsLoading(false);
         }
@@ -136,29 +130,21 @@ export default function Register() {
                 organization: formData.organization
             });
 
-            // Registration successful!
-            // Assuming the backend logs us in automatically (UserWithToken response)
-            // If backend returns tokens, we can auto-login
+            // Registration successful! Admin approval disabled - auto-login
             if (response.access_token) {
                 localStorage.setItem('token', response.access_token);
 
-                // Construct user object or fetch it. The backend /register returns UserWithToken
-                // which includes the user object.
                 if (response.user) {
-                    if (!response.user.is_active) {
-                        navigate('/pending-approval');
-                    } else {
-                        dispatch(setCredentials({
-                            user: response.user,
-                            token: response.access_token
-                        }));
-                        navigate('/dashboard');
-                    }
+                    // All users are auto-activated, go straight to dashboard
+                    dispatch(setCredentials({
+                        user: response.user,
+                        token: response.access_token
+                    }));
+                    navigate('/dashboard');
                 } else {
                     navigate('/login');
                 }
             } else {
-                // If manual verification needed
                 navigate('/login');
             }
         } catch (err: any) {
