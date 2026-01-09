@@ -10,7 +10,7 @@
             "deploy": {
                 "numReplicas": 1,
                 "restartPolicy": "ALWAYS",
-                "startCommand": "sh -c 'cd /app/backend && alembic upgrade head && cd /app && uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT'"
+                "startCommand": "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
             }
         },
         "frontend": {
@@ -34,7 +34,7 @@
             "deploy": {
                 "numReplicas": 1,
                 "restartPolicy": "ALWAYS",
-                "startCommand": "celery -A backend.app.core.celery_app worker --loglevel=info"
+                "startCommand": "celery -A app.core.celery_app worker --loglevel=info"
             }
         },
         "celery-beat": {
@@ -46,7 +46,7 @@
             "deploy": {
                 "numReplicas": 1,
                 "restartPolicy": "ALWAYS",
-                "startCommand": "celery -A backend.app.core.celery_app beat --loglevel=info"
+                "startCommand": "celery -A app.core.celery_app beat --loglevel=info"
             }
         }
     }
