@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { meetings } from '../../services/api'
+import { meetings, actionItems } from '../../services/api'
 import { Card, Badge } from '../../components/ui'
 import MeetingSidebar from './components/MeetingSidebar'
-import ModernLayout from '../../layouts/ModernLayout'
+
 import ConflictModal from '../../components/modals/ConflictModal'
 import InputModal from '../../components/modals/InputModal'
+import InvitePreviewModal from '../../components/modals/InvitePreviewModal'
 import StatusModal from '../../components/modals/StatusModal'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -42,6 +43,7 @@ export default function MeetingDetail() {
     const [detectedConflicts, setDetectedConflicts] = useState<any[]>([])
     const [showCancelModal, setShowCancelModal] = useState(false)
     const [showUpdateModal, setShowUpdateModal] = useState(false)
+    const [showInvitePreviewModal, setShowInvitePreviewModal] = useState(false)
     const [isLoadingAction, setIsLoadingAction] = useState(false)
     const [statusModal, setStatusModal] = useState<{ isOpen: boolean, type: 'success' | 'error' | 'info', title: string, message: string }>({
         isOpen: false,
@@ -56,6 +58,11 @@ export default function MeetingDetail() {
     const [isExtractingActions, setIsExtractingActions] = useState(false)
     const [newActionDescription, setNewActionDescription] = useState('')
     const [newActionOwner, setNewActionOwner] = useState('')
+    const [selectedAction, setSelectedAction] = useState<any>(null)
+    const [isEditingSelected, setIsEditingSelected] = useState(false)
+    const [selectedDescription, setSelectedDescription] = useState('')
+    const [selectedOwner, setSelectedOwner] = useState('')
+    const [selectedDueDate, setSelectedDueDate] = useState('')
     const [newActionDueDate, setNewActionDueDate] = useState('')
 
     // Edit Meeting State
@@ -63,9 +70,26 @@ export default function MeetingDetail() {
     const [editDate, setEditDate] = useState('')
     const [editLocation, setEditLocation] = useState('')
 
+    // Transcript State
+    const [transcript, setTranscript] = useState('')
+    const [isSavingTranscript, setIsSavingTranscript] = useState(false)
+    const [isTranscriptExpanded, setIsTranscriptExpanded] = useState(true)
+
     // Documents State
     const [documents, setDocuments] = useState<any[]>([])
     const [isUploadingDoc, setIsUploadingDoc] = useState(false)
+
+    const handleSaveTranscript = async () => {
+        if (!meetingId) return;
+        setIsSavingTranscript(true);
+        try {
+            await meetings.update(meetingId, { transcript });
+        } catch (e) {
+            console.error("Failed to save transcript", e);
+        } finally {
+            setIsSavingTranscript(false);
+        }
+    }
 
     useEffect(() => {
         loadMeetingDetails()
@@ -78,6 +102,7 @@ export default function MeetingDetail() {
         try {
             const res = await meetings.get(meetingId)
             setMeeting(res.data)
+            setTranscript(res.data.transcript || '')
 
             // Load agenda
             try {
@@ -92,6 +117,9 @@ export default function MeetingDetail() {
                 const minutesRes = await meetings.getMinutes(meetingId)
                 setMinutesContent(minutesRes.data.content || '')
                 setMinutesStatus(minutesRes.data.status || 'draft')
+                if (minutesRes.data.content) {
+                    setIsTranscriptExpanded(false)
+                }
             } catch (e) {
                 console.log("No minutes yet")
                 setMinutesContent('')
@@ -155,6 +183,8 @@ export default function MeetingDetail() {
         try {
             const res = await meetings.generateMinutes(meetingId)
             setMinutesContent(res.data.generated_minutes)
+            setMinutesStatus('draft')
+            setIsTranscriptExpanded(false)
             setMinutesStatus('draft')  // Generated content starts as draft
         } catch (error: any) {
             console.error("Failed to generate minutes", error)
@@ -243,21 +273,38 @@ export default function MeetingDetail() {
         }
         setIsCheckingConflicts(false)
 
-        // No conflicts - proceed directly
-        await proceedWithSendingInvites()
+        // No conflicts - show HITL preview modal instead of sending directly
+        setShowInvitePreviewModal(true)
     }
 
     const proceedWithSendingInvites = async () => {
         if (!meetingId) return
         setShowConflictModal(false)
+        // After conflict resolution, also show HITL preview
+        setShowInvitePreviewModal(true)
+    }
+
+    const handleApproveAndSend = async () => {
+        if (!meetingId) return
         setIsSendingInvites(true)
         try {
-            await meetings.schedule(meetingId)
-            alert("✅ Invitations sent successfully!")
+            await meetings.approveInvite(meetingId)
+            setShowInvitePreviewModal(false)
+            setStatusModal({
+                isOpen: true,
+                type: 'success',
+                title: 'Invitations Sent',
+                message: 'Meeting invitations have been sent to all participants.'
+            })
             await loadMeetingDetails()
         } catch (error: any) {
             console.error("Failed to send invites", error)
-            alert(error?.response?.data?.detail || "Failed to send invitations")
+            setStatusModal({
+                isOpen: true,
+                type: 'error',
+                title: 'Failed to Send',
+                message: error?.response?.data?.detail || 'Failed to send invitations. Please try again.'
+            })
         } finally {
             setIsSendingInvites(false)
         }
@@ -323,11 +370,61 @@ export default function MeetingDetail() {
         }
     }
 
+    // Action Item Handlers
+    const handleActionClick = (action: any) => {
+        setSelectedAction(action)
+        setSelectedDescription(action.description)
+        setSelectedOwner(action.owner || '')
+        setSelectedDueDate(action.due_date ? action.due_date.split('T')[0] : '')
+        setIsEditingSelected(false)
+    }
+
+    const handleDeleteAction = async () => {
+        if (!selectedAction) return
+        if (!confirm('Are you sure you want to delete this action item?')) return
+
+        try {
+            setIsLoadingAction(true)
+            await actionItems.delete(selectedAction.id)
+            const res = await meetings.getActionItems(meetingId!)
+            setActionItems(res.data)
+            setSelectedAction(null)
+            setStatusModal({ isOpen: true, type: 'success', title: 'Deleted', message: 'Action item deleted' })
+        } catch (error) {
+            console.error(error)
+            setStatusModal({ isOpen: true, type: 'error', title: 'Error', message: 'Failed to delete action item' })
+        } finally {
+            setIsLoadingAction(false)
+        }
+    }
+
+    const handleUpdateAction = async () => {
+        if (!selectedAction) return
+
+        try {
+            setIsLoadingAction(true)
+            await actionItems.update(selectedAction.id, {
+                description: selectedDescription,
+                owner: selectedOwner || null,
+                due_date: selectedDueDate || null
+            })
+            const res = await meetings.getActionItems(meetingId!)
+            setActionItems(res.data)
+            setSelectedAction(null)
+            setStatusModal({ isOpen: true, type: 'success', title: 'Updated', message: 'Action item updated' })
+        } catch (error) {
+            console.error(error)
+            setStatusModal({ isOpen: true, type: 'error', title: 'Error', message: 'Failed to update action item' })
+        } finally {
+            setIsLoadingAction(false)
+        }
+    }
+
     const handleExtractActions = async () => {
         if (!meetingId || isExtractingActions) return
         setIsExtractingActions(true)
         try {
-            const res = await meetings.extractActions(meetingId)
+            const res = await meetings.extractActionItems(meetingId)
             const message = res.data.message || `Extracted ${res.data.extracted_actions?.length || 0} action items`
             const createdCount = res.data.created_items?.filter((i: any) => i.created).length || 0
 
@@ -446,7 +543,7 @@ export default function MeetingDetail() {
     if (!meeting && !loading) return null
 
     return (
-        <ModernLayout>
+        <>
             <div className="flex flex-col h-full">
 
                 {/* Conflict Warning Modal */}
@@ -489,6 +586,14 @@ export default function MeetingDetail() {
                     title={statusModal.title}
                     message={statusModal.message}
                     onClose={() => setStatusModal(prev => ({ ...prev, isOpen: false }))}
+                />
+                {/* HITL Invite Preview Modal */}
+                <InvitePreviewModal
+                    isOpen={showInvitePreviewModal}
+                    meetingId={meetingId || ''}
+                    onClose={() => setShowInvitePreviewModal(false)}
+                    onApprove={handleApproveAndSend}
+                    isApproving={isSendingInvites}
                 />
 
                 {/* Header */}
@@ -651,213 +756,263 @@ export default function MeetingDetail() {
                                     {/* MINUTES & DECISIONS TAB */}
                                     {activeTab === 'minutes' && (
                                         <div className="max-w-4xl space-y-6">
-                                            {/* AI Summary Widget */}
-                                            <Card className="p-6 bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
-                                                <div className="flex items-start gap-4">
-                                                    <div className="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center shrink-0">
-                                                        <svg className="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                                        </svg>
-                                                    </div>
-                                                    <div className="flex-1">
-                                                        <h3 className="font-bold text-blue-900 dark:text-blue-100 mb-1">AI Meeting Summary Available</h3>
-                                                        <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
-                                                            The AI agent has processed the transcript and generated a draft of the minutes, decisions, and action items. Please review before approving.
-                                                        </p>
-                                                        <button
-                                                            onClick={handleGenerateSummary}
-                                                            disabled={isGeneratingMinutes}
-                                                            className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50"
-                                                        >
-                                                            {isGeneratingMinutes ? "⏳ Generating..." : "✨ Generate Minutes →"}
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </Card>
-
-                                            {/* Minutes Content */}
-                                            <div>
-                                                <div className="flex items-center justify-between mb-4">
-                                                    <div className="flex items-center gap-3">
-                                                        <h2 className="text-xl font-bold text-slate-900 dark:text-white">Meeting Minutes</h2>
-                                                        {/* Status Badge */}
-                                                        <span className={`px-2 py-1 text-xs font-bold rounded-full ${minutesStatus === 'approved' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-                                                            minutesStatus === 'pending_approval' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                                                                'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                                                            }`}>
-                                                            {minutesStatus === 'approved' ? '✓ Approved' :
-                                                                minutesStatus === 'pending_approval' ? '⏳ Pending Approval' :
-                                                                    '📝 Draft'}
-                                                        </span>
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        {/* Show Submit for Approval if DRAFT */}
-                                                        {minutesStatus === 'draft' && minutesContent && (
-                                                            <button
-                                                                onClick={handleSubmitForApproval}
-                                                                disabled={isSubmittingForApproval}
-                                                                className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50"
-                                                            >
-                                                                {isSubmittingForApproval ? '⏳ Submitting...' : '📤 Submit for Approval'}
-                                                            </button>
-                                                        )}
-                                                        {/* Show Approve button if PENDING_APPROVAL */}
-                                                        {minutesStatus === 'pending_approval' && (
-                                                            <button
-                                                                onClick={handleApproveMinutes}
-                                                                disabled={isApprovingMinutes}
-                                                                className="btn-primary text-sm flex items-center gap-1 disabled:opacity-50"
-                                                            >
-                                                                {isApprovingMinutes ? '⏳ Approving...' : '✅ Approve & Send'}
-                                                            </button>
-                                                        )}
-                                                        <button className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
-                                                            <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                                                            </svg>
-                                                        </button>
-                                                        <button className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
-                                                            <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                                                            </svg>
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                                <Card className="p-8">
-                                                    <div className="prose prose-slate dark:prose-invert max-w-none">
-                                                        <ReactMarkdown
-                                                            remarkPlugins={[remarkGfm]}
-                                                            components={{
-                                                                h1: ({ node, ...props }) => <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4" {...props} />,
-                                                                h2: ({ node, ...props }) => <h2 className="text-xl font-bold text-slate-800 dark:text-slate-200 mt-6 mb-3" {...props} />,
-                                                                h3: ({ node, ...props }) => <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mt-4 mb-2" {...props} />,
-                                                                ul: ({ node, ...props }) => <ul className="list-disc pl-6 mb-4 space-y-1" {...props} />,
-                                                                ol: ({ node, ...props }) => <ol className="list-decimal pl-6 mb-4 space-y-1" {...props} />,
-                                                                li: ({ node, ...props }) => <li className="text-slate-600 dark:text-slate-400" {...props} />,
-                                                                p: ({ node, ...props }) => <p className="mb-3 text-slate-600 dark:text-slate-400" {...props} />,
-                                                                strong: ({ node, ...props }) => <strong className="font-bold text-slate-800 dark:text-slate-200" {...props} />,
-                                                                table: ({ node, ...props }) => <table className="min-w-full border-collapse border border-slate-200 dark:border-slate-700 my-4" {...props} />,
-                                                                th: ({ node, ...props }) => <th className="border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-4 py-2 text-left font-bold" {...props} />,
-                                                                td: ({ node, ...props }) => <td className="border border-slate-200 dark:border-slate-700 px-4 py-2" {...props} />,
-                                                            }}
-                                                        >
-                                                            {minutesContent}
-                                                        </ReactMarkdown>
-                                                    </div>
-                                                </Card>
-                                            </div>
-
-                                            {/* Action Items */}
-                                            <div>
-                                                <div className="flex items-center justify-between mb-4">
-                                                    <h2 className="text-xl font-bold text-slate-900 dark:text-white">Action Items</h2>
-                                                    <div className="flex gap-2">
-                                                        <button
-                                                            onClick={handleExtractActions}
-                                                            disabled={isExtractingActions || !minutesContent}
-                                                            className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50"
-                                                            title="Extract action items from minutes using AI"
-                                                        >
-                                                            {isExtractingActions ? (
-                                                                <><span className="animate-spin">⏳</span> Extracting...</>
-                                                            ) : (
-                                                                <>📋 Extract from Minutes</>
-                                                            )}
-                                                        </button>
-                                                        <button onClick={() => setIsAddingAction(true)} className="btn-secondary text-sm flex items-center gap-2">
-                                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                                                            </svg>
-                                                            Add Action
-                                                        </button>
-                                                    </div>
-                                                </div>
-
-                                                {/* Add Action Form */}
-                                                {isAddingAction && (
-                                                    <Card className="p-4 mb-4 bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
-                                                        <h4 className="font-bold text-sm mb-3 text-blue-900 dark:text-blue-100">Create New Action Item</h4>
-                                                        <div className="space-y-3">
+                                            {/* Transcript Input - Only show if NOT approved */}
+                                            {minutesStatus !== 'approved' && minutesStatus !== 'APPROVED' && (
+                                                <Card className={`transition-all duration-300 ${isTranscriptExpanded ? 'p-6' : 'p-4'} border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm`}>
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className={`w-8 h-8 rounded-full flex items-center justify-center ${minutesContent ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'}`}>
+                                                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                                                </svg>
+                                                            </div>
                                                             <div>
-                                                                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Description *</label>
-                                                                <textarea
-                                                                    className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
-                                                                    placeholder="What needs to be done?"
-                                                                    rows={2}
-                                                                    value={newActionDescription}
-                                                                    onChange={e => setNewActionDescription(e.target.value)}
-                                                                />
+                                                                <h3 className="font-bold text-slate-900 dark:text-white text-sm">Transcript & Notes</h3>
+                                                                {!isTranscriptExpanded && <p className="text-xs text-slate-500">{transcript.length} chars / {transcript.split(/\s+/).length} words</p>}
                                                             </div>
-                                                            <div className="grid grid-cols-2 gap-3">
-                                                                <div>
-                                                                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Owner (Optional)</label>
-                                                                    <input
-                                                                        type="text"
-                                                                        className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
-                                                                        placeholder="User ID"
-                                                                        value={newActionOwner}
-                                                                        onChange={e => setNewActionOwner(e.target.value)}
-                                                                    />
-                                                                </div>
-                                                                <div>
-                                                                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Due Date (Optional)</label>
-                                                                    <input
-                                                                        type="date"
-                                                                        className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
-                                                                        value={newActionDueDate}
-                                                                        onChange={e => setNewActionDueDate(e.target.value)}
-                                                                    />
-                                                                </div>
-                                                            </div>
-                                                            <div className="flex gap-2 justify-end">
+                                                        </div>
+
+                                                        {!isTranscriptExpanded && (
+                                                            <button
+                                                                onClick={() => setIsTranscriptExpanded(true)}
+                                                                className="text-xs font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-3 py-1.5 rounded transition-colors"
+                                                            >
+                                                                Review / Edit Source
+                                                            </button>
+                                                        )}
+                                                        {isSavingTranscript && isTranscriptExpanded && <span className="text-xs text-blue-600 animate-pulse">Saving...</span>}
+                                                    </div>
+
+                                                    {isTranscriptExpanded && (
+                                                        <div className="mt-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                                                            <textarea
+                                                                className="w-full h-64 p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-blue-500 font-mono text-sm leading-relaxed resize-y mb-4 transition-all"
+                                                                placeholder="[Facilitator]: Welcome everyone. Today we are discussing..."
+                                                                value={transcript}
+                                                                onChange={(e) => setTranscript(e.target.value)}
+                                                                onBlur={handleSaveTranscript}
+                                                            />
+                                                            <div className="flex justify-end gap-3">
+                                                                {minutesContent && (
+                                                                    <button
+                                                                        onClick={() => setIsTranscriptExpanded(false)}
+                                                                        className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900"
+                                                                    >
+                                                                        Cancel
+                                                                    </button>
+                                                                )}
                                                                 <button
-                                                                    onClick={() => {
-                                                                        setIsAddingAction(false)
-                                                                        setNewActionDescription('')
-                                                                        setNewActionOwner('')
-                                                                        setNewActionDueDate('')
+                                                                    onClick={async () => {
+                                                                        await handleSaveTranscript();
+                                                                        handleGenerateSummary();
                                                                     }}
-                                                                    className="btn-secondary text-sm"
+                                                                    disabled={isGeneratingMinutes || !transcript.trim()}
+                                                                    className="btn-primary flex items-center gap-2"
                                                                 >
-                                                                    Cancel
+                                                                    {isGeneratingMinutes ? (
+                                                                        <><span className="animate-spin">⏳</span> Processing...</>
+                                                                    ) : (
+                                                                        <>{minutesContent ? '🔄 Regenerate Minutes' : '✨ Generate Minutes'}</>
+                                                                    )}
                                                                 </button>
-                                                                <button
-                                                                    onClick={handleAddAction}
-                                                                    disabled={!newActionDescription}
-                                                                    className="btn-primary text-sm"
-                                                                >
-                                                                    Create Action
+                                                            </div>
+                                                            {!minutesContent && (
+                                                                <p className="text-xs text-slate-400 mt-2 text-center">
+                                                                    Paste your notes above. The AI will cross-reference them with the Knowledge Repository to draft official minutes.
+                                                                </p>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                </Card>
+                                            )}
+
+                                            {minutesContent && (
+                                                <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
+                                                    {/* Minutes Content */}
+                                                    <div>
+                                                        <div className="flex items-center justify-between mb-4">
+                                                            <div className="flex items-center gap-3">
+                                                                <h2 className="text-xl font-bold text-slate-900 dark:text-white">Meeting Minutes</h2>
+                                                                {/* Status Badge */}
+                                                                <span className={`px-2 py-1 text-xs font-bold rounded-full ${minutesStatus === 'approved' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                                                                    minutesStatus === 'pending_approval' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                                                        'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                                                    }`}>
+                                                                    {minutesStatus === 'approved' ? '✓ Approved' :
+                                                                        minutesStatus === 'pending_approval' ? '⏳ Pending Approval' :
+                                                                            '📝 Draft'}
+                                                                </span>
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                {/* Show Submit for Approval if DRAFT */}
+                                                                {minutesStatus === 'draft' && minutesContent && (
+                                                                    <button
+                                                                        onClick={handleSubmitForApproval}
+                                                                        disabled={isSubmittingForApproval}
+                                                                        className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50"
+                                                                    >
+                                                                        {isSubmittingForApproval ? '⏳ Submitting...' : '📤 Submit for Approval'}
+                                                                    </button>
+                                                                )}
+                                                                {/* Show Approve button if PENDING_APPROVAL */}
+                                                                {minutesStatus === 'pending_approval' && (
+                                                                    <button
+                                                                        onClick={handleApproveMinutes}
+                                                                        disabled={isApprovingMinutes}
+                                                                        className="btn-primary text-sm flex items-center gap-1 disabled:opacity-50"
+                                                                    >
+                                                                        {isApprovingMinutes ? '⏳ Approving...' : '✅ Approve & Send'}
+                                                                    </button>
+                                                                )}
+                                                                <button className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
+                                                                    <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                                                                    </svg>
+                                                                </button>
+                                                                <button className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
+                                                                    <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+                                                                    </svg>
                                                                 </button>
                                                             </div>
                                                         </div>
-                                                    </Card>
-                                                )}
-
-                                                <div className="space-y-3">
-                                                    {actionItems.map(item => (
-                                                        <Card key={item.id} className="p-4">
-                                                            <div className="flex items-center gap-4">
-                                                                <input type="checkbox" className="w-5 h-5 rounded border-slate-300" />
-                                                                <div className="flex-1">
-                                                                    <div className="font-bold text-slate-900 dark:text-white">{item.description}</div>
-                                                                </div>
-                                                                <div className="flex items-center gap-3">
-                                                                    <div className="flex items-center gap-2">
-                                                                        <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">
-                                                                            {item.owner.avatar}
-                                                                        </div>
-                                                                        <span className="text-sm text-slate-600 dark:text-slate-400">{item.owner.name}</span>
-                                                                    </div>
-                                                                    <span className="text-sm text-slate-500">{item.dueDate}</span>
-                                                                    <Badge variant={item.status === 'pending' ? 'warning' : 'info'} className="text-xs">
-                                                                        {item.status === 'pending' ? 'Pending' : 'In Progress'}
-                                                                    </Badge>
-                                                                </div>
+                                                        <Card className="p-8">
+                                                            <div className="prose prose-slate dark:prose-invert max-w-none">
+                                                                <ReactMarkdown
+                                                                    remarkPlugins={[remarkGfm]}
+                                                                    components={{
+                                                                        h1: ({ node, ...props }) => <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4" {...props} />,
+                                                                        h2: ({ node, ...props }) => <h2 className="text-xl font-bold text-slate-800 dark:text-slate-200 mt-6 mb-3" {...props} />,
+                                                                        h3: ({ node, ...props }) => <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mt-4 mb-2" {...props} />,
+                                                                        ul: ({ node, ...props }) => <ul className="list-disc pl-6 mb-4 space-y-1" {...props} />,
+                                                                        ol: ({ node, ...props }) => <ol className="list-decimal pl-6 mb-4 space-y-1" {...props} />,
+                                                                        li: ({ node, ...props }) => <li className="text-slate-600 dark:text-slate-400" {...props} />,
+                                                                        p: ({ node, ...props }) => <p className="mb-3 text-slate-600 dark:text-slate-400" {...props} />,
+                                                                        strong: ({ node, ...props }) => <strong className="font-bold text-slate-800 dark:text-slate-200" {...props} />,
+                                                                        table: ({ node, ...props }) => <table className="min-w-full border-collapse border border-slate-200 dark:border-slate-700 my-4" {...props} />,
+                                                                        th: ({ node, ...props }) => <th className="border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-4 py-2 text-left font-bold" {...props} />,
+                                                                        td: ({ node, ...props }) => <td className="border border-slate-200 dark:border-slate-700 px-4 py-2" {...props} />,
+                                                                    }}
+                                                                >
+                                                                    {minutesContent}
+                                                                </ReactMarkdown>
                                                             </div>
                                                         </Card>
-                                                    ))}
+                                                    </div>
+
+                                                    {/* Action Items */}
+                                                    <div>
+                                                        <div className="flex items-center justify-between mb-4">
+                                                            <h2 className="text-xl font-bold text-slate-900 dark:text-white">Action Items</h2>
+                                                            <div className="flex gap-2">
+                                                                <button
+                                                                    onClick={handleExtractActions}
+                                                                    disabled={isExtractingActions || !minutesContent}
+                                                                    className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50"
+                                                                    title="Extract action items from minutes using AI"
+                                                                >
+                                                                    {isExtractingActions ? (
+                                                                        <><span className="animate-spin">⏳</span> Extracting...</>
+                                                                    ) : (
+                                                                        <>📋 Extract from Minutes</>
+                                                                    )}
+                                                                </button>
+                                                                <button onClick={() => setIsAddingAction(true)} className="btn-secondary text-sm flex items-center gap-2">
+                                                                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                                                                    </svg>
+                                                                    Add Action
+                                                                </button>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Add Action Form */}
+                                                        {isAddingAction && (
+                                                            <Card className="p-4 mb-4 bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800">
+                                                                <h4 className="font-bold text-sm mb-3 text-blue-900 dark:text-blue-100">Create New Action Item</h4>
+                                                                <div className="space-y-3">
+                                                                    <div>
+                                                                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Description *</label>
+                                                                        <textarea
+                                                                            className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                                                                            placeholder="What needs to be done?"
+                                                                            rows={2}
+                                                                            value={newActionDescription}
+                                                                            onChange={e => setNewActionDescription(e.target.value)}
+                                                                        />
+                                                                    </div>
+                                                                    <div className="grid grid-cols-2 gap-3">
+                                                                        <div>
+                                                                            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Owner (Optional)</label>
+                                                                            <input
+                                                                                type="text"
+                                                                                className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                                                                                placeholder="User ID"
+                                                                                value={newActionOwner}
+                                                                                onChange={e => setNewActionOwner(e.target.value)}
+                                                                            />
+                                                                        </div>
+                                                                        <div>
+                                                                            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Due Date (Optional)</label>
+                                                                            <input
+                                                                                type="date"
+                                                                                className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                                                                                value={newActionDueDate}
+                                                                                onChange={e => setNewActionDueDate(e.target.value)}
+                                                                            />
+                                                                        </div>
+                                                                    </div>
+                                                                    <div className="flex gap-2 justify-end">
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                setIsAddingAction(false)
+                                                                                setNewActionDescription('')
+                                                                                setNewActionOwner('')
+                                                                                setNewActionDueDate('')
+                                                                            }}
+                                                                            className="btn-secondary text-sm"
+                                                                        >
+                                                                            Cancel
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={handleAddAction}
+                                                                            disabled={!newActionDescription}
+                                                                            className="btn-primary text-sm"
+                                                                        >
+                                                                            Create Action
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            </Card>
+                                                        )}
+
+                                                        <div className="space-y-3">
+                                                            {actionItems.map(item => (
+                                                                <Card key={item.id} className="p-4">
+                                                                    <div className="flex items-center gap-4">
+                                                                        <input type="checkbox" className="w-5 h-5 rounded border-slate-300" />
+                                                                        <div className="flex-1">
+                                                                            <div className="font-bold text-slate-900 dark:text-white">{item.description}</div>
+                                                                        </div>
+                                                                        <div className="flex items-center gap-3">
+                                                                            <div className="flex items-center gap-2">
+                                                                                <div className="w-6 h-6 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">
+                                                                                    {item.owner.avatar}
+                                                                                </div>
+                                                                                <span className="text-sm text-slate-600 dark:text-slate-400">{item.owner.name}</span>
+                                                                            </div>
+                                                                            <span className="text-sm text-slate-500">{item.dueDate}</span>
+                                                                            <Badge variant={item.status === 'pending' ? 'warning' : 'info'} className="text-xs">
+                                                                                {item.status === 'pending' ? 'Pending' : 'In Progress'}
+                                                                            </Badge>
+                                                                        </div>
+                                                                    </div>
+                                                                </Card>
+                                                            ))}
+                                                        </div>
+                                                    </div>
                                                 </div>
-                                            </div>
+                                            )}
                                         </div>
                                     )}
 
@@ -1054,61 +1209,154 @@ export default function MeetingDetail() {
             </div>
 
             {/* Edit Meeting Modal */}
-            {isEditingMeeting && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b border-slate-200 dark:border-slate-800">
-                            <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Edit Meeting</h2>
-                        </div>
-                        <div className="p-6 space-y-4">
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Meeting Title *</label>
-                                <input
-                                    type="text"
-                                    className="w-full px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                    value={editTitle}
-                                    onChange={e => setEditTitle(e.target.value)}
-                                    placeholder="Enter meeting title"
-                                />
+            {
+                isEditingMeeting && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
+                            <div className="p-6 border-b border-slate-200 dark:border-slate-800">
+                                <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Edit Meeting</h2>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Date & Time *</label>
-                                <input
-                                    type="datetime-local"
-                                    className="w-full px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                    value={editDate}
-                                    onChange={e => setEditDate(e.target.value)}
-                                />
+                            <div className="p-6 space-y-4">
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Meeting Title *</label>
+                                    <input
+                                        type="text"
+                                        className="w-full px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                        value={editTitle}
+                                        onChange={e => setEditTitle(e.target.value)}
+                                        placeholder="Enter meeting title"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Date & Time *</label>
+                                    <input
+                                        type="datetime-local"
+                                        className="w-full px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                        value={editDate}
+                                        onChange={e => setEditDate(e.target.value)}
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Location</label>
+                                    <input
+                                        type="text"
+                                        className="w-full px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                        value={editLocation}
+                                        onChange={e => setEditLocation(e.target.value)}
+                                        placeholder="Meeting location or video link"
+                                    />
+                                </div>
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 mb-2">Location</label>
-                                <input
-                                    type="text"
-                                    className="w-full px-4 py-2 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                    value={editLocation}
-                                    onChange={e => setEditLocation(e.target.value)}
-                                    placeholder="Meeting location or video link"
-                                />
+                            <div className="p-6 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
+                                <button
+                                    onClick={() => setIsEditingMeeting(false)}
+                                    className="btn-secondary"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleUpdateMeeting}
+                                    disabled={!editTitle || !editDate}
+                                    className="btn-primary"
+                                >
+                                    Save Changes
+                                </button>
                             </div>
-                        </div>
-                        <div className="p-6 border-t border-slate-200 dark:border-slate-800 flex justify-end gap-3">
-                            <button
-                                onClick={() => setIsEditingMeeting(false)}
-                                className="btn-secondary"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                onClick={handleUpdateMeeting}
-                                disabled={!editTitle || !editDate}
-                                className="btn-primary"
-                            >
-                                Save Changes
-                            </button>
                         </div>
                     </div>
-                </div>
-            )}
-        </ModernLayout>
+                )
+            }
+            {/* Action Item Detail Modal */}
+            {
+                selectedAction && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setSelectedAction(null)}>
+                        <div className="bg-white dark:bg-slate-900 rounded-lg shadow-xl max-w-md w-full p-6" onClick={e => e.stopPropagation()}>
+                            <div className="flex justify-between items-start mb-4">
+                                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Action Item Details</h3>
+                                <button onClick={() => setSelectedAction(null)} className="text-slate-400 hover:text-slate-500">
+                                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            {isEditingSelected ? (
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Description</label>
+                                        <textarea
+                                            className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-sm"
+                                            rows={3}
+                                            value={selectedDescription}
+                                            onChange={e => setSelectedDescription(e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Owner</label>
+                                            <input
+                                                type="text"
+                                                className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-sm"
+                                                value={selectedOwner}
+                                                onChange={e => setSelectedOwner(e.target.value)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">Due Date</label>
+                                            <input
+                                                type="date"
+                                                className="w-full px-3 py-2 rounded-md border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-800 text-sm"
+                                                value={selectedDueDate}
+                                                onChange={e => setSelectedDueDate(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end gap-2 mt-4">
+                                        <button onClick={() => setIsEditingSelected(false)} className="btn-secondary text-sm">Cancel</button>
+                                        <button onClick={handleUpdateAction} className="btn-primary text-sm" disabled={isLoadingAction}>Save Changes</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-md border border-slate-100 dark:border-slate-700">
+                                        <p className="text-sm text-slate-800 dark:text-slate-200 whitespace-pre-wrap">{selectedAction.description}</p>
+                                    </div>
+                                    <div className="flex justify-between text-sm">
+                                        <div>
+                                            <span className="text-slate-500 block text-xs uppercase tracking-wider font-bold mb-1">Owner</span>
+                                            <div className="flex items-center gap-2">
+                                                <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white ${selectedAction.owner ? 'bg-indigo-500' : 'bg-slate-400'}`}>
+                                                    {selectedAction.owner ? selectedAction.owner.charAt(0).toUpperCase() : '?'}
+                                                </div>
+                                                <span className="font-medium text-slate-700 dark:text-slate-300">{selectedAction.owner || 'Unassigned'}</span>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <span className="text-slate-500 block text-xs uppercase tracking-wider font-bold mb-1">Due Date</span>
+                                            <span className="font-medium text-slate-700 dark:text-slate-300">{selectedAction.due_date ? new Date(selectedAction.due_date).toLocaleDateString() : 'None'}</span>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-between items-center pt-4 border-t border-slate-200 dark:border-slate-700 mt-4">
+                                        <button onClick={handleDeleteAction} className="text-red-600 hover:text-red-700 text-sm font-medium flex items-center gap-1">
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                            Delete
+                                        </button>
+                                        <button onClick={() => setIsEditingSelected(true)} className="btn-secondary text-sm flex items-center gap-2">
+                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                            </svg>
+                                            Edit Action
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )
+            }
+
+        </>
     )
 }

@@ -71,7 +71,17 @@ async def startup_event():
     url_list = [{"path": route.path, "name": route.name} for route in app.routes]
     for route in url_list:
         logger.info(f"  {route['path']} ({route['name']})")
+
+    # Start Scheduler
+    from app.services.scheduler import scheduler_service
+    scheduler_service.start()
+
     logger.info("--- END STARTUP DIAGNOSTICS ---")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    from app.services.scheduler import scheduler_service
+    scheduler_service.shutdown()
 
 # Register routers
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}")

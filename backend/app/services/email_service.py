@@ -81,7 +81,8 @@ class EmailService:
         subject: str,
         template_name: str,
         template_context: Dict[str, Any],
-        meeting_details: Dict[str, Any]
+        meeting_details: Dict[str, Any],
+        attachments: List[Dict[str, Any]] = None
     ):
         """
         Sends a meeting invitation with an ICS attachment.
@@ -109,7 +110,8 @@ class EmailService:
                 subject=subject,
                 html_content=html_content,
                 ics_content=ics_content,
-                ics_filename="invite.ics"
+                ics_filename="invite.ics",
+                extra_attachments=attachments
             )
         else:
             return await self._send_via_smtp(
@@ -117,7 +119,8 @@ class EmailService:
                 subject=subject,
                 html_content=html_content,
                 ics_content=ics_content,
-                ics_filename="invite.ics"
+                ics_filename="invite.ics",
+                extra_attachments=attachments
             )
 
     async def send_meeting_update(
@@ -164,6 +167,123 @@ class EmailService:
                 html_content=html_content,
                 ics_content=ics_content,
                 ics_filename="meeting_update.ics"
+            )
+
+    async def send_meeting_reminder(
+        self,
+        to_emails: List[str],
+        template_context: Dict[str, Any],
+        meeting_details: Dict[str, Any]
+    ):
+        """
+        Sends a meeting reminder email.
+        """
+        template = self.jinja_env.get_template("meeting_reminder.html")
+        html_content = template.render(**template_context)
+        
+        ics_content = self._create_calendar_invite(
+            title=meeting_details['title'],
+            description=meeting_details.get('description', ''),
+            start_time=meeting_details['start_time'],
+            duration_minutes=meeting_details.get('duration', 60),
+            location=meeting_details.get('location'),
+            attendees=to_emails
+        )
+
+        subject = f"REMINDER: {meeting_details['title']}"
+
+        if not settings.EMAILS_ENABLED:
+            print(f"[EmailService] Emails disabled. Would send reminder to: {to_emails}")
+            return True
+
+        if self.use_resend:
+            return await self._send_via_resend(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                ics_content=ics_content,
+                ics_filename="reminder.ics"
+            )
+        else:
+            return await self._send_via_smtp(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                ics_content=ics_content,
+                ics_filename="reminder.ics"
+            )
+
+    async def send_minutes_nudge(
+        self,
+        to_emails: List[str],
+        template_context: Dict[str, Any]
+    ):
+        """
+        Sends a nudge to upload minutes.
+        """
+        template = self.jinja_env.get_template("minutes_nudge.html")
+        html_content = template.render(**template_context)
+        
+        subject = f"ACTION: Missing Minutes for {template_context.get('meeting_title', 'Meeting')}"
+
+        if not settings.EMAILS_ENABLED:
+            print(f"[EmailService] Emails disabled. Would send nudge to: {to_emails}")
+            return True
+
+        if self.use_resend:
+            return await self._send_via_resend(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content
+            )
+        else:
+            return await self._send_via_smtp(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content
+            )
+
+
+
+    async def send_minutes_published_email(
+        self,
+        to_emails: List[str],
+        template_context: Dict[str, Any],
+        pdf_content: bytes,
+        pdf_filename: str = "Minutes.pdf"
+    ):
+        """
+        Sends Minutes Published email with PDF attachment.
+        """
+        template = self.jinja_env.get_template("minutes_published.html")
+        html_content = template.render(**template_context)
+        
+        subject = f"OFFICIAL MINUTES: {template_context.get('meeting_title')}"
+        
+        # Prepare attachment
+        attachments = [{
+            "filename": pdf_filename,
+            "content": pdf_content,
+            "content_type": "application/pdf"
+        }]
+
+        if not settings.EMAILS_ENABLED:
+            print(f"[EmailService] Emails disabled. Would send Minutes to: {to_emails}")
+            return True
+
+        if self.use_resend:
+            return await self._send_via_resend(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                extra_attachments=attachments
+            )
+        else:
+            return await self._send_via_smtp(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                extra_attachments=attachments
             )
 
     def _create_cancel_invite(
@@ -244,7 +364,8 @@ class EmailService:
         subject: str,
         html_content: str,
         ics_content: bytes = None,
-        ics_filename: str = "invite.ics"
+        ics_filename: str = "invite.ics",
+        extra_attachments: List[Dict[str, Any]] = None
     ) -> bool:
         """
         Send email using Resend API (works on Railway).
@@ -258,6 +379,15 @@ class EmailService:
                 "content": base64.b64encode(ics_content).decode('utf-8'),
                 "content_type": "text/calendar"
             })
+            
+        if extra_attachments:
+            for attachment in extra_attachments:
+                # Expects: filename, content (bytes), content_type
+                attachments.append({
+                    "filename": attachment["filename"],
+                    "content": base64.b64encode(attachment["content"]).decode('utf-8'),
+                    "content_type": attachment["content_type"]
+                })
 
         params = {
             "from": f"{self.from_name} <{self.from_email}>",
@@ -283,7 +413,8 @@ class EmailService:
         subject: str,
         html_content: str,
         ics_content: bytes = None,
-        ics_filename: str = "invite.ics"
+        ics_filename: str = "invite.ics",
+        extra_attachments: List[Dict[str, Any]] = None
     ) -> bool:
         """
         Send email using SMTP (fallback, may not work on some cloud platforms).
@@ -308,7 +439,22 @@ class EmailService:
             encoders.encode_base64(part_ics)
             part_ics.add_header("Content-Disposition", "attachment", filename=ics_filename)
             part_ics.add_header("Content-Class", "urn:content-classes:calendarmessage")
+            part_ics.add_header("Content-Class", "urn:content-classes:calendarmessage")
             message.attach(part_ics)
+
+        if extra_attachments:
+            for attachment in extra_attachments:
+                # Expects: filename, content (bytes), content_type
+                main_type, sub_type = attachment["content_type"].split("/", 1)
+                part = MIMEBase(main_type, sub_type)
+                part.set_payload(attachment["content"])
+                encoders.encode_base64(part)
+                part.add_header(
+                    "Content-Disposition",
+                    "attachment",
+                    filename=attachment["filename"],
+                )
+                message.attach(part)
 
         with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
             if settings.SMTP_TLS:

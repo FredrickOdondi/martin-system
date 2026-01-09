@@ -7,7 +7,7 @@ import CopilotChat from '../../components/workspace/CopilotChat'
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { meetings, twgs } from '../../services/api'
-import ModernLayout from '../../layouts/ModernLayout'
+
 import CreateMeetingModal from '../../components/schedule/CreateMeetingModal'
 
 export default function TwgWorkspace() {
@@ -77,7 +77,7 @@ export default function TwgWorkspace() {
         : 'None Scheduled';
 
     return (
-        <ModernLayout>
+        <>
             <div className="flex h-[calc(100vh-140px)] gap-6">
                 <div className="flex-1 space-y-6">
                     {/* Banner Section */}
@@ -403,6 +403,6 @@ export default function TwgWorkspace() {
                 twgId={twgId}
                 onSuccess={loadMeetings}
             />
-        </ModernLayout>
+        </>
     )
 }
