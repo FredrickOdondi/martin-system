@@ -9,7 +9,7 @@ import requests
 import json
 from typing import List, Dict, Optional, Any
 from loguru import logger
-from backend.app.core.config import settings
+from app.core.config import settings
 
 try:
     from openai import OpenAI

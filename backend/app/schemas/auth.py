@@ -8,7 +8,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
 from typing import Optional
 from datetime import datetime
 import uuid
-from backend.app.models.models import UserRole
+from app.models.models import UserRole
 
 
 class UserRegister(BaseModel):
@@ -98,6 +98,7 @@ class UserResponse(BaseModel):
     is_active: bool
     last_login: Optional[datetime]
     created_at: datetime
+    twg_ids: list[uuid.UUID] = []
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -116,3 +117,4 @@ class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
     organization: Optional[str] = None
     is_active: Optional[bool] = None
+    twg_ids: Optional[list[uuid.UUID]] = None

@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Card, Badge } from '../../components/ui'
 import { meetings } from '../../services/api'
-import MeetingDetail from './MeetingDetail'
 import ModernLayout from '../../layouts/ModernLayout'
 
 export default function SummitSchedule() {
+    const navigate = useNavigate()
     const [events, setEvents] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
-    const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null)
 
     useEffect(() => {
         loadMeetings()
@@ -115,7 +115,7 @@ export default function SummitSchedule() {
 
                                     <div className="ml-24 space-y-4">
                                         {dayEvents.map((event: any, i: number) => (
-                                            <div key={i} onClick={() => setSelectedMeetingId(event.id)}>
+                                            <div key={i} onClick={() => navigate(`/meetings/${event.id}`)}>
                                                 <Card className="p-6 hover:ring-2 hover:ring-blue-500/30 transition-all cursor-pointer group">
                                                     <div className="flex gap-6">
                                                         <div className="flex flex-col items-center w-20 shrink-0">
@@ -161,12 +161,6 @@ export default function SummitSchedule() {
                             )
                         }))}
                 </div>
-                {selectedMeetingId && (
-                    <MeetingDetail
-                        meetingId={selectedMeetingId}
-                        onClose={() => setSelectedMeetingId(null)}
-                    />
-                )}
             </div>
         </ModernLayout>
     )

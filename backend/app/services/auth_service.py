@@ -13,9 +13,9 @@ import uuid
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-from backend.app.models.models import User, RefreshToken, UserRole
-from backend.app.schemas.auth import UserRegister, UserLogin
-from backend.app.utils.security import (
+from app.models.models import User, RefreshToken, UserRole
+from app.schemas.auth import UserRegister, UserLogin
+from app.utils.security import (
     hash_password,
     verify_password,
     create_access_token,
@@ -174,7 +174,7 @@ class AuthService:
         Returns:
             Tuple of (User, access_token, refresh_token)
         """
-        from backend.app.core.config import settings
+        from app.core.config import settings
         
         try:
             # Verify the ID token
@@ -231,11 +231,18 @@ class AuthService:
             
             return user, access_token, refresh_token_str
             
-        except ValueError:
+        except ValueError as e:
             # Invalid token
+            print(f"Google Auth ValueError: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid Google ID token"
+            )
+        except Exception as e:
+            print(f"Google Auth Unexpected Error: {type(e).__name__}: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Google authentication failed: {str(e)}"
             )
     
     async def refresh_access_token(self, refresh_token_str: str) -> str:
@@ -368,7 +375,7 @@ class AuthService:
     
     async def _store_refresh_token(self, user_id: uuid.UUID, token: str) -> RefreshToken:
         """Store refresh token in database."""
-        from backend.app.core.config import settings
+        from app.core.config import settings
         
         expires_at = datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
         

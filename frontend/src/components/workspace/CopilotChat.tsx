@@ -1,8 +1,15 @@
 import { useState, useRef, useEffect } from 'react';
+import { useSelector } from 'react-redux';
+import { RootState } from '../../store';
 import { ChatMessage, ChatMessageType, EnhancedChatRequest, ActionType } from '../../types/agent';
 import { useStreamingChat, StreamEvent } from '../../hooks/useStreamingChat';
+import ReactMarkdown from 'react-markdown';
 
-export default function CopilotChat() {
+export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
+    // Determine TWG Context: Use prop if available, otherwise fallback to user's primary TWG
+    const user = useSelector((state: RootState) => state.auth.user);
+    const twgId = propTwgId || (user?.role !== 'admin' ? user?.twg_ids?.[0] : undefined);
+
     const [input, setInput] = useState('');
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -51,7 +58,8 @@ export default function CopilotChat() {
 
         const request: EnhancedChatRequest = {
             message: content,
-            conversation_id: conversationId
+            conversation_id: conversationId,
+            twg_id: twgId // Pass TWG Context
         };
 
         await sendStreamingMessage(
@@ -110,8 +118,10 @@ export default function CopilotChat() {
                                 )}
                             </div>
                         )}
+
+
                         <div className={`
-                            p-3 rounded-2xl max-w-[85%] text-xs leading-relaxed transition-colors shadow-sm
+                            p-3 rounded-2xl max-w-[95%] text-xs leading-relaxed transition-colors shadow-sm
                             ${msg.sender === 'user'
                                 ? 'bg-blue-600 text-white rounded-tr-none'
                                 : msg.sender === 'system'
@@ -119,7 +129,20 @@ export default function CopilotChat() {
                                     : 'bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 rounded-tl-none border border-slate-100 dark:border-slate-700'
                             }
                         `}>
-                            <p>{msg.content}</p>
+                            <div className="prose prose-xs dark:prose-invert max-w-none">
+                                <ReactMarkdown
+                                    components={{
+                                        p: ({ node, ...props }: any) => <p className="mb-2 last:mb-0" {...props} />,
+                                        ul: ({ node, ...props }: any) => <ul className="list-disc pl-4 mb-2 space-y-1" {...props} />,
+                                        ol: ({ node, ...props }: any) => <ol className="list-decimal pl-4 mb-2 space-y-1" {...props} />,
+                                        li: ({ node, ...props }: any) => <li className="pl-1" {...props} />,
+                                        strong: ({ node, ...props }: any) => <strong className="font-bold text-slate-900 dark:text-white" {...props} />,
+                                        a: ({ node, ...props }: any) => <a className="text-blue-500 hover:underline" {...props} />
+                                    }}
+                                >
+                                    {msg.content}
+                                </ReactMarkdown>
+                            </div>
 
                             {/* Render Tool Execution Metadata */}
                             {msg.metadata?.parsed?.type === 'command_result' && (
@@ -195,7 +218,7 @@ export default function CopilotChat() {
                         onChange={(e) => setInput(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
                         placeholder="Ask Copilot to analyze, draft, or schedule..."
-                        className="w-full bg-white dark:bg-dark-elem border border-slate-200 dark:border-slate-600 rounded-xl py-3 pl-4 pr-12 text-xs font-medium text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 hover:border-blue-400 transition-all shadow-sm"
+                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl py-3 pl-4 pr-12 text-xs font-medium text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 hover:border-blue-400 transition-all shadow-sm"
                         disabled={isStreaming}
                         autoFocus
                     />

@@ -10,7 +10,7 @@ from icalendar import Calendar, Event
 from datetime import datetime, timedelta
 import pytz
 
-from backend.app.core.config import settings
+from app.core.config import settings
 
 class EmailService:
     def __init__(self):
@@ -107,6 +107,126 @@ class EmailService:
         message.attach(part_ics)
 
         # Send
+        if settings.EMAILS_ENABLED:
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                if settings.SMTP_TLS:
+                    server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.sendmail(self.from_email, to_emails, message.as_string())
+        
+        return True
+
+    async def send_meeting_update(
+        self,
+        to_emails: List[str],
+        template_context: Dict[str, Any],
+        meeting_details: Dict[str, Any],
+        changes: List[str] = None
+    ):
+        """
+        Sends a meeting update notification with an updated ICS attachment.
+        """
+        template = self.jinja_env.get_template("meeting_update.html")
+        template_context["changes"] = changes or []
+        html_content = template.render(**template_context)
+        
+        # Create updated ICS (same as REQUEST but signals update)
+        ics_content = self._create_calendar_invite(
+            title=meeting_details['title'],
+            description=meeting_details.get('description', ''),
+            start_time=meeting_details['start_time'],
+            duration_minutes=meeting_details.get('duration', 60),
+            location=meeting_details.get('location'),
+            attendees=to_emails
+        )
+
+        message = MIMEMultipart("mixed")
+        message["Subject"] = f"UPDATED: {meeting_details['title']}"
+        message["From"] = f"{self.from_name} <{self.from_email}>"
+        message["To"] = ", ".join(to_emails)
+
+        part_html = MIMEText(html_content, "html")
+        message.attach(part_html)
+
+        part_ics = MIMEBase("text", "calendar", method="REQUEST")
+        part_ics.set_payload(ics_content)
+        encoders.encode_base64(part_ics)
+        part_ics.add_header("Content-Disposition", "attachment", filename="meeting_update.ics")
+        message.attach(part_ics)
+
+        if settings.EMAILS_ENABLED:
+            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+                if settings.SMTP_TLS:
+                    server.starttls()
+                server.login(self.smtp_user, self.smtp_password)
+                server.sendmail(self.from_email, to_emails, message.as_string())
+        
+        return True
+
+    def _create_cancel_invite(
+        self,
+        title: str,
+        start_time: datetime,
+        duration_minutes: int,
+        location: Optional[str] = None
+    ) -> bytes:
+        """
+        Creates an iCalendar (.ics) cancellation notice.
+        """
+        cal = Calendar()
+        cal.add('prodid', '-//ECOWAS Summit TWG//martin-system//EN')
+        cal.add('version', '2.0')
+        cal.add('method', 'CANCEL')  # CANCEL method
+
+        event = Event()
+        event.add('summary', f"CANCELLED: {title}")
+        event.add('dtstart', start_time)
+        event.add('dtend', start_time + timedelta(minutes=duration_minutes))
+        event.add('dtstamp', datetime.now(pytz.utc))
+        event.add('status', 'CANCELLED')
+        
+        if location:
+            event.add('location', location)
+
+        cal.add_component(event)
+        return cal.to_ical()
+
+    async def send_meeting_cancellation(
+        self,
+        to_emails: List[str],
+        template_context: Dict[str, Any],
+        meeting_details: Dict[str, Any],
+        reason: str = None
+    ):
+        """
+        Sends a meeting cancellation notification with a CANCEL ICS attachment.
+        """
+        template = self.jinja_env.get_template("meeting_cancellation.html")
+        template_context["reason"] = reason
+        html_content = template.render(**template_context)
+        
+        # Create CANCEL ICS
+        ics_content = self._create_cancel_invite(
+            title=meeting_details['title'],
+            start_time=meeting_details['start_time'],
+            duration_minutes=meeting_details.get('duration', 60),
+            location=meeting_details.get('location')
+        )
+
+        message = MIMEMultipart("mixed")
+        message["Subject"] = f"CANCELLED: {meeting_details['title']}"
+        message["From"] = f"{self.from_name} <{self.from_email}>"
+        message["To"] = ", ".join(to_emails)
+
+        part_html = MIMEText(html_content, "html")
+        message.attach(part_html)
+
+        part_ics = MIMEBase("text", "calendar", method="CANCEL")
+        part_ics.set_payload(ics_content)
+        encoders.encode_base64(part_ics)
+        part_ics.add_header("Content-Disposition", "attachment", filename="cancellation.ics")
+        message.attach(part_ics)
+
         if settings.EMAILS_ENABLED:
             with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
                 if settings.SMTP_TLS:

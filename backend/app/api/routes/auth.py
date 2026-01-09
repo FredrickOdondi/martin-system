@@ -7,8 +7,8 @@ Provides endpoints for user authentication and authorization.
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.database import get_db
-from backend.app.schemas.auth import (
+from app.core.database import get_db
+from app.schemas.auth import (
     UserRegister,
     UserLogin,
     GoogleLogin,
@@ -19,36 +19,29 @@ from backend.app.schemas.auth import (
     UserResponse,
     UserWithToken
 )
-from backend.app.services.auth_service import AuthService
-from backend.app.api.deps import get_current_active_user
-from backend.app.models.models import User
+from app.services.auth_service import AuthService
+from app.api.deps import get_current_active_user
+from app.models.models import User
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
-@router.post("/register", response_model=UserWithToken, status_code=status.HTTP_201_CREATED)
+# PUBLIC REGISTRATION DISABLED - Invite-only system
+# Users must be created by administrators via /users/invite endpoint
+@router.post("/register", response_model=UserWithToken, status_code=status.HTTP_403_FORBIDDEN)
 async def register(
     user_data: UserRegister,
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Register a new user account.
+    Public registration is disabled.
     
-    - **email**: Valid email address (must be unique)
-    - **password**: Strong password (min 8 chars, uppercase, lowercase, digit, special char)
-    - **full_name**: User's full name
-    - **role**: User role (default: TWG_MEMBER)
-    - **organization**: Optional organization name
-    
-    Returns user data and authentication tokens.
+    This system uses invite-only registration. Contact your administrator
+    to receive an invitation.
     """
-    auth_service = AuthService(db)
-    user, access_token, refresh_token = await auth_service.register_user(user_data)
-    
-    return UserWithToken(
-        user=UserResponse.model_validate(user),
-        access_token=access_token,
-        refresh_token=refresh_token
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Public registration is disabled. Please contact your administrator for an invitation."
     )
 
 

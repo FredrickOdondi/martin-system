@@ -14,12 +14,13 @@ import TwgWorkspace from './pages/workspace/TwgWorkspace'
 import TwgAgent from './pages/workspace/TwgAgent'
 import ActionTracker from './pages/actions/ActionTracker'
 import KnowledgeBase from './pages/knowledge/KnowledgeBase'
-import DealPipeline from './pages/workspace/DealPipeline'
-// import ProjectDetails from './pages/workspace/ProjectDetails'
-// import ProjectMemo from './pages/workspace/ProjectMemo'
+import DealPipeline from './pages/DealPipeline'
+import ProjectDetails from './pages/ProjectDetails'
+import ProjectMemo from './pages/ProjectMemo'
 import UserProfile from './pages/profile/UserProfile'
 import AgentAssistant from './pages/assistant/AgentAssistant'
 import SummitSchedule from './pages/schedule/SummitSchedule'
+import MeetingDetail from './pages/schedule/MeetingDetail'
 import DocumentLibrary from './pages/documents/DocumentLibrary'
 import NotificationCenter from './pages/notifications/NotificationCenter'
 import TeamManagement from './pages/admin/TeamManagement'
@@ -133,14 +134,29 @@ function App() {
                     <SummitSchedule />
                 </ProtectedRoute>
             } />
+            <Route path="/meetings/:id" element={
+                <ProtectedRoute>
+                    <MeetingDetail />
+                </ProtectedRoute>
+            } />
             <Route path="/knowledge-base" element={
                 <ProtectedRoute>
                     <KnowledgeBase />
                 </ProtectedRoute>
             } />
             <Route path="/deal-pipeline" element={
-                <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.FACILITATOR, UserRole.SECRETARIAT_LEAD]}>
+                <ProtectedRoute>
                     <DealPipeline />
+                </ProtectedRoute>
+            } />
+            <Route path="/deal-pipeline/:projectId" element={
+                <ProtectedRoute>
+                    <ProjectDetails />
+                </ProtectedRoute>
+            } />
+            <Route path="/deal-pipeline/:projectId/memo" element={
+                <ProtectedRoute>
+                    <ProjectMemo />
                 </ProtectedRoute>
             } />
             <Route path="/actions" element={

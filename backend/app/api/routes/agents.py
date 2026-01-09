@@ -4,6 +4,9 @@ from typing import List, AsyncGenerator
 import uuid
 import asyncio
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.api.deps import get_current_active_user
 from app.models.models import User
@@ -261,7 +264,8 @@ async def stream_chat(
 
     async def event_generator() -> AsyncGenerator[str, None]:
         """Generate SSE events for streaming."""
-        conv_id = chat_in.conversation_id or str(uuid.uuid4())
+        # Ensure conv_id is always a string for JSON serialization
+        conv_id = str(chat_in.conversation_id) if chat_in.conversation_id else str(uuid.uuid4())
 
         try:
             # Send initial event
@@ -341,8 +345,8 @@ async def stream_chat(
                 metadata={"parsed": parsed} if parsed["type"] != MessageParseType.NATURAL else None
             )
 
-            # Send final response
-            yield f"data: {json.dumps({'type': 'response', 'message': agent_message.dict()})}\n\n"
+            # Send final response - use model_dump with mode='json' to handle UUID serialization
+            yield f"data: {json.dumps({'type': 'response', 'message': agent_message.model_dump(mode='json')})}\n\n"
 
             # Send done event
             yield f"data: {json.dumps({'type': 'done'})}\n\n"

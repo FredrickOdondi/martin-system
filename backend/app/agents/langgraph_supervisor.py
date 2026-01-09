@@ -156,6 +156,33 @@ class LangGraphSupervisor:
         # Set entry point
         workflow.set_entry_point("route_query")
 
+        # Add dispatch_multiple node for handling multiple agents
+        def dispatch_multiple_node(state: AgentState) -> AgentState:
+            """
+            Dispatch query to multiple TWG agents sequentially.
+
+            TODO: This could be parallelized using LangGraph's parallel execution
+            """
+            relevant_agents = state["relevant_agents"]
+            query = state["query"]
+
+            state["agent_responses"] = {}
+
+            for agent_id in relevant_agents:
+                if agent_id in self._twg_agents:
+                    logger.info(f"[DISPATCH] Querying {agent_id}...")
+                    try:
+                        agent = self._twg_agents[agent_id]
+                        response = agent.chat(query)
+                        state["agent_responses"][agent_id] = response
+                    except Exception as e:
+                        logger.error(f"[DISPATCH] Error with {agent_id}: {e}")
+                        state["agent_responses"][agent_id] = f"Error: {str(e)}"
+
+            return state
+
+        workflow.add_node("dispatch_multiple", dispatch_multiple_node)
+
         # Conditional routing after route_query
         def route_to_agents(state: AgentState) -> str:
             """
@@ -194,32 +221,7 @@ class LangGraphSupervisor:
             }
         )
 
-        # Add dispatch_multiple node for handling multiple agents
-        def dispatch_multiple_node(state: AgentState) -> AgentState:
-            """
-            Dispatch query to multiple TWG agents sequentially.
 
-            TODO: This could be parallelized using LangGraph's parallel execution
-            """
-            relevant_agents = state["relevant_agents"]
-            query = state["query"]
-
-            state["agent_responses"] = {}
-
-            for agent_id in relevant_agents:
-                if agent_id in self._twg_agents:
-                    logger.info(f"[DISPATCH] Querying {agent_id}...")
-                    try:
-                        agent = self._twg_agents[agent_id]
-                        response = agent.chat(query)
-                        state["agent_responses"][agent_id] = response
-                    except Exception as e:
-                        logger.error(f"[DISPATCH] Error with {agent_id}: {e}")
-                        state["agent_responses"][agent_id] = f"Error: {str(e)}"
-
-            return state
-
-        workflow.add_node("dispatch_multiple", dispatch_multiple_node)
 
         # From supervisor -> END
         workflow.add_edge("supervisor", END)

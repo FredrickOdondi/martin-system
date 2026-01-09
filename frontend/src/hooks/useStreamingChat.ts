@@ -1,6 +1,9 @@
 import { useState, useCallback, useRef } from 'react';
 import { EnhancedChatRequest } from '../types/agent';
 
+// Get API URL from environment
+const API_URL = (import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1').trim().replace('localhost', '127.0.0.1');
+
 export interface StreamEvent {
     type: string;
     conversation_id?: string;
@@ -59,7 +62,7 @@ export function useStreamingChat() {
                 abortControllerRef.current = new AbortController();
 
                 const token = localStorage.getItem('token');
-                const response = await fetch('/api/v1/agents/chat/stream', {
+                const response = await fetch(`${API_URL}/agents/chat/stream`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
