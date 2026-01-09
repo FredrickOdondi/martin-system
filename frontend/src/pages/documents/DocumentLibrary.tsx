@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import ModernLayout from '../../layouts/ModernLayout'
+
 import documentService, { Document, SearchResult } from '../../services/documentService'
 import { useAppSelector } from '../../hooks/useRedux'
 import { UserRole } from '../../types/auth'
@@ -281,7 +281,7 @@ export default function DocumentLibrary({ twgId }: { twgId?: string } = {}) {
     ];
 
     return (
-        <ModernLayout>
+        <>
             <div className="flex flex-col lg:flex-row gap-8 h-full">
                 {/* Left Sidebar Filters */}
                 <aside className="w-full lg:w-64 space-y-8">
@@ -728,6 +728,6 @@ export default function DocumentLibrary({ twgId }: { twgId?: string } = {}) {
                     </div>
                 </div>
             )}
-        </ModernLayout>
+        </>
     );
 }

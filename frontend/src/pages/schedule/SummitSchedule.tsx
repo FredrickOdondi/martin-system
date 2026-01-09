@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, Badge } from '../../components/ui'
 import { meetings } from '../../services/api'
-import ModernLayout from '../../layouts/ModernLayout'
+
 
 export default function SummitSchedule() {
     const navigate = useNavigate()
@@ -49,16 +49,14 @@ export default function SummitSchedule() {
 
     if (loading) {
         return (
-            <ModernLayout>
-                <div className="flex h-[50vh] items-center justify-center">
-                    <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                </div>
-            </ModernLayout>
+            <div className="flex h-[50vh] items-center justify-center">
+                <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+            </div>
         )
     }
 
     return (
-        <ModernLayout>
+        <>
             <div className="max-w-6xl mx-auto space-y-8">
                 <div className="flex items-center justify-between">
                     <div>
@@ -162,6 +160,6 @@ export default function SummitSchedule() {
                         }))}
                 </div>
             </div>
-        </ModernLayout>
+        </>
     )
 }

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import ModernLayout from '../../layouts/ModernLayout';
+
 import { getDashboardStats, getTimeline, exportDashboardReport, DashboardStats, TimelineItem } from '../../services/dashboardService';
 
 export default function Dashboard() {
@@ -60,19 +60,17 @@ export default function Dashboard() {
 
     if (loading) {
         return (
-            <ModernLayout>
-                <div className="flex items-center justify-center min-h-[60vh]">
-                    <div className="flex flex-col items-center gap-4">
-                        <div className="size-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-                        <p className="text-[#4c669a] font-medium">Loading Intelligence Dashboard...</p>
-                    </div>
+            <div className="flex items-center justify-center min-h-[60vh]">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="size-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-[#4c669a] font-medium">Loading Intelligence Dashboard...</p>
                 </div>
-            </ModernLayout>
+            </div>
         );
     }
 
     return (
-        <ModernLayout>
+        <>
             {/* Header Section */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                 <div>
@@ -385,6 +383,6 @@ export default function Dashboard() {
                     </div>
                 </div>
             </div>
-        </ModernLayout>
+        </>
     );
 }

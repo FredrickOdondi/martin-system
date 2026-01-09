@@ -179,6 +179,20 @@ class MeetingUpdateNotification(SchemaBase):
     changes: List[str] = []
     notify_participants: bool = True
 
+class InviteStatus(str, enum.Enum):
+    DRAFT = "draft"
+    SENT = "sent"
+    FAILED = "failed"
+
+class InvitePreview(SchemaBase):
+    """Preview of meeting invitation before sending"""
+    meeting_id: uuid.UUID
+    subject: str
+    html_content: str
+    participants: List[str]  # List of email addresses
+    ics_attached: bool = True
+    status: InviteStatus = InviteStatus.DRAFT
+
 # --- Meeting Participant Schema ---
 
 class MeetingParticipantRead(SchemaBase):

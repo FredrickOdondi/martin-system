@@ -240,6 +240,38 @@ class PineconeKnowledgeBase:
             logger.error(f"Error upserting documents: {e}")
             raise
     
+    def add_document(
+        self,
+        content: str,
+        metadata: Dict[str, Any],
+        namespace: Optional[str] = None,
+        doc_id: Optional[str] = None
+    ) -> str:
+        """
+        Add a single document to the knowledge base.
+        
+        Args:
+            content: Text content
+            metadata: Metadata dict
+            namespace: Optional namespace
+            doc_id: Optional document ID (auto-generated if None)
+            
+        Returns:
+            Document ID
+        """
+        if not doc_id:
+            import uuid
+            doc_id = str(uuid.uuid4())
+            
+        document = {
+            "id": doc_id,
+            "text": content,
+            "metadata": metadata
+        }
+        
+        self.upsert_documents([document], namespace=namespace)
+        return doc_id
+
     def search(
         self,
         query: str,
