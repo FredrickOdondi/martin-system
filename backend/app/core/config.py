@@ -193,7 +193,7 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSION: int = Field(default=768, description="Embedding dimension")
     
     # Email
-    SMTP_SERVER: str = Field(default="localhost", description="SMTP server host")
+    SMTP_HOST: str = Field(default="localhost", description="SMTP server host")
     SMTP_PORT: int = Field(default=587, description="SMTP server port")
     SMTP_USER: Optional[str] = Field(default=None, description="SMTP username")
     SMTP_PASSWORD: Optional[str] = Field(default=None, description="SMTP password")
@@ -201,25 +201,6 @@ class Settings(BaseSettings):
     EMAILS_FROM_NAME: str = Field(default="Martin (ECOWAS Summit)", description="Sender name")
     EMAILS_ENABLED: bool = Field(default=True, description="Whether emails are enabled")
     SMTP_TLS: bool = Field(default=True, description="Whether to use TLS for SMTP")
-
-    # Document Processing
-    CHUNK_SIZE: int = Field(default=500, description="Document chunk size")
-    CHUNK_OVERLAP: int = Field(default=50, description="Document chunk overlap")
-    MAX_CHUNKS_PER_DOC: int = Field(default=1000, description="Maximum chunks per document")
-    
-    @property
-    def cors_origins_list(self) -> list:
-        """Parse CORS_ORIGINS string into a list"""
-        if isinstance(self.CORS_ORIGINS, list):
-            return self.CORS_ORIGINS
-        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
-
-    # Email Settings (for future use)
-    SMTP_HOST: Optional[str] = None
-    SMTP_PORT: Optional[int] = 587
-    SMTP_USER: Optional[str] = None
-    SMTP_PASSWORD: Optional[str] = None
-    EMAIL_FROM: Optional[str] = None
 
     # Gmail API Configuration
     GMAIL_CREDENTIALS_FILE: str = Field(
@@ -254,6 +235,19 @@ class Settings(BaseSettings):
         default=10485760,  # 10MB
         description="Maximum upload size in bytes"
     )
+
+    # Document Processing
+    CHUNK_SIZE: int = Field(default=500, description="Document chunk size")
+    CHUNK_OVERLAP: int = Field(default=50, description="Document chunk overlap")
+    MAX_CHUNKS_PER_DOC: int = Field(default=1000, description="Maximum chunks per document")
+    
+    @property
+    def cors_origins_list(self) -> list:
+        """Parse CORS_ORIGINS string into a list"""
+        if isinstance(self.CORS_ORIGINS, list):
+            return self.CORS_ORIGINS
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",")]
+
     model_config = SettingsConfigDict(
         env_file=str(Path(__file__).parent.parent.parent / ".env"),
         case_sensitive=True,
