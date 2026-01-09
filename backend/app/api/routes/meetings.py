@@ -374,8 +374,12 @@ async def cancel_meeting(
                 )
                 emails_sent = len(participant_emails)
             except Exception as e:
-                # Log but don't fail the cancellation
-                print(f"Failed to send cancellation emails: {str(e)}")
+                # Log full traceback for debugging to stdout
+                import traceback
+                error_trace = traceback.format_exc()
+                print(f"CRITICAL ERROR: Failed to send cancellation emails:\n{error_trace}")
+                # Don't fail the cancellation just because email failed
+                pass
 
     await db.commit()
     return {"status": "cancelled", "emails_sent": emails_sent}
@@ -442,6 +446,13 @@ async def notify_meeting_update(
                 )
                 emails_sent = len(participant_emails)
             except Exception as e:
+                # Log full traceback for debugging to stdout
+                import traceback
+                error_trace = traceback.format_exc()
+                print(f"CRITICAL ERROR: Failed to send update emails:\n{error_trace}")
+                # Raise warning but don't strictly crash 500 if we want to be lenient,
+                # BUT since this endpoint is *only* for notification, a failure IS an error.
+                # Use 500 but log it properly so user sees it in Railway.
                 raise HTTPException(status_code=500, detail=f"Failed to send update emails: {str(e)}")
 
     return {"status": "notification_sent", "emails_sent": emails_sent}
