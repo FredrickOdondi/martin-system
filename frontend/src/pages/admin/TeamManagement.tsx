@@ -27,7 +27,6 @@ export default function TeamManagement() {
 
     // Track if we're enforcing TWG selection (for facilitator role)
     const [enforceTwgSelection, setEnforceTwgSelection] = useState(false)
-    const [previousRole, setPreviousRole] = useState<UserRole | null>(null)
 
     // Invite User Modal State
     const [isInviteModalOpen, setIsInviteModalOpen] = useState(false)
@@ -102,8 +101,6 @@ export default function TeamManagement() {
     const handleRoleChange = async (user: User, newRole: UserRole) => {
         // If changing to FACILITATOR or MEMBER, prompt for TWG assignment
         if (newRole === UserRole.FACILITATOR || newRole === UserRole.MEMBER) {
-            // Store the previous role in case they cancel
-            setPreviousRole(user.role)
             // First update the role
             await handleUpdateUser(user.id, { role: newRole })
             // Mark that we're enforcing TWG selection for facilitators
@@ -156,7 +153,6 @@ export default function TeamManagement() {
             toast.success('Teams updated successfully')
             setIsTeamModalOpen(false)
             setEnforceTwgSelection(false)
-            setPreviousRole(null)
             loadUsers()
         } catch (error) {
             console.error('Failed to update teams', error)
@@ -172,7 +168,6 @@ export default function TeamManagement() {
         }
         setIsTeamModalOpen(false)
         setEnforceTwgSelection(false)
-        setPreviousRole(null)
         loadUsers()
     }
 
