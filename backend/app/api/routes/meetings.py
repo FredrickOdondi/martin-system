@@ -364,6 +364,36 @@ async def approve_and_send_invite(
             participant_emails.append(participant.email)
     participant_emails = list(set(participant_emails))
 
+    # Fetch Agenda for Meeting Pack
+    from app.services.pdf_service import pdf_service
+    from app.models.models import Agenda
+    
+    agenda_query = select(Agenda).where(Agenda.meeting_id == meeting_id)
+    agenda_result = await db.execute(agenda_query)
+    agenda = agenda_result.scalar_one_or_none()
+    
+    attachments = []
+    if agenda and agenda.content:
+        try:
+            pdf_bytes = pdf_service.generate_agenda_pdf(
+                agenda_markdown=agenda.content,
+                template_context={
+                    "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "TWG",
+                    "meeting_title": db_meeting.title,
+                    "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d"),
+                    "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC"),
+                    "location": db_meeting.location or "Virtual"
+                }
+            )
+            attachments.append({
+                "filename": f"Agenda - {db_meeting.title}.pdf",
+                "content": pdf_bytes,
+                "content_type": "application/pdf"
+            })
+            print(f"Generated PDF Agenda size: {len(pdf_bytes)} bytes")
+        except Exception as e:
+            print(f"Failed to generate PDF Agenda: {e}")
+
     # Send emails
     try:
         if participant_emails:
@@ -385,7 +415,8 @@ async def approve_and_send_invite(
                     "start_time": db_meeting.scheduled_at,
                     "duration": db_meeting.duration_minutes,
                     "location": db_meeting.location
-                }
+                },
+                attachments=attachments
             )
     except Exception as e:
         import traceback

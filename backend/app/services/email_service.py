@@ -81,7 +81,8 @@ class EmailService:
         subject: str,
         template_name: str,
         template_context: Dict[str, Any],
-        meeting_details: Dict[str, Any]
+        meeting_details: Dict[str, Any],
+        attachments: List[Dict[str, Any]] = None
     ):
         """
         Sends a meeting invitation with an ICS attachment.
@@ -109,7 +110,8 @@ class EmailService:
                 subject=subject,
                 html_content=html_content,
                 ics_content=ics_content,
-                ics_filename="invite.ics"
+                ics_filename="invite.ics",
+                extra_attachments=attachments
             )
         else:
             return await self._send_via_smtp(
@@ -117,7 +119,8 @@ class EmailService:
                 subject=subject,
                 html_content=html_content,
                 ics_content=ics_content,
-                ics_filename="invite.ics"
+                ics_filename="invite.ics",
+                extra_attachments=attachments
             )
 
     async def send_meeting_update(
@@ -244,7 +247,8 @@ class EmailService:
         subject: str,
         html_content: str,
         ics_content: bytes = None,
-        ics_filename: str = "invite.ics"
+        ics_filename: str = "invite.ics",
+        extra_attachments: List[Dict[str, Any]] = None
     ) -> bool:
         """
         Send email using Resend API (works on Railway).
@@ -258,6 +262,15 @@ class EmailService:
                 "content": base64.b64encode(ics_content).decode('utf-8'),
                 "content_type": "text/calendar"
             })
+            
+        if extra_attachments:
+            for attachment in extra_attachments:
+                # Expects: filename, content (bytes), content_type
+                attachments.append({
+                    "filename": attachment["filename"],
+                    "content": base64.b64encode(attachment["content"]).decode('utf-8'),
+                    "content_type": attachment["content_type"]
+                })
 
         params = {
             "from": f"{self.from_name} <{self.from_email}>",
@@ -283,7 +296,8 @@ class EmailService:
         subject: str,
         html_content: str,
         ics_content: bytes = None,
-        ics_filename: str = "invite.ics"
+        ics_filename: str = "invite.ics",
+        extra_attachments: List[Dict[str, Any]] = None
     ) -> bool:
         """
         Send email using SMTP (fallback, may not work on some cloud platforms).
@@ -308,7 +322,22 @@ class EmailService:
             encoders.encode_base64(part_ics)
             part_ics.add_header("Content-Disposition", "attachment", filename=ics_filename)
             part_ics.add_header("Content-Class", "urn:content-classes:calendarmessage")
+            part_ics.add_header("Content-Class", "urn:content-classes:calendarmessage")
             message.attach(part_ics)
+
+        if extra_attachments:
+            for attachment in extra_attachments:
+                # Expects: filename, content (bytes), content_type
+                main_type, sub_type = attachment["content_type"].split("/", 1)
+                part = MIMEBase(main_type, sub_type)
+                part.set_payload(attachment["content"])
+                encoders.encode_base64(part)
+                part.add_header(
+                    "Content-Disposition",
+                    "attachment",
+                    filename=attachment["filename"],
+                )
+                message.attach(part)
 
         with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
             if settings.SMTP_TLS:
