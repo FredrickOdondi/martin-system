@@ -224,22 +224,85 @@ async def upsert_minutes(
     await db.refresh(db_minutes)
     return db_minutes
 
-@router.post("/{meeting_id}/schedule", status_code=status.HTTP_200_OK)
-async def schedule_meeting_trigger(
+@router.get("/{meeting_id}/invite-preview")
+async def get_invite_preview(
     meeting_id: uuid.UUID,
     current_user: User = Depends(require_facilitator),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Finalize and schedule a meeting. 
-    Triggers automated email invitations and calendar invites.
+    Get a preview of the meeting invitation email and participant list.
+    This allows the facilitator to review before approving.
     """
-    # Verify meeting exists and access rights
+    from app.schemas.schemas import InvitePreview, InviteStatus
+    
     query = select(Meeting).where(Meeting.id == meeting_id).options(
         selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
         selectinload(Meeting.twg)
     )
+    result = await db.execute(query)
+    db_meeting = result.scalar_one_or_none()
 
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Collect participant emails
+    participant_emails = []
+    for participant in db_meeting.participants:
+        if participant.user and participant.user.email:
+            participant_emails.append(participant.user.email)
+        elif participant.email:
+            participant_emails.append(participant.email)
+    participant_emails = list(set(participant_emails))
+
+    # Render email template for preview
+    template_context = {
+        "user_name": "Valued Participant",
+        "meeting_title": db_meeting.title,
+        "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d") if db_meeting.scheduled_at else "TBD",
+        "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC") if db_meeting.scheduled_at else "TBD",
+        "location": db_meeting.location or "Virtual",
+        "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "TWG",
+        "portal_url": f"{settings.FRONTEND_URL}/schedule"
+    }
+    
+    # Render the template
+    try:
+        template = email_service.jinja_env.get_template("meeting_invite.html")
+        html_content = template.render(**template_context)
+    except Exception as e:
+        html_content = f"<p>Template rendering failed: {str(e)}</p>"
+
+    # Determine status
+    status = InviteStatus.SENT if db_meeting.status == MeetingStatus.SCHEDULED else InviteStatus.DRAFT
+
+    return InvitePreview(
+        meeting_id=meeting_id,
+        subject=f"INVITATION: {db_meeting.title}",
+        html_content=html_content,
+        participants=participant_emails,
+        ics_attached=True,
+        status=status
+    )
+
+
+@router.post("/{meeting_id}/schedule", status_code=status.HTTP_200_OK)
+async def schedule_meeting_draft(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Mark a meeting as ready to schedule (DRAFT state).
+    Does NOT send emails - use /approve-invite after reviewing the preview.
+    """
+    query = select(Meeting).where(Meeting.id == meeting_id).options(
+        selectinload(Meeting.participants),
+        selectinload(Meeting.twg)
+    )
     result = await db.execute(query)
     db_meeting = result.scalar_one_or_none()
 
@@ -252,63 +315,90 @@ async def schedule_meeting_trigger(
     if not db_meeting.participants:
         raise HTTPException(status_code=400, detail="No participants assigned to this meeting")
 
-    # Change status
+    # Don't change status yet - wait for approval
+    # Just return the preview info
+    participant_count = len(db_meeting.participants)
+
+    return {
+        "status": "ready_for_approval",
+        "message": "Please review the invite preview and click 'Approve & Send' to dispatch invitations.",
+        "participant_count": participant_count
+    }
+
+
+@router.post("/{meeting_id}/approve-invite", status_code=status.HTTP_200_OK)
+async def approve_and_send_invite(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    HITL Approval Gate: Actually send the meeting invitations after human review.
+    This is the final step that dispatches emails to participants.
+    """
+    query = select(Meeting).where(Meeting.id == meeting_id).options(
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+        selectinload(Meeting.twg)
+    )
+    result = await db.execute(query)
+    db_meeting = result.scalar_one_or_none()
+
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not db_meeting.participants:
+        raise HTTPException(status_code=400, detail="No participants assigned to this meeting")
+
+    # Mark as scheduled
     db_meeting.status = MeetingStatus.SCHEDULED
 
-    # Send emails
+    # Collect emails
     participant_emails = []
-    
-    # Iterate through MeetingParticipant objects
     for participant in db_meeting.participants:
-        # Check if registered user
         if participant.user and participant.user.email:
-             participant_emails.append(participant.user.email)
-        # Check if external guest with email
+            participant_emails.append(participant.user.email)
         elif participant.email:
-             participant_emails.append(participant.email)
-            
-    # Remove duplicates
+            participant_emails.append(participant.email)
     participant_emails = list(set(participant_emails))
-    
+
+    # Send emails
     try:
         if participant_emails:
             await email_service.send_meeting_invite(
-            to_emails=participant_emails,
-            subject=f"INVITATION: {db_meeting.title}",
-            template_name="meeting_invite.html",
-            template_context={
-                "user_name": "Valued Participant", # Simplified
-                "meeting_title": db_meeting.title,
-                "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d"),
-                "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC"),
-                "location": db_meeting.location or "Virtual",
-                "pillar_name": db_meeting.twg.pillar.value,
-                "portal_url": f"{settings.FRONTEND_URL}/schedule"
-            },
-            meeting_details={
-                "title": db_meeting.title,
-                "start_time": db_meeting.scheduled_at,
-                "duration": db_meeting.duration_minutes,
-                "location": db_meeting.location
-            }
-        )
+                to_emails=participant_emails,
+                subject=f"INVITATION: {db_meeting.title}",
+                template_name="meeting_invite.html",
+                template_context={
+                    "user_name": "Valued Participant",
+                    "meeting_title": db_meeting.title,
+                    "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d"),
+                    "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC"),
+                    "location": db_meeting.location or "Virtual",
+                    "pillar_name": db_meeting.twg.pillar.value,
+                    "portal_url": f"{settings.FRONTEND_URL}/schedule"
+                },
+                meeting_details={
+                    "title": db_meeting.title,
+                    "start_time": db_meeting.scheduled_at,
+                    "duration": db_meeting.duration_minutes,
+                    "location": db_meeting.location
+                }
+            )
     except Exception as e:
-        # Log full traceback for debugging to stdout for Railway logs
         import traceback
         error_trace = traceback.format_exc()
         print(f"CRITICAL ERROR: Failed to send invitations:\n{error_trace}")
-        
-        # Also attempt to write to file if possible (fallback)
-        try:
-            with open("debug_error.log", "w") as f:
-                f.write(f"Schedule Meeting Error:\n{error_trace}")
-        except:
-            pass
-            
         raise HTTPException(status_code=500, detail=f"Failed to send invitations: {str(e)}")
 
     await db.commit()
-    return {"status": "successfully scheduled", "emails_sent": len(participant_emails)}
+    return {
+        "status": "invites_sent",
+        "message": f"Successfully sent invitations to {len(participant_emails)} participant(s).",
+        "emails_sent": len(participant_emails)
+    }
 
 
 @router.post("/{meeting_id}/cancel", status_code=status.HTTP_200_OK)

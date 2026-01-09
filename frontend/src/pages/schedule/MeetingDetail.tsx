@@ -6,6 +6,7 @@ import MeetingSidebar from './components/MeetingSidebar'
 import ModernLayout from '../../layouts/ModernLayout'
 import ConflictModal from '../../components/modals/ConflictModal'
 import InputModal from '../../components/modals/InputModal'
+import InvitePreviewModal from '../../components/modals/InvitePreviewModal'
 import StatusModal from '../../components/modals/StatusModal'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -42,6 +43,7 @@ export default function MeetingDetail() {
     const [detectedConflicts, setDetectedConflicts] = useState<any[]>([])
     const [showCancelModal, setShowCancelModal] = useState(false)
     const [showUpdateModal, setShowUpdateModal] = useState(false)
+    const [showInvitePreviewModal, setShowInvitePreviewModal] = useState(false)
     const [isLoadingAction, setIsLoadingAction] = useState(false)
     const [statusModal, setStatusModal] = useState<{ isOpen: boolean, type: 'success' | 'error' | 'info', title: string, message: string }>({
         isOpen: false,
@@ -243,21 +245,38 @@ export default function MeetingDetail() {
         }
         setIsCheckingConflicts(false)
 
-        // No conflicts - proceed directly
-        await proceedWithSendingInvites()
+        // No conflicts - show HITL preview modal instead of sending directly
+        setShowInvitePreviewModal(true)
     }
 
     const proceedWithSendingInvites = async () => {
         if (!meetingId) return
         setShowConflictModal(false)
+        // After conflict resolution, also show HITL preview
+        setShowInvitePreviewModal(true)
+    }
+
+    const handleApproveAndSend = async () => {
+        if (!meetingId) return
         setIsSendingInvites(true)
         try {
-            await meetings.schedule(meetingId)
-            alert("✅ Invitations sent successfully!")
+            await meetings.approveInvite(meetingId)
+            setShowInvitePreviewModal(false)
+            setStatusModal({
+                isOpen: true,
+                type: 'success',
+                title: 'Invitations Sent',
+                message: 'Meeting invitations have been sent to all participants.'
+            })
             await loadMeetingDetails()
         } catch (error: any) {
             console.error("Failed to send invites", error)
-            alert(error?.response?.data?.detail || "Failed to send invitations")
+            setStatusModal({
+                isOpen: true,
+                type: 'error',
+                title: 'Failed to Send',
+                message: error?.response?.data?.detail || 'Failed to send invitations. Please try again.'
+            })
         } finally {
             setIsSendingInvites(false)
         }
@@ -489,6 +508,14 @@ export default function MeetingDetail() {
                     title={statusModal.title}
                     message={statusModal.message}
                     onClose={() => setStatusModal(prev => ({ ...prev, isOpen: false }))}
+                />
+                {/* HITL Invite Preview Modal */}
+                <InvitePreviewModal
+                    isOpen={showInvitePreviewModal}
+                    meetingId={meetingId || ''}
+                    onClose={() => setShowInvitePreviewModal(false)}
+                    onApprove={handleApproveAndSend}
+                    isApproving={isSendingInvites}
                 />
 
                 {/* Header */}
