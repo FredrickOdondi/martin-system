@@ -58,8 +58,10 @@ export const getTimeline = async (): Promise<TimelineItem[]> => {
     return response.data;
 };
 
-export const getConflicts = async (): Promise<ConflictAlert[]> => {
-    const response = await api.get('/dashboard/conflicts');
+export const getConflicts = async (includeHistory: boolean = false): Promise<ConflictAlert[]> => {
+    const response = await api.get('/dashboard/conflicts', {
+        params: { include_history: includeHistory }
+    });
     return response.data;
 };
 
@@ -90,4 +92,44 @@ export const exportDashboardReport = async (): Promise<void> => {
     // Cleanup
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
+};
+
+export interface ReconciliationResult {
+    status: string;
+    scan_time: string;
+    conflicts_detected: number;
+    auto_resolved: number;
+    breakdown: {
+        same_slot: number;
+        venue: number;
+        vip_double_booking: number;
+        crowding: number;
+        overdue_action: number;
+    };
+    details: Array<{
+        type: string;
+        severity: string;
+        description: string;
+        affected_meetings?: string[];
+    }>;
+}
+
+export const forceReconciliation = async (): Promise<ReconciliationResult> => {
+    const response = await api.post('/dashboard/force-reconciliation');
+    return response.data;
+};
+
+export const generateWeeklyPacket = async (): Promise<any> => {
+    const response = await api.post('/dashboard/weekly-packet');
+    return response.data;
+};
+
+export const autoNegotiateConflict = async (conflictId: string): Promise<any> => {
+    const response = await api.post(`/dashboard/conflicts/${conflictId}/auto-negotiate`);
+    return response.data;
+};
+
+export const dismissConflict = async (conflictId: string, resolution: string = 'Dismissed by user'): Promise<any> => {
+    const response = await api.post(`/dashboard/conflicts/${conflictId}/resolve?resolution=${encodeURIComponent(resolution)}`);
+    return response.data;
 };
