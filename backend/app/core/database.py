@@ -9,6 +9,12 @@ except ImportError:
 # Use the database URL from settings (supports both SQLite and PostgreSQL)
 SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
+# Convert postgresql:// to postgresql+asyncpg:// for async engine
+if SQLALCHEMY_DATABASE_URL.startswith("postgresql://"):
+    SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace(
+        "postgresql://", "postgresql+asyncpg://"
+    )
+
 # For SQLite, we need to enable check_same_thread=False and connect_args
 engine_kwargs = {
     "echo": True,  # Set to False in production
