@@ -1,9 +1,4 @@
 import os
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from email.mime.base import MIMEBase
-from email import encoders
 from typing import List, Optional, Dict, Any
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from icalendar import Calendar, Event
@@ -11,6 +6,14 @@ from datetime import datetime, timedelta
 import pytz
 
 from app.core.config import settings
+
+# Try to import resend, fall back gracefully if not available
+try:
+    import resend
+    RESEND_AVAILABLE = True
+except ImportError:
+    RESEND_AVAILABLE = False
+
 
 class EmailService:
     def __init__(self):
@@ -23,12 +26,20 @@ class EmailService:
             autoescape=select_autoescape(['html', 'xml'])
         )
         
-        self.smtp_server = settings.SMTP_HOST
-        self.smtp_port = settings.SMTP_PORT
-        self.smtp_user = settings.SMTP_USER
-        self.smtp_password = settings.SMTP_PASSWORD
         self.from_email = settings.EMAILS_FROM_EMAIL
         self.from_name = settings.EMAILS_FROM_NAME
+        
+        # Configure Resend if available
+        if RESEND_AVAILABLE and settings.RESEND_API_KEY:
+            resend.api_key = settings.RESEND_API_KEY
+            self.use_resend = True
+        else:
+            self.use_resend = False
+            # SMTP fallback settings
+            self.smtp_server = settings.SMTP_HOST
+            self.smtp_port = settings.SMTP_PORT
+            self.smtp_user = settings.SMTP_USER
+            self.smtp_password = settings.SMTP_PASSWORD
 
     def _create_calendar_invite(
         self,
@@ -88,33 +99,26 @@ class EmailService:
             attendees=to_emails
         )
 
-        # Build Email
-        message = MIMEMultipart("mixed")
-        message["Subject"] = subject
-        message["From"] = f"{self.from_name} <{self.from_email}>"
-        message["To"] = ", ".join(to_emails)
+        if not settings.EMAILS_ENABLED:
+            print(f"[EmailService] Emails disabled. Would send to: {to_emails}")
+            return True
 
-        # Attachment: Content
-        part_html = MIMEText(html_content, "html")
-        message.attach(part_html)
-
-        # Attachment: ICS
-        part_ics = MIMEBase("text", "calendar", method="REQUEST")
-        part_ics.set_payload(ics_content)
-        encoders.encode_base64(part_ics)
-        part_ics.add_header("Content-Disposition", "attachment", filename="invite.ics")
-        part_ics.add_header("Content-Class", "urn:content-classes:calendarmessage")
-        message.attach(part_ics)
-
-        # Send
-        if settings.EMAILS_ENABLED:
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                if settings.SMTP_TLS:
-                    server.starttls()
-                server.login(self.smtp_user, self.smtp_password)
-                server.sendmail(self.from_email, to_emails, message.as_string())
-        
-        return True
+        if self.use_resend:
+            return await self._send_via_resend(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                ics_content=ics_content,
+                ics_filename="invite.ics"
+            )
+        else:
+            return await self._send_via_smtp(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                ics_content=ics_content,
+                ics_filename="invite.ics"
+            )
 
     async def send_meeting_update(
         self,
@@ -130,7 +134,6 @@ class EmailService:
         template_context["changes"] = changes or []
         html_content = template.render(**template_context)
         
-        # Create updated ICS (same as REQUEST but signals update)
         ics_content = self._create_calendar_invite(
             title=meeting_details['title'],
             description=meeting_details.get('description', ''),
@@ -140,28 +143,28 @@ class EmailService:
             attendees=to_emails
         )
 
-        message = MIMEMultipart("mixed")
-        message["Subject"] = f"UPDATED: {meeting_details['title']}"
-        message["From"] = f"{self.from_name} <{self.from_email}>"
-        message["To"] = ", ".join(to_emails)
+        subject = f"UPDATED: {meeting_details['title']}"
 
-        part_html = MIMEText(html_content, "html")
-        message.attach(part_html)
+        if not settings.EMAILS_ENABLED:
+            print(f"[EmailService] Emails disabled. Would send update to: {to_emails}")
+            return True
 
-        part_ics = MIMEBase("text", "calendar", method="REQUEST")
-        part_ics.set_payload(ics_content)
-        encoders.encode_base64(part_ics)
-        part_ics.add_header("Content-Disposition", "attachment", filename="meeting_update.ics")
-        message.attach(part_ics)
-
-        if settings.EMAILS_ENABLED:
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                if settings.SMTP_TLS:
-                    server.starttls()
-                server.login(self.smtp_user, self.smtp_password)
-                server.sendmail(self.from_email, to_emails, message.as_string())
-        
-        return True
+        if self.use_resend:
+            return await self._send_via_resend(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                ics_content=ics_content,
+                ics_filename="meeting_update.ics"
+            )
+        else:
+            return await self._send_via_smtp(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                ics_content=ics_content,
+                ics_filename="meeting_update.ics"
+            )
 
     def _create_cancel_invite(
         self,
@@ -176,7 +179,7 @@ class EmailService:
         cal = Calendar()
         cal.add('prodid', '-//ECOWAS Summit TWG//martin-system//EN')
         cal.add('version', '2.0')
-        cal.add('method', 'CANCEL')  # CANCEL method
+        cal.add('method', 'CANCEL')
 
         event = Event()
         event.add('summary', f"CANCELLED: {title}")
@@ -205,7 +208,6 @@ class EmailService:
         template_context["reason"] = reason
         html_content = template.render(**template_context)
         
-        # Create CANCEL ICS
         ics_content = self._create_cancel_invite(
             title=meeting_details['title'],
             start_time=meeting_details['start_time'],
@@ -213,27 +215,108 @@ class EmailService:
             location=meeting_details.get('location')
         )
 
+        subject = f"CANCELLED: {meeting_details['title']}"
+
+        if not settings.EMAILS_ENABLED:
+            print(f"[EmailService] Emails disabled. Would send cancellation to: {to_emails}")
+            return True
+
+        if self.use_resend:
+            return await self._send_via_resend(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                ics_content=ics_content,
+                ics_filename="cancellation.ics"
+            )
+        else:
+            return await self._send_via_smtp(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                ics_content=ics_content,
+                ics_filename="cancellation.ics"
+            )
+
+    async def _send_via_resend(
+        self,
+        to_emails: List[str],
+        subject: str,
+        html_content: str,
+        ics_content: bytes = None,
+        ics_filename: str = "invite.ics"
+    ) -> bool:
+        """
+        Send email using Resend API (works on Railway).
+        """
+        import base64
+        
+        attachments = []
+        if ics_content:
+            attachments.append({
+                "filename": ics_filename,
+                "content": base64.b64encode(ics_content).decode('utf-8'),
+                "content_type": "text/calendar"
+            })
+
+        params = {
+            "from": f"{self.from_name} <{self.from_email}>",
+            "to": to_emails,
+            "subject": subject,
+            "html": html_content,
+        }
+        
+        if attachments:
+            params["attachments"] = attachments
+
+        try:
+            result = resend.Emails.send(params)
+            print(f"[Resend] Email sent successfully: {result}")
+            return True
+        except Exception as e:
+            print(f"[Resend] Failed to send email: {e}")
+            raise
+
+    async def _send_via_smtp(
+        self,
+        to_emails: List[str],
+        subject: str,
+        html_content: str,
+        ics_content: bytes = None,
+        ics_filename: str = "invite.ics"
+    ) -> bool:
+        """
+        Send email using SMTP (fallback, may not work on some cloud platforms).
+        """
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        from email.mime.base import MIMEBase
+        from email import encoders
+
         message = MIMEMultipart("mixed")
-        message["Subject"] = f"CANCELLED: {meeting_details['title']}"
+        message["Subject"] = subject
         message["From"] = f"{self.from_name} <{self.from_email}>"
         message["To"] = ", ".join(to_emails)
 
         part_html = MIMEText(html_content, "html")
         message.attach(part_html)
 
-        part_ics = MIMEBase("text", "calendar", method="CANCEL")
-        part_ics.set_payload(ics_content)
-        encoders.encode_base64(part_ics)
-        part_ics.add_header("Content-Disposition", "attachment", filename="cancellation.ics")
-        message.attach(part_ics)
+        if ics_content:
+            part_ics = MIMEBase("text", "calendar", method="REQUEST")
+            part_ics.set_payload(ics_content)
+            encoders.encode_base64(part_ics)
+            part_ics.add_header("Content-Disposition", "attachment", filename=ics_filename)
+            part_ics.add_header("Content-Class", "urn:content-classes:calendarmessage")
+            message.attach(part_ics)
 
-        if settings.EMAILS_ENABLED:
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                if settings.SMTP_TLS:
-                    server.starttls()
-                server.login(self.smtp_user, self.smtp_password)
-                server.sendmail(self.from_email, to_emails, message.as_string())
+        with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
+            if settings.SMTP_TLS:
+                server.starttls()
+            server.login(self.smtp_user, self.smtp_password)
+            server.sendmail(self.from_email, to_emails, message.as_string())
         
         return True
+
 
 email_service = EmailService()

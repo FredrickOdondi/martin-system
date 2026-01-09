@@ -201,6 +201,10 @@ class Settings(BaseSettings):
     EMAILS_FROM_NAME: str = Field(default="Martin (ECOWAS Summit)", description="Sender name")
     EMAILS_ENABLED: bool = Field(default=True, description="Whether emails are enabled")
     SMTP_TLS: bool = Field(default=True, description="Whether to use TLS for SMTP")
+    
+    # Resend (recommended for production)
+    RESEND_API_KEY: Optional[str] = Field(default=None, description="Resend API key for email delivery")
+    EMAIL_PROVIDER: str = Field(default="resend", description="Email provider: 'smtp' or 'resend'")
 
     # Gmail API Configuration
     GMAIL_CREDENTIALS_FILE: str = Field(
