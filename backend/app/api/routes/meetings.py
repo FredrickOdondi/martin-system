@@ -283,7 +283,6 @@ async def schedule_meeting_trigger(
                 "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC"),
                 "location": db_meeting.location or "Virtual",
                 "pillar_name": db_meeting.twg.pillar.value,
-                "pillar_name": db_meeting.twg.pillar.value,
                 "portal_url": f"{settings.FRONTEND_URL}/schedule"
             },
             meeting_details={
@@ -294,13 +293,20 @@ async def schedule_meeting_trigger(
             }
         )
     except Exception as e:
-        # Log full traceback for debugging
+        # Log full traceback for debugging to stdout for Railway logs
         import traceback
-        with open("debug_error.log", "w") as f:
-            f.write(f"Schedule Meeting Error:\n{traceback.format_exc()}")
+        error_trace = traceback.format_exc()
+        print(f"CRITICAL ERROR: Failed to send invitations:\n{error_trace}")
+        
+        # Also attempt to write to file if possible (fallback)
+        try:
+            with open("debug_error.log", "w") as f:
+                f.write(f"Schedule Meeting Error:\n{error_trace}")
+        except:
+            pass
+            
         raise HTTPException(status_code=500, detail=f"Failed to send invitations: {str(e)}")
 
-    await db.commit()
     await db.commit()
     return {"status": "successfully scheduled", "emails_sent": len(participant_emails)}
 
