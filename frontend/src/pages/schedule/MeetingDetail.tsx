@@ -7,6 +7,8 @@ import ModernLayout from '../../layouts/ModernLayout'
 import ConflictModal from '../../components/modals/ConflictModal'
 import InputModal from '../../components/modals/InputModal'
 import StatusModal from '../../components/modals/StatusModal'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 type TabType = 'agenda' | 'minutes' | 'participants' | 'documents'
 
@@ -618,7 +620,26 @@ export default function MeetingDetail() {
                                             ) : (
                                                 <Card className="p-6">
                                                     {agendaContent ? (
-                                                        <div className="prose dark:prose-invert max-w-none whitespace-pre-wrap">{agendaContent}</div>
+                                                        <div className="prose prose-slate dark:prose-invert max-w-none">
+                                                            <ReactMarkdown
+                                                                remarkPlugins={[remarkGfm]}
+                                                                components={{
+                                                                    h1: ({ node, ...props }) => <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4" {...props} />,
+                                                                    h2: ({ node, ...props }) => <h2 className="text-xl font-bold text-slate-800 dark:text-slate-200 mt-6 mb-3" {...props} />,
+                                                                    h3: ({ node, ...props }) => <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mt-4 mb-2" {...props} />,
+                                                                    ul: ({ node, ...props }) => <ul className="list-disc pl-6 mb-4 space-y-1" {...props} />,
+                                                                    ol: ({ node, ...props }) => <ol className="list-decimal pl-6 mb-4 space-y-1" {...props} />,
+                                                                    li: ({ node, ...props }) => <li className="text-slate-600 dark:text-slate-400" {...props} />,
+                                                                    p: ({ node, ...props }) => <p className="mb-3 text-slate-600 dark:text-slate-400" {...props} />,
+                                                                    strong: ({ node, ...props }) => <strong className="font-bold text-slate-800 dark:text-slate-200" {...props} />,
+                                                                    table: ({ node, ...props }) => <table className="min-w-full border-collapse border border-slate-200 dark:border-slate-700 my-4" {...props} />,
+                                                                    th: ({ node, ...props }) => <th className="border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-4 py-2 text-left font-bold" {...props} />,
+                                                                    td: ({ node, ...props }) => <td className="border border-slate-200 dark:border-slate-700 px-4 py-2" {...props} />,
+                                                                }}
+                                                            >
+                                                                {agendaContent}
+                                                            </ReactMarkdown>
+                                                        </div>
                                                     ) : (
                                                         <div className="text-slate-400 italic text-center py-10">No agenda has been set for this meeting.</div>
                                                     )}
@@ -703,8 +724,25 @@ export default function MeetingDetail() {
                                                     </div>
                                                 </div>
                                                 <Card className="p-8">
-                                                    <div className="prose dark:prose-invert max-w-none">
-                                                        <div dangerouslySetInnerHTML={{ __html: minutesContent.replace(/\n/g, '<br/>') }} />
+                                                    <div className="prose prose-slate dark:prose-invert max-w-none">
+                                                        <ReactMarkdown
+                                                            remarkPlugins={[remarkGfm]}
+                                                            components={{
+                                                                h1: ({ node, ...props }) => <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-4" {...props} />,
+                                                                h2: ({ node, ...props }) => <h2 className="text-xl font-bold text-slate-800 dark:text-slate-200 mt-6 mb-3" {...props} />,
+                                                                h3: ({ node, ...props }) => <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mt-4 mb-2" {...props} />,
+                                                                ul: ({ node, ...props }) => <ul className="list-disc pl-6 mb-4 space-y-1" {...props} />,
+                                                                ol: ({ node, ...props }) => <ol className="list-decimal pl-6 mb-4 space-y-1" {...props} />,
+                                                                li: ({ node, ...props }) => <li className="text-slate-600 dark:text-slate-400" {...props} />,
+                                                                p: ({ node, ...props }) => <p className="mb-3 text-slate-600 dark:text-slate-400" {...props} />,
+                                                                strong: ({ node, ...props }) => <strong className="font-bold text-slate-800 dark:text-slate-200" {...props} />,
+                                                                table: ({ node, ...props }) => <table className="min-w-full border-collapse border border-slate-200 dark:border-slate-700 my-4" {...props} />,
+                                                                th: ({ node, ...props }) => <th className="border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 px-4 py-2 text-left font-bold" {...props} />,
+                                                                td: ({ node, ...props }) => <td className="border border-slate-200 dark:border-slate-700 px-4 py-2" {...props} />,
+                                                            }}
+                                                        >
+                                                            {minutesContent}
+                                                        </ReactMarkdown>
                                                     </div>
                                                 </Card>
                                             </div>

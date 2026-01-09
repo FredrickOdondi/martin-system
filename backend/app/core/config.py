@@ -18,7 +18,12 @@ class Settings(BaseSettings):
     VERSION: str = "0.1.0"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = False
-
+    
+    FRONTEND_URL: str = Field(
+        default="http://localhost:5173",
+        description="URL of the frontend application for email links"
+    )
+    
     # Database
     DATABASE_URL: str = Field(
         default="sqlite+aiosqlite:///./ecowas_db.sqlite",

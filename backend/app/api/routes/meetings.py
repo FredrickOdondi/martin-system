@@ -15,6 +15,7 @@ from app.schemas.schemas import (
 )
 from app.api.deps import get_current_active_user, require_facilitator, require_twg_access, has_twg_access
 from app.services.email_service import email_service
+from app.core.config import settings
 from sqlalchemy.orm import selectinload
 
 router = APIRouter(prefix="/meetings", tags=["Meetings"])
@@ -282,7 +283,8 @@ async def schedule_meeting_trigger(
                 "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC"),
                 "location": db_meeting.location or "Virtual",
                 "pillar_name": db_meeting.twg.pillar.value,
-                "portal_url": "http://localhost:5173/schedule"  # TODO: Use settings.FRONTEND_URL in production
+                "pillar_name": db_meeting.twg.pillar.value,
+                "portal_url": f"{settings.FRONTEND_URL}/schedule"
             },
             meeting_details={
                 "title": db_meeting.title,
@@ -354,7 +356,7 @@ async def cancel_meeting(
                         "location": db_meeting.location or "Virtual",
                         "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "TWG",
                         "reason": cancel_data.reason,
-                        "portal_url": "http://localhost:5173/schedule"
+                        "portal_url": f"{settings.FRONTEND_URL}/schedule"
                     },
                     meeting_details={
                         "title": db_meeting.title,
@@ -422,7 +424,7 @@ async def notify_meeting_update(
                         "location": db_meeting.location or "Virtual",
                         "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "TWG",
                         "changes": update_data.changes,
-                        "portal_url": "http://localhost:5173/schedule"
+                        "portal_url": f"{settings.FRONTEND_URL}/schedule"
                     },
                     meeting_details={
                         "title": db_meeting.title,
@@ -680,14 +682,32 @@ Duration: {db_meeting.duration_minutes} minutes
 Location: {db_meeting.location or 'Virtual'}
 TWG Pillar: {pillar}
 
-Create a structured agenda with:
-1. Opening/Welcome (5 min)
-2. Review of previous action items (10 min)
-3. Main discussion topics relevant to the {pillar} pillar (use ECOWAS Vision 2050 context)
-4. Action items and next steps
-5. Closing remarks
+Create a structured agenda using MARKDOWN HEADERS:
 
-Format as a clean, numbered list ready for distribution."""
+# Meeting Agenda: {db_meeting.title}
+
+## 1. Opening & Welcome (5 min)
+- Introduction by the Chair
+- Meeting objectives overview
+
+## 2. Review of Previous Action Items (10 min)
+- Status updates
+- Outstanding items
+
+## 3. Main Discussion Topics
+Discussion topics relevant to the {pillar.replace('_', ' ').title()} pillar:
+- **Topic 1**: [description]
+- **Topic 2**: [description]
+
+## 4. Action Items & Next Steps
+- New assignments
+- Deadlines
+
+## 5. Closing Remarks (5 min)
+- Summary
+- Adjournment
+
+Use markdown headers (#, ##), bold (**) for emphasis, and bullet points for lists."""
 
     generated_content = agent.chat(prompt)
     
@@ -907,16 +927,39 @@ Agenda:
 
 {f"Transcript/Notes:{chr(10)}{context}" if context else "No transcript available - generate based on typical ECOWAS TWG proceedings."}
 
-Create structured meeting minutes with:
-1. Meeting Header (Title, Date, Location, Attendees placeholder)
-2. Opening and Welcome
-3. Discussion Points (based on agenda or transcript)
-4. Key Decisions Made
-5. Action Items (with Owner and Due Date placeholders)
-6. Next Steps
-7. Closing
+Create structured meeting minutes using MARKDOWN HEADERS (# and ##) for sections:
 
-Format professionally for official ECOWAS documentation."""
+# ECOWAS Technical Working Group Meeting Minutes
+
+## Meeting Details
+- **Title:** [title]
+- **Date:** [date]
+- **Location:** [location]
+- **Attendees:** [placeholder]
+
+## Opening and Welcome
+[Opening remarks]
+
+## Discussion Points
+1. **[Topic 1]**: [description]
+2. **[Topic 2]**: [description]
+
+## Key Decisions
+1. [Decision 1]
+2. [Decision 2]
+
+## Action Items
+| Owner | Task | Due Date |
+|-------|------|----------|
+| TBD | [task] | [date] |
+
+## Next Steps
+[Next steps]
+
+## Closing
+[Closing remarks]
+
+Use proper markdown formatting with headers (#, ##), bold (**), lists, and tables."""
 
     generated_content = agent.chat(prompt)
     
@@ -1373,3 +1416,189 @@ async def delete_document(
     
     return {"message": "Document deleted successfully"}
 
+
+# ==================== MEETING PACK ENDPOINTS ====================
+
+@router.post("/{meeting_id}/meeting-pack")
+async def compile_meeting_pack(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Compile a meeting pack containing:
+    1. Agenda PDF (on summit letterhead)
+    2. Previous meeting minutes (if available)
+    3. Attached pre-read documents
+    
+    Returns a ZIP file with all materials.
+    """
+    import zipfile
+    import io
+    import os
+    from fastapi.responses import StreamingResponse
+    from app.services.format_service import format_service
+    
+    # Get meeting with all related data
+    result = await db.execute(
+        select(Meeting)
+        .options(
+            selectinload(Meeting.twg),
+            selectinload(Meeting.agenda),
+            selectinload(Meeting.minutes)
+        )
+        .where(Meeting.id == meeting_id)
+    )
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Create ZIP buffer
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        files_added = []
+        
+        # 1. Generate Agenda PDF with letterhead
+        if db_meeting.agenda and db_meeting.agenda.content:
+            pillar = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
+            
+            pdf_bytes, pdf_filename = format_service.generate_agenda_pdf(
+                twg_pillar=pillar,
+                meeting_title=db_meeting.title,
+                meeting_date=db_meeting.scheduled_at,
+                meeting_location=db_meeting.location or "Virtual",
+                agenda_content=db_meeting.agenda.content,
+                duration_minutes=db_meeting.duration_minutes
+            )
+            
+            zip_file.writestr(pdf_filename, pdf_bytes)
+            files_added.append(pdf_filename)
+        
+        # 2. Get previous meeting minutes (if any exist for this TWG)
+        prev_meetings_result = await db.execute(
+            select(Meeting)
+            .options(selectinload(Meeting.minutes))
+            .where(
+                Meeting.twg_id == db_meeting.twg_id,
+                Meeting.scheduled_at < db_meeting.scheduled_at,
+                Meeting.id != db_meeting.id
+            )
+            .order_by(Meeting.scheduled_at.desc())
+            .limit(1)
+        )
+        prev_meeting = prev_meetings_result.scalar_one_or_none()
+        
+        if prev_meeting and prev_meeting.minutes and prev_meeting.minutes.content:
+            prev_date = prev_meeting.scheduled_at.strftime('%Y-%m-%d') if prev_meeting.scheduled_at else "previous"
+            pillar_short = db_meeting.twg.pillar.value.split("_")[0].title() if db_meeting.twg else "TWG"
+            minutes_filename = f"{pillar_short}TWG_Minutes_{prev_date}.txt"
+            zip_file.writestr(minutes_filename, prev_meeting.minutes.content)
+            files_added.append(minutes_filename)
+        
+        # 3. Get attached documents for this meeting
+        docs_result = await db.execute(
+            select(Document).where(Document.twg_id == db_meeting.twg_id)
+        )
+        documents = docs_result.scalars().all()
+        
+        for doc in documents[:5]:  # Limit to 5 pre-read docs
+            if os.path.exists(doc.file_path):
+                with open(doc.file_path, 'rb') as f:
+                    zip_file.writestr(f"prereads/{doc.file_name}", f.read())
+                    files_added.append(f"prereads/{doc.file_name}")
+    
+    zip_buffer.seek(0)
+    
+    # Generate pack filename
+    pillar_short = db_meeting.twg.pillar.value.split("_")[0].title() if db_meeting.twg else "TWG"
+    date_str = db_meeting.scheduled_at.strftime('%Y-%m-%d') if db_meeting.scheduled_at else "draft"
+    pack_filename = f"{pillar_short}TWG_MeetingPack_{date_str}.zip"
+    
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={pack_filename}"}
+    )
+
+
+# ==================== NEXT-MEETING AUTOMATION ====================
+
+@router.post("/{meeting_id}/propose-next")
+async def propose_next_meeting(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Use AI to propose the next meeting date based on:
+    - Current meeting date
+    - TWG's typical cadence (defaults to bi-weekly)
+    - Avoids weekends
+    
+    Optionally creates a draft meeting record.
+    """
+    from datetime import timedelta
+    from app.agents.langgraph_base_agent import create_langgraph_agent
+    
+    # Get current meeting
+    result = await db.execute(
+        select(Meeting)
+        .options(selectinload(Meeting.twg))
+        .where(Meeting.id == meeting_id)
+    )
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Calculate proposed date (default: 2 weeks from current meeting)
+    current_date = db_meeting.scheduled_at
+    proposed_date = current_date + timedelta(weeks=2)
+    
+    # Adjust to avoid weekends (push to Monday if needed)
+    while proposed_date.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        proposed_date += timedelta(days=1)
+    
+    # Get AI to suggest title and confirm
+    pillar = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
+    agent_id = pillar.split("_")[0]
+    agent = create_langgraph_agent(agent_id=agent_id, session_id=str(meeting_id))
+    
+    prompt = f"""Based on the previous meeting titled "{db_meeting.title}" for the {pillar.replace('_', ' ').title()} TWG, 
+suggest a concise title for the follow-up meeting scheduled for {proposed_date.strftime('%A, %d %B %Y')}.
+
+Return only the meeting title, nothing else. Keep it under 80 characters.
+Example: "Energy TWG Session 2: Infrastructure Assessment Review"
+"""
+    
+    suggested_title = agent.chat(prompt).strip().strip('"')
+    
+    # Create draft meeting (status will be SCHEDULED by default, but not yet finalized)
+    draft_meeting = Meeting(
+        twg_id=db_meeting.twg_id,
+        title=suggested_title or f"Follow-up: {db_meeting.title}",
+        scheduled_at=proposed_date,
+        duration_minutes=db_meeting.duration_minutes,
+        location=db_meeting.location,
+        status=MeetingStatus.SCHEDULED,
+        meeting_type=db_meeting.meeting_type
+    )
+    db.add(draft_meeting)
+    await db.commit()
+    await db.refresh(draft_meeting)
+    
+    return {
+        "proposed_date": proposed_date.isoformat(),
+        "proposed_title": suggested_title or f"Follow-up: {db_meeting.title}",
+        "draft_meeting_id": str(draft_meeting.id),
+        "message": "Draft meeting created. Review and finalize using the scheduling endpoint.",
+        "based_on_meeting": str(meeting_id)
+    }
