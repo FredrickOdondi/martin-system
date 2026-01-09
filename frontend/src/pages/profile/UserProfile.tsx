@@ -1,8 +1,8 @@
-import ModernLayout from '../../layouts/ModernLayout';
+
 
 export default function UserProfile() {
     return (
-        <ModernLayout>
+        <>
             <div className="flex items-center justify-between mb-8">
                 <div>
                     <h1 className="text-3xl font-black text-[#0d121b] dark:text-white tracking-tight">User Profile</h1>
@@ -97,6 +97,6 @@ export default function UserProfile() {
                     </div>
                 </div>
             </div>
-        </ModernLayout>
+        </>
     )
 }

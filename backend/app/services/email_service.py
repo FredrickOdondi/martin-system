@@ -169,6 +169,123 @@ class EmailService:
                 ics_filename="meeting_update.ics"
             )
 
+    async def send_meeting_reminder(
+        self,
+        to_emails: List[str],
+        template_context: Dict[str, Any],
+        meeting_details: Dict[str, Any]
+    ):
+        """
+        Sends a meeting reminder email.
+        """
+        template = self.jinja_env.get_template("meeting_reminder.html")
+        html_content = template.render(**template_context)
+        
+        ics_content = self._create_calendar_invite(
+            title=meeting_details['title'],
+            description=meeting_details.get('description', ''),
+            start_time=meeting_details['start_time'],
+            duration_minutes=meeting_details.get('duration', 60),
+            location=meeting_details.get('location'),
+            attendees=to_emails
+        )
+
+        subject = f"REMINDER: {meeting_details['title']}"
+
+        if not settings.EMAILS_ENABLED:
+            print(f"[EmailService] Emails disabled. Would send reminder to: {to_emails}")
+            return True
+
+        if self.use_resend:
+            return await self._send_via_resend(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                ics_content=ics_content,
+                ics_filename="reminder.ics"
+            )
+        else:
+            return await self._send_via_smtp(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                ics_content=ics_content,
+                ics_filename="reminder.ics"
+            )
+
+    async def send_minutes_nudge(
+        self,
+        to_emails: List[str],
+        template_context: Dict[str, Any]
+    ):
+        """
+        Sends a nudge to upload minutes.
+        """
+        template = self.jinja_env.get_template("minutes_nudge.html")
+        html_content = template.render(**template_context)
+        
+        subject = f"ACTION: Missing Minutes for {template_context.get('meeting_title', 'Meeting')}"
+
+        if not settings.EMAILS_ENABLED:
+            print(f"[EmailService] Emails disabled. Would send nudge to: {to_emails}")
+            return True
+
+        if self.use_resend:
+            return await self._send_via_resend(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content
+            )
+        else:
+            return await self._send_via_smtp(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content
+            )
+
+
+
+    async def send_minutes_published_email(
+        self,
+        to_emails: List[str],
+        template_context: Dict[str, Any],
+        pdf_content: bytes,
+        pdf_filename: str = "Minutes.pdf"
+    ):
+        """
+        Sends Minutes Published email with PDF attachment.
+        """
+        template = self.jinja_env.get_template("minutes_published.html")
+        html_content = template.render(**template_context)
+        
+        subject = f"OFFICIAL MINUTES: {template_context.get('meeting_title')}"
+        
+        # Prepare attachment
+        attachments = [{
+            "filename": pdf_filename,
+            "content": pdf_content,
+            "content_type": "application/pdf"
+        }]
+
+        if not settings.EMAILS_ENABLED:
+            print(f"[EmailService] Emails disabled. Would send Minutes to: {to_emails}")
+            return True
+
+        if self.use_resend:
+            return await self._send_via_resend(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                extra_attachments=attachments
+            )
+        else:
+            return await self._send_via_smtp(
+                to_emails=to_emails,
+                subject=subject,
+                html_content=html_content,
+                extra_attachments=attachments
+            )
+
     def _create_cancel_invite(
         self,
         title: str,

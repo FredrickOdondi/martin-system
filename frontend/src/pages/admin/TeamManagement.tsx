@@ -5,7 +5,7 @@ import api from '../../services/api'
 import { User, UserRole } from '../../types/auth'
 import { Avatar } from '../../components/ui'
 import { toast } from 'react-toastify'
-import ModernLayout from '../../layouts/ModernLayout'
+
 
 import { useAppSelector } from '../../hooks/useRedux'
 
@@ -213,16 +213,14 @@ export default function TeamManagement() {
 
     if (isLoading) {
         return (
-            <ModernLayout>
-                <div className="flex items-center justify-center h-64">
-                    <div className="w-8 h-8 border-4 border-[#1152d4] border-t-transparent rounded-full animate-spin"></div>
-                </div>
-            </ModernLayout>
+            <div className="flex items-center justify-center h-64">
+                <div className="w-8 h-8 border-4 border-[#1152d4] border-t-transparent rounded-full animate-spin"></div>
+            </div>
         )
     }
 
     return (
-        <ModernLayout>
+        <>
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-[#0d121b] dark:text-white tracking-tight">Team Management</h1>
@@ -612,6 +610,6 @@ export default function TeamManagement() {
                     </div>
                 </div>
             )}
-        </ModernLayout >
+        </>
     )
 }

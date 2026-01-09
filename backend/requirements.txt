@@ -103,3 +103,4 @@ tqdm==4.66.1
 
 # WebSocket Support
 websockets==12.0
+apscheduler

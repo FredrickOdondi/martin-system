@@ -38,5 +38,30 @@ class PDFService:
         
         return pdf_bytes
 
+    def generate_minutes_pdf(
+        self,
+        minutes_markdown: str,
+        template_context: Dict[str, Any]
+    ) -> bytes:
+        """
+        Generates a PDF of Meeting Minutes on official letterhead from markdown content.
+        """
+        # Convert Markdown to HTML
+        # Use extensions for tables
+        minutes_html = markdown.markdown(minutes_markdown, extensions=['tables', 'fenced_code', 'nl2br'])
+        
+        # Prepare context
+        context = template_context.copy()
+        context['minutes_html'] = minutes_html
+        
+        # Render Template
+        template = self.jinja_env.get_template("minutes_pdf.html")
+        rendered_html = template.render(**context)
+        
+        # Convert to PDF
+        pdf_bytes = HTML(string=rendered_html).write_pdf()
+        
+        return pdf_bytes
+
 # Global instance
 pdf_service = PDFService()

@@ -5,7 +5,7 @@ import { MentionAutocomplete } from '../../components/agent/MentionAutocomplete'
 import EmailApprovalModal, { EmailApprovalRequest, EmailDraft } from '../../components/agent/EmailApprovalModal';
 import SettingsModal from '../../components/agent/SettingsModal';
 import { CommandAutocompleteResult } from '../../types/agent';
-import ModernLayout from '../../layouts/ModernLayout';
+
 import axios from 'axios';
 
 interface Message {
@@ -400,7 +400,7 @@ export default function TwgAgent() {
     };
 
     return (
-        <ModernLayout>
+        <>
             <div className="h-[calc(100vh-140px)] flex overflow-hidden">
                 {/* Sidebar */}
                 <aside className={`${isSidebarCollapsed ? 'w-0' : 'w-80'} bg-white dark:bg-[#1a202c] border-r border-[#e7ebf3] dark:border-[#2d3748] flex flex-col transition-all duration-300 overflow-hidden hidden lg:flex`}>
@@ -932,6 +932,6 @@ export default function TwgAgent() {
                     />
                 )}
             </div>
-        </ModernLayout>
+        </>
     );
 }

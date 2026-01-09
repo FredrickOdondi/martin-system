@@ -188,7 +188,7 @@ class Settings(BaseSettings):
     # PINECONE
     PINECONE_API_KEY: str = Field(default="test-key", description="Pinecone API key")
     PINECONE_ENVIRONMENT: str = Field(default="gcp-starter", description="Pinecone environment")
-    PINECONE_INDEX_NAME: str = Field(default="ecowas-summit-knowledge-nomic", description="Pinecone index name")
+    PINECONE_INDEX_NAME: str = Field(default="ecowas-martin-local-768", description="Pinecone index name")
     EMBEDDING_MODEL: str = Field(default="nomic-embed-text", description="Embedding model name")
     EMBEDDING_DIMENSION: int = Field(default=768, description="Embedding dimension")
     

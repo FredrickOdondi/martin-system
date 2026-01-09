@@ -100,25 +100,30 @@ export const meetings = {
     submitMinutesForApproval: (id: string) => api.post(`/meetings/${id}/minutes/submit-for-approval`),
     approveMinutes: (id: string) => api.post(`/meetings/${id}/minutes/approve`),
 
-    // Action Items
-    getActionItems: (meetingId: string) => api.get(`/meetings/${meetingId}/action-items`),
-    createActionItem: (meetingId: string, data: any) => api.post(`/meetings/${meetingId}/action-items`, data),
-    extractActions: (meetingId: string) => api.post(`/meetings/${meetingId}/extract-actions`),
-    updateActionItem: (actionId: string, data: any) => api.patch(`/action-items/${actionId}`, data),
+    getActionItems: (id: string) => api.get(`/meetings/${id}/action-items`),
+    createActionItem: (id: string, data: any) => api.post(`/meetings/${id}/action-items`, data),
+    extractActionItems: (id: string) => api.post(`/meetings/${id}/extract-actions`),
 
-    // Documents
-    getDocuments: (meetingId: string) => api.get(`/meetings/${meetingId}/documents`),
-    uploadDocument: (meetingId: string, file: File) => {
-        const formData = new FormData();
-        formData.append('file', file);
-        return api.post(`/meetings/${meetingId}/documents`, formData, {
-            headers: { 'Content-Type': 'multipart/form-data' }
-        });
-    },
+    getDocuments: (id: string) => api.get(`/meetings/${id}/documents`),
+    uploadDocument: (id: string, formData: FormData) => api.post(`/meetings/${id}/documents`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+    compileMeetingPack: (id: string) => api.post(`/meetings/${id}/meeting-pack`),
+    proposeNextMeeting: (id: string) => api.post(`/meetings/${id}/propose-next`),
 };
+
+export const actionItems = {
+    update: (id: string, data: any) => api.patch(`/action-items/${id}`, data),
+    delete: (id: string) => api.delete(`/action-items/${id}`),
+};
+
 
 export const twgs = {
     list: (skip = 0, limit = 100) => api.get(`/twgs/?skip=${skip}&limit=${limit}`),
     get: (id: string) => api.get(`/twgs/${id}`),
     update: (id: string, data: any) => api.patch(`/twgs/${id}`, data),
+};
+
+export const auditLogs = {
+    list: (skip = 0, limit = 100) => api.get(`/audit-logs/?skip=${skip}&limit=${limit}`),
 };

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
-import ModernLayout from '../../layouts/ModernLayout';
+
 import * as notificationService from '../../services/notificationService';
 import { NotificationType } from '../../services/notificationService';
 import { fetchNotifications, markRead, removeNotification, markAllRead } from '../../store/slices/notificationsSlice';
@@ -96,7 +96,7 @@ export default function NotificationCenter() {
     const earlierNotifications = notifications.filter(n => !isToday(n.created_at));
 
     return (
-        <ModernLayout>
+        <>
             <div className="flex items-center justify-between mb-8">
                 <div>
                     <h1 className="text-3xl font-black text-[#0d121b] dark:text-white tracking-tight">Notification Center</h1>
@@ -293,6 +293,6 @@ export default function NotificationCenter() {
                     background: rgba(26, 32, 44, 0.7);
                 }
             `}} />
-        </ModernLayout>
+        </>
     );
 }
