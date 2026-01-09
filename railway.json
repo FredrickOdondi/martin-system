@@ -18,7 +18,13 @@
             "build": {
                 "builder": "DOCKERFILE",
                 "dockerfilePath": "Dockerfile",
-                "target": "production"
+                "target": "production",
+                "buildArgs": {
+                    "VITE_API_URL": "${{VITE_API_URL}}",
+                    "VITE_GOOGLE_CLIENT_ID": "${{VITE_GOOGLE_CLIENT_ID}}",
+                    "VITE_APP_NAME": "${{VITE_APP_NAME}}",
+                    "VITE_APP_VERSION": "${{VITE_APP_VERSION}}"
+                }
             },
             "deploy": {
                 "numReplicas": 1,
