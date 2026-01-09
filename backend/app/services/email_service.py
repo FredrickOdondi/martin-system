@@ -23,7 +23,7 @@ class EmailService:
             autoescape=select_autoescape(['html', 'xml'])
         )
         
-        self.smtp_server = settings.SMTP_SERVER
+        self.smtp_server = settings.SMTP_HOST
         self.smtp_port = settings.SMTP_PORT
         self.smtp_user = settings.SMTP_USER
         self.smtp_password = settings.SMTP_PASSWORD
