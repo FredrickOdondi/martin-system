@@ -649,7 +649,8 @@ async def generate_agenda(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Generate a draft agenda using AI agent based on meeting context and TWG pillar.
+    Generate a draft agenda using the Supervisor AI agent.
+    The Supervisor coordinates the specific TWG agent to draft the content.
     """
     from app.agents.langgraph_base_agent import create_langgraph_agent
     
@@ -667,22 +668,29 @@ async def generate_agenda(
     if not has_twg_access(current_user, db_meeting.twg_id):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    # Determine agent based on TWG pillar
-    pillar = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
-    agent_id = pillar.split("_")[0]  # e.g., "energy" from "energy_infrastructure"
+    # Use Supervisor Agent ("Secretariat AI")
+    agent = create_langgraph_agent(agent_id="supervisor", session_id=str(meeting_id))
     
-    # Create agent and generate agenda
-    agent = create_langgraph_agent(agent_id=agent_id, session_id=str(meeting_id))
+    pillar_name = db_meeting.twg.pillar.value if db_meeting.twg else "Unspecified"
     
-    prompt = f"""Generate a professional meeting agenda for the following TWG session:
+    # Prompt Supervisor to coordinate the task
+    prompt = f"""Act as the Summit Secretariat Supervisor. Instruct the {pillar_name} TWG Agent to draft a professional meeting agenda for the following session.
 
-Meeting Title: {db_meeting.title}
-Date: {db_meeting.scheduled_at.strftime('%Y-%m-%d %H:%M UTC') if db_meeting.scheduled_at else 'TBD'}
-Duration: {db_meeting.duration_minutes} minutes
-Location: {db_meeting.location or 'Virtual'}
-TWG Pillar: {pillar}
+Meeting Details:
+- Title: {db_meeting.title}
+- Date: {db_meeting.scheduled_at.strftime('%Y-%m-%d %H:%M UTC') if db_meeting.scheduled_at else 'TBD'}
+- Duration: {db_meeting.duration_minutes} minutes
+- Location: {db_meeting.location or 'Virtual'}
+- TWG Pillar: {pillar_name}
 
-Create a structured agenda using MARKDOWN HEADERS:
+INSTRUCTIONS:
+1. Generate the agenda CONTENT ONLY.
+2. Use the strict MARKDOWN structure below.
+3. DO NOT include any conversational text (e.g., "Here is the agenda...").
+4. DO NOT simulate sending emails or calling tools.
+5. The output must be PURE MARKDOWN.
+
+STRUCTURE:
 
 # Meeting Agenda: {db_meeting.title}
 
@@ -695,9 +703,9 @@ Create a structured agenda using MARKDOWN HEADERS:
 - Outstanding items
 
 ## 3. Main Discussion Topics
-Discussion topics relevant to the {pillar.replace('_', ' ').title()} pillar:
-- **Topic 1**: [description]
-- **Topic 2**: [description]
+Discussion topics relevant to the {pillar_name} pillar:
+- **Topic 1**: [description based on context]
+- **Topic 2**: [description based on context]
 
 ## 4. Action Items & Next Steps
 - New assignments
@@ -705,9 +713,7 @@ Discussion topics relevant to the {pillar.replace('_', ' ').title()} pillar:
 
 ## 5. Closing Remarks (5 min)
 - Summary
-- Adjournment
-
-Use markdown headers (#, ##), bold (**) for emphasis, and bullet points for lists."""
+- Adjournment"""
 
     generated_content = agent.chat(prompt)
     
@@ -885,7 +891,8 @@ async def generate_minutes(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Generate draft meeting minutes using AI agent based on transcript or agenda.
+    Generate draft meeting minutes using the Supervisor AI agent.
+    The Supervisor coordinates the specific TWG agent (Rapporteur Mode) to draft the minutes.
     """
     from app.agents.langgraph_base_agent import create_langgraph_agent
     
@@ -903,31 +910,37 @@ async def generate_minutes(
     if not has_twg_access(current_user, db_meeting.twg_id):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    # Determine agent based on TWG pillar
-    pillar = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
-    agent_id = pillar.split("_")[0]
+    # Use Supervisor Agent ("Secretariat AI")
+    agent = create_langgraph_agent(agent_id="supervisor", session_id=str(meeting_id))
     
-    # Create agent and generate minutes
-    agent = create_langgraph_agent(agent_id=agent_id, session_id=str(meeting_id))
+    pillar_name = db_meeting.twg.pillar.value if db_meeting.twg else "Unspecified"
     
     # Use transcript if available, otherwise use agenda
     context = db_meeting.transcript if db_meeting.transcript else ""
     agenda_content = db_meeting.agenda.content if db_meeting.agenda else ""
     
-    prompt = f"""Generate professional meeting minutes for the following TWG session:
+    prompt = f"""Act as the Summit Secretariat Supervisor. Instruct the {pillar_name} TWG Agent to draft professional meeting minutes for the following session.
 
-Meeting Title: {db_meeting.title}
-Date: {db_meeting.scheduled_at.strftime('%Y-%m-%d %H:%M UTC') if db_meeting.scheduled_at else 'TBD'}
-Duration: {db_meeting.duration_minutes} minutes
-Location: {db_meeting.location or 'Virtual'}
-TWG Pillar: {pillar}
+Meeting Details:
+- Title: {db_meeting.title}
+- Date: {db_meeting.scheduled_at.strftime('%Y-%m-%d %H:%M UTC') if db_meeting.scheduled_at else 'TBD'}
+- Duration: {db_meeting.duration_minutes} minutes
+- Location: {db_meeting.location or 'Virtual'}
+- TWG Pillar: {pillar_name}
 
-Agenda:
+Context (Agenda/Transcript):
 {agenda_content}
 
 {f"Transcript/Notes:{chr(10)}{context}" if context else "No transcript available - generate based on typical ECOWAS TWG proceedings."}
 
-Create structured meeting minutes using MARKDOWN HEADERS (# and ##) for sections:
+INSTRUCTIONS:
+1. Generate the minutes CONTENT ONLY.
+2. Use the strict MARKDOWN structure below.
+3. DO NOT include any conversational text (e.g., "Here are the minutes...").
+4. DO NOT simulate sending emails or calling tools.
+5. The output must be PURE MARKDOWN.
+
+STRUCTURE:
 
 # ECOWAS Technical Working Group Meeting Minutes
 
@@ -957,9 +970,7 @@ Create structured meeting minutes using MARKDOWN HEADERS (# and ##) for sections
 [Next steps]
 
 ## Closing
-[Closing remarks]
-
-Use proper markdown formatting with headers (#, ##), bold (**), lists, and tables."""
+[Closing remarks]"""
 
     generated_content = agent.chat(prompt)
     
