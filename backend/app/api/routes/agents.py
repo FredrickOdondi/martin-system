@@ -272,8 +272,14 @@ async def stream_chat(
             # Send initial event
             yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
 
-            # Get the supervisor agent
-            supervisor = get_supervisor()
+            # Create a new supervisor instance with isolated session for this conversation
+            # This prevents conversation history accumulation causing context length errors
+            supervisor = SupervisorWithTools()
+            supervisor.supervisor.session_id = conv_id
+
+            # Clear any existing history for this session to start fresh
+            if hasattr(supervisor.supervisor, 'supervisor_agent'):
+                supervisor.supervisor.supervisor_agent.clear_history()
 
             # Parse message for commands and mentions
             parsed = command_parser.parse_message(chat_in.message)

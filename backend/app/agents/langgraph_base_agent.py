@@ -311,6 +311,10 @@ class LangGraphBaseAgent:
         thread_id = thread_id or self.session_id
         logger.info(f"[{self.agent_id}:{thread_id}] History cleared (use new thread_id for fresh conversation)")
 
+    def clear_history(self, thread_id: Optional[str] = None):
+        """Alias for reset_history for backward compatibility."""
+        self.reset_history(thread_id)
+
     def get_agent_info(self) -> Dict:
         """Get agent information."""
         return {

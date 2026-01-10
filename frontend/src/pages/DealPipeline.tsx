@@ -21,6 +21,8 @@ const DealPipeline: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showAIInsight, setShowAIInsight] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [showFilterModal, setShowFilterModal] = useState(false);
 
   const projects: Project[] = [
     {
@@ -112,6 +114,51 @@ const DealPipeline: React.FC = () => {
     return true;
   });
 
+  const handleExport = () => {
+    // Create CSV content
+    const headers = ['ID', 'Name', 'Pillar', 'Lead Country', 'Lead Company', 'Investment', 'Readiness Score', 'Status'];
+    const csvContent = [
+      headers.join(','),
+      ...filteredProjects.map(p =>
+        [p.id, p.name, p.pillar, p.leadCountry, p.leadCompany, p.investment, p.readinessScore, p.status].join(',')
+      )
+    ].join('\n');
+
+    // Download CSV
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `deal-pipeline-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const handleNewProject = () => {
+    navigate('/deal-pipeline/new');
+  };
+
+  const handleReviewSuggestions = () => {
+    alert('AI Suggestions feature coming soon!');
+  };
+
+  const handleFilterClick = () => {
+    setShowFilterModal(true);
+    alert('Advanced filters modal coming soon!');
+  };
+
+  const handlePreviousPage = () => {
+    if (currentPage > 1) {
+      setCurrentPage(currentPage - 1);
+    }
+  };
+
+  const handleNextPage = () => {
+    setCurrentPage(currentPage + 1);
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Breadcrumbs */}
@@ -134,11 +181,15 @@ const DealPipeline: React.FC = () => {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-200 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm">
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-200 text-sm font-medium hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors shadow-sm">
             <span className="material-symbols-outlined text-[20px]">download</span>
             Export
           </button>
-          <button className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg text-sm font-bold shadow-md shadow-primary/20 transition-all">
+          <button
+            onClick={handleNewProject}
+            className="flex items-center gap-2 px-4 py-2 bg-primary hover:bg-primary-hover text-white rounded-lg text-sm font-bold shadow-md shadow-primary/20 transition-all">
             <span className="material-symbols-outlined text-[20px]">add</span>
             New Project
           </button>
@@ -208,7 +259,9 @@ const DealPipeline: React.FC = () => {
               could increase the overall readiness score by ~15%.
             </p>
           </div>
-          <button className="text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:underline px-2 z-10 whitespace-nowrap self-center">
+          <button
+            onClick={handleReviewSuggestions}
+            className="text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:underline px-2 z-10 whitespace-nowrap self-center">
             Review Suggestions
           </button>
           <button
@@ -279,7 +332,9 @@ const DealPipeline: React.FC = () => {
               <span className="material-symbols-outlined text-[20px]">expand_more</span>
             </div>
           </div>
-          <button className="p-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600">
+          <button
+            onClick={handleFilterClick}
+            className="p-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600">
             <span className="material-symbols-outlined text-[20px]">filter_list</span>
           </button>
         </div>
@@ -402,7 +457,10 @@ const DealPipeline: React.FC = () => {
                       <span className="material-symbols-outlined text-[20px]">visibility</span>
                     </button>
                     <button
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        alert('More options menu coming soon!');
+                      }}
                       className="text-slate-400 hover:text-primary transition-colors p-1 ml-2"
                     >
                       <span className="material-symbols-outlined text-[20px]">more_vert</span>
@@ -424,10 +482,15 @@ const DealPipeline: React.FC = () => {
             of <span className="font-medium text-slate-900 dark:text-white">24</span> results
           </div>
           <div className="flex gap-2">
-            <button className="px-3 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-50">
+            <button
+              onClick={handlePreviousPage}
+              disabled={currentPage === 1}
+              className="px-3 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-50 dark:hover:bg-slate-600">
               Previous
             </button>
-            <button className="px-3 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600">
+            <button
+              onClick={handleNextPage}
+              className="px-3 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600">
               Next
             </button>
           </div>
