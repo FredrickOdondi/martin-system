@@ -599,7 +599,7 @@ async def force_reconciliation(
     # Group meetings by location  
     venue_schedule = defaultdict(list)
     for m in meetings:
-        if m.location:
+        if m.location and m.location.lower().strip() != 'virtual':
             venue_schedule[m.location.lower().strip()].append({
                 "meeting_id": str(m.id),
                 "title": m.title,
