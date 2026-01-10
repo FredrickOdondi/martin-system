@@ -1,0 +1,196 @@
+import os
+import io
+import asyncio
+from datetime import datetime, timedelta
+from typing import List, Optional, Dict, Any
+
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.core.config import settings
+from app.core.database import AsyncSessionLocal
+from app.models.models import Meeting
+from app.services.document_synthesizer import DocumentSynthesizer
+from app.services.groq_llm_service import get_llm_service
+from loguru import logger
+
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+
+class DriveService:
+    """
+    Service to interact with Google Drive, specifically to watch for 
+    Meeting Recordings/Transcripts and ingest them.
+    """
+    def __init__(self):
+        self.creds = None
+        self.service = None
+        self._setup_credentials()
+
+    def _setup_credentials(self):
+        """Setup Google Drive credentials"""
+        try:
+            creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+            if not creds_path and os.path.exists('google_credentials.json'):
+                creds_path = 'google_credentials.json'
+            
+            if creds_path and os.path.exists(creds_path):
+                self.creds = service_account.Credentials.from_service_account_file(
+                    creds_path, scopes=SCOPES
+                )
+                self.service = build('drive', 'v3', credentials=self.creds)
+                logger.info("DriveService initialized successfully.")
+            else:
+                logger.warning("No Google Credentials found. DriveService will not function.")
+        except Exception as e:
+            logger.error(f"Failed to initialize DriveService: {e}")
+
+    def list_recent_transcripts(self, hours: int = 24) -> List[Dict[str, Any]]:
+        """
+        List transcript files modified in the last N hours.
+        Searches for files with text/plain mimeType (transcripts) or Google Docs.
+        Blocking call - should be run in thread.
+        """
+        if not self.service:
+            return []
+
+        # Time filter
+        time_threshold = (datetime.utcnow() - timedelta(hours=hours)).isoformat() + 'Z'
+        
+        query = (
+            f"modifiedTime > '{time_threshold}' and "
+            "trashed = false and "
+            "(mimeType = 'text/plain' or mimeType = 'application/vnd.google-apps.document') and "
+            "name contains 'Transcript'"
+        )
+
+        try:
+            results = self.service.files().list(
+                q=query,
+                pageSize=10,
+                fields="nextPageToken, files(id, name, modifiedTime, createdTime)"
+            ).execute()
+            items = results.get('files', [])
+            return items
+        except Exception as e:
+            logger.error(f"Error listing Drive files: {e}")
+            return []
+
+    def download_file_content(self, file_id: str, mime_type: str) -> str:
+        """Download text content of a file. Blocking call."""
+        if not self.service:
+            return ""
+
+        try:
+            if mime_type == 'application/vnd.google-apps.document':
+                request = self.service.files().export_media(fileId=file_id, mimeType='text/plain')
+            else:
+                request = self.service.files().get_media(fileId=file_id)
+
+            fh = io.BytesIO()
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while done is False:
+                status, done = downloader.next_chunk()
+
+            return fh.getvalue().decode('utf-8')
+        except Exception as e:
+            logger.error(f"Error downloading file {file_id}: {e}")
+            return ""
+
+    async def process_new_transcripts(self):
+        """
+        Main logic: Check for new transcripts, match to meetings, generate minutes.
+        Async compatible.
+        """
+        logger.info("Checking for new meeting transcripts...")
+        
+        # Run blocking Google API call in thread
+        files = await asyncio.to_thread(self.list_recent_transcripts, hours=24)
+        
+        if not files:
+            logger.info("No new transcripts found.")
+            return
+
+        async with AsyncSessionLocal() as db:
+            try:
+                synthesizer = DocumentSynthesizer(llm_client=get_llm_service())
+
+                for file in files:
+                    file_id = file['id']
+                    filename = file['name']
+                    
+                    logger.info(f"Processing transcript: {filename}")
+                    
+                    # Run blocking download in thread
+                    content = await asyncio.to_thread(self.download_file_content, file_id, 'text/plain')
+
+                    if not content:
+                        continue
+
+                    # MATCHING LOGIC
+                    matched_meeting = await self._match_meeting(db, filename)
+                    
+                    if matched_meeting:
+                        if matched_meeting.minutes:
+                            logger.info(f"Meeting {matched_meeting.title} already has minutes. Skipping.")
+                            continue
+                            
+                        logger.info(f"Generating minutes for meeting: {matched_meeting.title}")
+                        
+                        # Context for synthesizer
+                        meeting_context = {
+                            "meeting_title": matched_meeting.title,
+                            "meeting_date": str(matched_meeting.start_time),
+                            "pillar_name": matched_meeting.twg.name if matched_meeting.twg else "General",
+                            "attendees_list": "See transcript", 
+                            "agenda_content": matched_meeting.description or "Standard Agenda"
+                        }
+                        
+                        # Synthesize (Assuming synthesize_minutes handles LLM sync/async correctly)
+                        # synthesizer.synthesize_minutes calls llm.chat which is currently SYNC.
+                        # We should also wrap that if it's slow, but let's assume it's fast enough or wrap it.
+                        # llm.chat uses groq client which is sync? Yes.
+                        result = await asyncio.to_thread(
+                            synthesizer.synthesize_minutes, 
+                            content, 
+                            meeting_context
+                        )
+                        minutes_text = result['content']
+                        
+                        # Save to DB
+                        # Need to re-fetch/attach if session issue? 
+                        # matched_meeting is bound to db session.
+                        
+                        # Also save transcript text?
+                        matched_meeting.transcript = content
+                        matched_meeting.minutes = minutes_text
+                        
+                        await db.commit()
+                        logger.info(f"SUCCESS: Saved minutes for {matched_meeting.title}")
+                    else:
+                        logger.warning(f"Could not match transcript '{filename}' to any active meeting.")
+
+            except Exception as e:
+                logger.error(f"Error in transcript processing loop: {e}")
+
+    async def _match_meeting(self, db: AsyncSession, filename: str) -> Optional[Meeting]:
+        """
+        Attempt to match a transcript filename to a DB meeting.
+        """
+        # Fetch all meetings (optimized: maybe filter by date?)
+        # For now, fetch title and id
+        result = await db.execute(select(Meeting))
+        all_meetings = result.scalars().all()
+        
+        # Simple heuristic match
+        for meeting in all_meetings:
+            if meeting.title and meeting.title in filename:
+                return meeting
+        
+        return None
+
+# Singleton
+drive_service = DriveService()

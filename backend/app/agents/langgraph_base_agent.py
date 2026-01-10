@@ -8,6 +8,7 @@ Uses LangGraph StateGraph for proper agent orchestration.
 from typing import Annotated, TypedDict, List, Dict, Optional, Sequence
 from loguru import logger
 from operator import add
+import json
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
@@ -104,12 +105,65 @@ class LangGraphBaseAgent:
         
         # Tools Configuration
         from app.tools.calendar_tools import GET_SCHEDULE_TOOL_DEF, get_schedule
+        from app.tools.email_tools import EMAIL_TOOLS, send_email, search_emails, list_recent_emails, get_email, create_email_draft, get_email_thread
         import json
         
         # Register default tools available to all agents (or specific ones)
+        
+        # 1. Start with standard tools
         self.tools_def = [GET_SCHEDULE_TOOL_DEF]
+        
+        # 2. Convert and add EMAIL_TOOLS
+        for tool in EMAIL_TOOLS:
+            # Create standard OpenAI tool definition
+            tool_def = {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "parameters": {
+                        "type": "object",
+                        "properties": tool["parameters"],
+                        # Assuming all params optional for now or need strict parsing
+                        # Simple schema adjustment:
+                        "required": [] 
+                    }
+                }
+            }
+            # Adjust properties format if needed. 
+            # EMAIL_TOOLS params are simple key-value descriptions. 
+            # We need to construct a valid JSON schema for parameters.
+            # Reworking parameters to be strict JSON schema:
+            new_props = {}
+            for param_name, param_desc in tool["parameters"].items():
+                new_props[param_name] = {
+                    "type": "string", # Default to string
+                    "description": param_desc
+                }
+                # Fix specific types
+                if param_name in ["max_results", "days"]:
+                    new_props[param_name]["type"] = "integer"
+                if param_name in ["include_body"]:
+                    new_props[param_name]["type"] = "boolean"
+                if param_name in ["variables", "exclude_files"]:
+                    new_props[param_name]["type"] = "object"
+                if param_name in ["attachments", "to", "cc", "bcc"]:
+                     # These can be lists or strings, schema is complex. 
+                     # Simplifying to string or array of strings
+                     pass # leaving as string or implied
+            
+            tool_def["function"]["parameters"]["properties"] = new_props
+            self.tools_def.append(tool_def)
+
+        # 3. Build Tool Map
         self.tool_map = {
-            "get_schedule": get_schedule
+            "get_schedule": get_schedule,
+            "send_email": send_email,
+            "search_emails": search_emails,
+            "list_recent_emails": list_recent_emails,
+            "get_email": get_email,
+            "create_email_draft": create_email_draft,
+            "get_email_thread": get_email_thread
         }
         
         # Get Knowledge Base (RAG)
@@ -190,11 +244,36 @@ class LangGraphBaseAgent:
 
     def _process_query_node(self, state: AgentConversationState) -> AgentConversationState:
         """Process incoming query."""
-        # ... (Same as before, simplified for brevity in this replace) ...
-        # Ensure imports for RAG are handled
+        query = state["query"]
+        
+        # Initialize context if needed
+        if state.get("context") is None:
+            state["context"] = {}
+
+        # RAG Retrieval
         if self.twg_id and self.kb:
-            # ... existing RAG logic ...
-            pass # Kept intact in full file
+            try:
+                # Search KB restricted to TWG namespace
+                results = self.kb.search(
+                    query=query,
+                    namespace=f"twg-{self.twg_id}",
+                    top_k=2  # LIMIT: Only top 2 docs
+                )
+                
+                # Format context
+                if results:
+                    docs_text = "\n\n".join([
+                        f"Document (Score: {r['score']:.2f}):\n{r['metadata'].get('text', '')[:2000]}" # LIMIT: 2000 chars per doc
+                        for r in results
+                    ])
+                    state["context"]["retrieved_docs"] = docs_text
+                    logger.info(f"[{self.agent_id}] Retrieved {len(results)} documents")
+                else:
+                    state["context"]["retrieved_docs"] = "No relevant documents found."
+                    
+            except Exception as e:
+                logger.error(f"[{self.agent_id}] RAG Error: {e}")
+                
         return state
 
     def _generate_response_node(self, state: AgentConversationState) -> AgentConversationState:
@@ -203,6 +282,10 @@ class LangGraphBaseAgent:
         """
         query = state["query"]
         messages = state.get("messages", [])
+        
+        # Enforce History Limit to prevent 413 errors
+        if len(messages) > self.max_history:
+             messages = messages[-self.max_history:]
         
         logger.info(f"[{self.agent_id}] Generating response...")
 
@@ -275,9 +358,41 @@ class LangGraphBaseAgent:
             else:
                 # Standard text response
                 content = response_obj if isinstance(response_obj, str) else response_obj.content
-                logger.info(f"[{self.agent_id}] Text Response generated")
-                state["response"] = content
-                state["messages"].append(AIMessage(content=content))
+                
+                # FALLBACK: Check for hallucinatedtool call syntax (LLama models sometimes do this)
+                # Pattern: <function=tool_name{...args...}</function>
+                import re
+                fallback_match = re.search(r'<function=(\w+)\s*(\{[^}]*\})\s*</function>', content or "")
+                if fallback_match:
+                    logger.warning(f"[{self.agent_id}] Detected hallucinated tool call, parsing fallback...")
+                    tool_name = fallback_match.group(1)
+                    try:
+                        tool_args = json.loads(fallback_match.group(2))
+                    except json.JSONDecodeError:
+                        tool_args = {}
+                    
+                    # Generate a fake tool_call_id
+                    import uuid
+                    tool_call_id = f"fallback_{uuid.uuid4().hex[:8]}"
+                    
+                    tool_calls_data = [{
+                        "name": tool_name,
+                        "args": tool_args,
+                        "id": tool_call_id
+                    }]
+                    
+                    ai_msg = AIMessage(
+                        content="",  # Clear the hallucinated content
+                        tool_calls=tool_calls_data
+                    )
+                    state["response"] = "[Calling Tool (Fallback)...]"
+                    state["messages"].append(ai_msg)
+                    logger.info(f"[{self.agent_id}] Fallback tool call constructed: {tool_name}")
+                else:
+                    # Truly just text
+                    logger.info(f"[{self.agent_id}] Text Response generated")
+                    state["response"] = content
+                    state["messages"].append(AIMessage(content=content))
 
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error in generation: {e}")
@@ -312,8 +427,53 @@ class LangGraphBaseAgent:
                 if tool_name in self.tool_map:
                     # Execute function
                     func = self.tool_map[tool_name]
-                    # Pass args as kwargs
-                    result = func(**tool_args)
+                    
+                    # Check if async
+                    import asyncio
+                    import inspect
+                    
+                    if inspect.iscoroutinefunction(func):
+                        try:
+                            loop = asyncio.get_running_loop()
+                            # We are in an event loop (FastAPI).
+                            # Since this node is SYNC, we technically shouldn't block, 
+                            # but we need the result.
+                            # We can't await here.
+                            # We must run it in a separate thread to block this sync thread until done.
+                            from concurrent.futures import ThreadPoolExecutor
+                            with ThreadPoolExecutor() as executor:
+                                future = executor.submit(lambda: asyncio.run(func(**tool_args)))
+                                result = future.result()
+                        except RuntimeError:
+                             # No running loop, use asyncio.run
+                             result = asyncio.run(func(**tool_args))
+                        except Exception as loop_error:
+                             # Fallback crazy: Just try to run it?
+                             # Dealing with nested loops is hard. 
+                             # Alternative: Run in threadsafe if loop exists?
+                             # asyncio.run_coroutine_threadsafe needs a loop to run IN.
+                             # If we are in a loop, we can use it.
+                             if loop:
+                                 # But .result() blocks. Blocking the loop from within the loop = Deadlock.
+                                 # We CANNOT block a running loop.
+                                 # THIS IS A PROBLEM.
+                                 # The Agent `chat` method MUST be async if it wants to await things.
+                                 # Refactoring `chat` to async is the only robust way.
+                                 # Temporary hack: Use NestAsyncio? No.
+                                 
+                                 # Correct approach for now:
+                                 # Assume we are in a thread (FastAPI runs sync endpoints in threads).
+                                 # IF `agent.chat` is in a sync endpoint `def chat(...)`, FastAPI runs it in a thread.
+                                 # Then `asyncio.run()` works fine!
+                                 # IF `agent.chat` is in an async endpoint `async def chat(...)`, we are in the main loop.
+                                 
+                                 # Let's hope `agents.py` calls it from a `def` (sync) endpoint or in a thread.
+                                 # If it fails, we know we must refactor to Async.
+                                 result = asyncio.run(func(**tool_args)) 
+                    else:
+                        # Sync function
+                        result = func(**tool_args)
+                        
                     # Result in JSON string format expected
                 else:
                     result = json.dumps({"error": f"Tool {tool_name} not found"})
