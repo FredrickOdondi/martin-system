@@ -15,6 +15,82 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
     const [mentionIndex, setMentionIndex] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
 
+    // Chat State
+    const [input, setInput] = useState('');
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+
+    const { streamingState, sendStreamingMessage, cancelStream } = useStreamingChat();
+    const { isStreaming, currentStatus, currentTool } = streamingState;
+
+    // Initial Welcome Message
+    useEffect(() => {
+        if (messages.length === 0) {
+            setMessages([
+                {
+                    message_id: 'welcome',
+                    conversation_id: 'init',
+                    message_type: ChatMessageType.AGENT_TEXT,
+                    content: "Hello Dr. Sow. I can help you analyze documents, draft agendas, and coordinate with other TWGs. How can I assist you today?",
+                    sender: 'agent',
+                    timestamp: new Date().toISOString()
+                }
+            ]);
+        }
+    }, [messages.length]);
+
+    // Auto-scroll to bottom
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [messages, streamingState]);
+
+    const handleSendMessage = async () => {
+        if (!input.trim() || isStreaming) return;
+
+        const content = input.trim();
+        setInput('');
+
+        const userMsg: ChatMessage = {
+            message_id: Date.now().toString(),
+            conversation_id: conversationId || '',
+            message_type: ChatMessageType.USER_TEXT,
+            content: content,
+            sender: 'user',
+            timestamp: new Date().toISOString()
+        };
+
+        setMessages(prev => [...prev, userMsg]);
+
+        const request: EnhancedChatRequest = {
+            message: content,
+            conversation_id: conversationId,
+            twg_id: propTwgId || (user?.role !== 'admin' ? user?.twg_ids?.[0] : undefined) // Pass TWG Context
+        };
+
+        await sendStreamingMessage(
+            request,
+            (event: StreamEvent) => {
+                if (event.type === 'start' && event.conversation_id) {
+                    setConversationId(event.conversation_id);
+                }
+            },
+            (finalMsg: any) => {
+                setMessages(prev => [...prev, finalMsg]);
+            },
+            (err: string) => {
+                setMessages(prev => [...prev, {
+                    message_id: Date.now().toString(),
+                    conversation_id: conversationId || '',
+                    message_type: ChatMessageType.SYSTEM,
+                    content: `Error: ${err}`,
+                    sender: 'system',
+                    timestamp: new Date().toISOString()
+                }]);
+            }
+        );
+    };
+
     // Fetch TWGs if authorized
     useEffect(() => {
         const canMention = user?.role === 'admin' || user?.role === 'secretariat_lead';
@@ -208,8 +284,8 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
                                 <li
                                     key={twg.id}
                                     className={`px-3 py-2 text-xs cursor-pointer flex items-center gap-2 ${idx === mentionIndex
-                                            ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
-                                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                                        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
                                         }`}
                                     onMouseDown={(e) => {
                                         e.preventDefault(); // Prevent blur
