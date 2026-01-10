@@ -1041,7 +1041,11 @@ export default function MeetingDetail() {
 
                                                         <div className="space-y-3">
                                                             {meetingActionItems.map(item => (
-                                                                <Card key={item.id} className="p-4">
+                                                                <Card
+                                                                    key={item.id}
+                                                                    className="p-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors"
+                                                                    onClick={() => handleActionClick(item)}
+                                                                >
                                                                     <div className="flex items-center gap-4">
                                                                         <input type="checkbox" className="w-5 h-5 rounded border-slate-300" />
                                                                         <div className="flex-1">
