@@ -10,7 +10,7 @@ from loguru import logger
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.errors import GraphInterrupt
+from langgraph.errors import GraphInterrupt, GraphRecursionError
 from langchain_core.messages import HumanMessage, AIMessage
 
 from app.agents.langgraph_base_agent import LangGraphBaseAgent
@@ -176,7 +176,17 @@ class LangGraphSupervisor:
                         agent = self._twg_agents[agent_id]
                         response = agent.chat(query)
                         state["agent_responses"][agent_id] = response
+                    except GraphInterrupt:
+                        # Re-raise explicit interrupts (like Approval Required)
+                        # The supervisor must pause if a child pauses
+                        logger.info(f"[DISPATCH] Interrupt from {agent_id} detected in supervisor")
+                        raise
                     except Exception as e:
+                        # Check for re-raised GraphInterrupt trapped in generic Exception
+                        if type(e).__name__ == "GraphInterrupt":
+                            logger.info(f"[DISPATCH] GraphInterrupt caught as Exception from {agent_id}")
+                            raise e
+                            
                         logger.error(f"[DISPATCH] Error with {agent_id}: {e}")
                         state["agent_responses"][agent_id] = f"Error: {str(e)}"
 
@@ -283,7 +293,8 @@ class LangGraphSupervisor:
         }
 
         # Run the graph
-        config = {"configurable": {"thread_id": thread_id}}
+        # Enforce recursion limit for supervisor workflow
+        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 30}
 
         try:
             result = self.compiled_graph.invoke(initial_state, config)
@@ -308,6 +319,10 @@ class LangGraphSupervisor:
 
             return final_response
 
+        except GraphRecursionError:
+            logger.warning(f"[SUPERVISOR:{thread_id}] GraphRecursionError: Max iterations reached")
+            return "I apologize, but the supervisor reached the maximum number of steps. This usually indicates a complex loop or conflict. Please refine your request."
+            
         except Exception as e:
             # Check for GraphInterrupt by name to avoid import/scope issues
             if type(e).__name__ == "GraphInterrupt":
