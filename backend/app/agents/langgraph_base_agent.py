@@ -13,7 +13,8 @@ import json
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import interrupt, Command
-from langgraph.errors import GraphInterrupt
+from langgraph.types import interrupt, Command
+from langgraph.errors import GraphInterrupt, GraphRecursionError
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
 from app.services.groq_llm_service import get_llm_service
@@ -138,23 +139,36 @@ class LangGraphBaseAgent:
             # Adjust properties format if needed. 
             # EMAIL_TOOLS params are simple key-value descriptions. 
             # We need to construct a valid JSON schema for parameters.
-            # Reworking parameters to be strict JSON schema:
+            
             new_props = {}
             for param_name, param_desc in tool["parameters"].items():
-                new_props[param_name] = {
-                    "type": "string", # Default to string
+                # Default generic schema
+                prop_schema = {
+                    "type": "string",
                     "description": param_desc
                 }
-                # Fix specific types
+                
+                # Specific Type Overrides
                 if param_name in ["max_results", "days"]:
-                    new_props[param_name]["type"] = "integer"
-                if param_name in ["include_body"]:
-                    new_props[param_name]["type"] = "boolean"
-                if param_name in ["variables", "exclude_files"]:
-                    new_props[param_name]["type"] = "object"
-                if param_name == "attachments":
-                    # Relaxed schema to handle LLM inconsistencies (it often sends "" or null instead of [])
-                    new_props[param_name] = {
+                    prop_schema["type"] = "integer"
+                elif param_name in ["include_body"]:
+                    prop_schema["type"] = "boolean"
+                elif param_name in ["variables", "exclude_files"]:
+                    prop_schema["type"] = "object"
+                
+                # Handle 'to': String or List of strings
+                elif param_name == "to":
+                    prop_schema = {
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "array", "items": {"type": "string"}}
+                        ],
+                        "description": param_desc
+                    }
+                
+                # Handle 'attachments': List of strings (or null/string fallback)
+                elif param_name == "attachments":
+                     prop_schema = {
                         "anyOf": [
                             {"type": "array", "items": {"type": "string"}},
                             {"type": "string"},
@@ -162,16 +176,18 @@ class LangGraphBaseAgent:
                         ],
                         "description": param_desc
                     }
-                
-                # 'cc', 'bcc', 'html_body', and 'pillar_name' can also receive null from LLM
-                if param_name in ["cc", "bcc", "html_body", "pillar_name", "context"]:
-                    new_props[param_name] = {
+
+                # Handle Nullable Strings (cc, bcc, html_body, pillar_name, context)
+                elif param_name in ["cc", "bcc", "html_body", "pillar_name", "context"]:
+                    prop_schema = {
                         "anyOf": [
                             {"type": "string"},
                             {"type": "null"}
                         ],
                         "description": param_desc
                     }
+
+                new_props[param_name] = prop_schema
             
             tool_def["function"]["parameters"]["properties"] = new_props
             self.tools_def.append(tool_def)
@@ -276,9 +292,10 @@ class LangGraphBaseAgent:
         if self.twg_id and self.kb:
             try:
                 # Search KB restricted to TWG namespace
+                namespace = f"twg-{self.twg_id}"
                 results = self.kb.search(
                     query=query,
-                    namespace=f"twg-{self.twg_id}",
+                    namespace=namespace,
                     top_k=2  # LIMIT: Only top 2 docs
                 )
                 
@@ -290,8 +307,8 @@ class LangGraphBaseAgent:
                     for r in results:
                         file_name = r['metadata'].get('file_name', 'Unknown')
                         text = r['metadata'].get('text', '') or ''
-                        # Truncate text to 500 chars to avoid token limit errors
-                        truncated_text = text[:500] + "..." if len(text) > 500 else text
+                        # Truncate text to 2000 chars (approx 500 tokens) to allow for more context while staying within limits
+                        truncated_text = text[:2000] + "..." if len(text) > 2000 else text
                         context_parts.append(f"[{file_name}]\n{truncated_text}")
 
                     context_text = "\n".join(context_parts)
@@ -591,7 +608,8 @@ class LangGraphBaseAgent:
         logger.info(f"[{self.agent_id}:{thread_id}] Received: {message[:100]}...")
 
         # Get existing state from checkpointer if available
-        config = {"configurable": {"thread_id": thread_id}}
+        # Enforce recursion limit to prevent infinite loops (approx 5-7 tool turns)
+        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
 
         # Initialize or update state
         initial_state: AgentConversationState = {
@@ -626,6 +644,9 @@ class LangGraphBaseAgent:
         except GraphInterrupt:
             # Re-raise GraphInterrupt
             raise
+        except GraphRecursionError:
+            logger.warning(f"[{self.agent_id}:{thread_id}] GraphRecursionError: Max iterations reached")
+            return "I apologize, but I reached the maximum number of steps trying to solve this request. I am stopping to avoid an infinite loop. Please refine your query or provide more specific instructions."
         except Exception as e:
             logger.error(f"[{self.agent_id}:{thread_id}] Error: {e}")
             return f"I apologize, but I encountered an error: {str(e)}"
