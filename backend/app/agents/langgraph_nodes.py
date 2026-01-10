@@ -24,8 +24,29 @@ def route_query_node(state: AgentState) -> AgentState:
     """
     query = state["query"]
     query_lower = query.lower()
-
-    # Agent domain keywords
+    
+    # --- STRICT RBAC ENFORCEMENT ---
+    context = state.get("context")
+    if context and context.get("twg_id"):
+        twg_id = context.get("twg_id")
+        from app.agents.utils import get_agent_id_by_twg_id
+        forced_agent_id = get_agent_id_by_twg_id(twg_id)
+        
+        if forced_agent_id:
+            logger.info(f"[ROUTE] Strict RBAC: Context restricted to {forced_agent_id.upper()}")
+            # Force routing to single agent
+            state["relevant_agents"] = [forced_agent_id]
+            state["delegation_type"] = "single"
+            state["requires_synthesis"] = False
+            return state
+        else:
+            logger.warning(f"[ROUTE] Context twg_id {twg_id} did not resolve to an agent. STRICT RBAC BLOCKING.")
+            # Fail Closed: Do not allow fallback to Supervisor
+            state["relevant_agents"] = []
+            state["delegation_type"] = "rbac_failure" 
+            return state
+    
+    # Keyword-based routing (Standard)
     agent_domains = {
         "energy": {
             "primary": ["energy", "infrastructure", "power", "electricity", "renewable", "solar", "wind", "wapp"],
@@ -135,20 +156,21 @@ def create_twg_agent_node(agent_id: str, agent: LangGraphBaseAgent):
 
     Returns a function that can be used as a LangGraph node.
     """
-    def twg_node(state: AgentState) -> AgentState:
+    # Use default args to capture values at definition time, not call time
+    def twg_node(state: AgentState, _agent_id: str = agent_id, _agent: LangGraphBaseAgent = agent) -> AgentState:
         """
         Delegate query to a specific TWG agent.
         """
         query = state["query"]
-        logger.info(f"[{agent_id.upper()}] Processing query")
+        logger.info(f"[{_agent_id.upper()}] Processing query")
 
         try:
-            response = agent.chat(query)
-            state["agent_responses"][agent_id] = response
-            logger.info(f"[{agent_id.upper()}] Response generated")
+            response = _agent.chat(query)
+            state["agent_responses"][_agent_id] = response
+            logger.info(f"[{_agent_id.upper()}] Response generated")
         except Exception as e:
-            logger.error(f"[{agent_id.upper()}] Error: {e}")
-            state["agent_responses"][agent_id] = f"Error: {str(e)}"
+            logger.error(f"[{_agent_id.upper()}] Error: {e}")
+            state["agent_responses"][_agent_id] = f"Error: {str(e)}"
 
         return state
 

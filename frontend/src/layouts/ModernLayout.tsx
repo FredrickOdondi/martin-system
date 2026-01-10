@@ -198,7 +198,7 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
                                         title={isSidebarCollapsed ? "Schedule" : ""}
                                     >
                                         <span className="material-symbols-outlined text-[20px]">calendar_month</span>
-                                        {!isSidebarCollapsed && <span>Schedule</span>}
+                                        {!isSidebarCollapsed && <span>Meetings (Schedule)</span>}
                                     </button>
                                     <button
                                         onClick={() => navigate('/notifications')}

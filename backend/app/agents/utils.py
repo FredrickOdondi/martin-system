@@ -57,3 +57,30 @@ def get_twg_id_by_agent_id(agent_id: str) -> Optional[str]:
     except Exception as e:
         logger.error(f"Error resolving TWG ID for agent {agent_id}: {e}")
         return None
+
+
+def get_agent_id_by_twg_id(twg_id: str) -> Optional[str]:
+    """
+    Synchronously resolve a TWG UUID to its Agent ID (e.g., 'energy').
+    Used for Strict RBAC routing.
+
+    Args:
+        twg_id: The TWG UUID string
+
+    Returns:
+        Agent ID string or None if not found
+    """
+    try:
+        with SyncSession() as session:
+            stmt = select(TWG).where(TWG.id == uuid.UUID(twg_id))
+            twg = session.execute(stmt).scalar_one_or_none()
+
+            if twg:
+                # Reverse lookup from pillar
+                for agent_id, pillar in AGENT_TO_PILLAR_MAP.items():
+                    if pillar == twg.pillar:
+                        return agent_id
+            return None
+    except Exception as e:
+        logger.error(f"Error resolving Agent ID for TWG {twg_id}: {e}")
+        return None

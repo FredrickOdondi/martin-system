@@ -118,4 +118,10 @@ chroma/
 # Temporary files
 *.tmp
 *.temp
-.tmp/
+
+# Google Credentials
+backend/google_credentials.json
+token.json
+backend/token.json
+backend/credentials.json
+

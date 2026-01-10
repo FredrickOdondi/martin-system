@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
+import { useSelector } from 'react-redux';
+import { RootState } from '../../store';
 import { agentService, Citation } from '../../services/agentService';
+import { twgService } from '../../services/twgService';
 import { CommandAutocomplete } from '../../components/agent/CommandAutocomplete';
 import { MentionAutocomplete } from '../../components/agent/MentionAutocomplete';
 import EmailApprovalModal, { EmailApprovalRequest, EmailDraft } from '../../components/agent/EmailApprovalModal';
@@ -71,7 +74,36 @@ interface AgentMentionSuggestion {
 }
 
 export default function TwgAgent() {
+    // User context for dynamic agent routing
+    const user = useSelector((state: RootState) => state.auth.user);
+    const twgId = user?.role !== 'admin' ? user?.twg_ids?.[0] : undefined;
+
+    // Agent name state (fetched from TWG)
+    const [agentName, setAgentName] = useState<string>('Your Assistant');
+
+    // Fetch TWG details to get the proper agent name
+    useEffect(() => {
+        const fetchTwgDetails = async () => {
+            if (!twgId) {
+                setAgentName('Secretariat Assistant');
+                return;
+            }
+            try {
+                const twg = await twgService.getTWG(twgId);
+                // Extract pillar name from TWG name (e.g., "Energy TWG" -> "Energy Agent")
+                const pillarName = twg.name.replace(' TWG', '').replace('TWG', '').trim();
+                setAgentName(`${pillarName} Agent`);
+            } catch (error) {
+                console.error('Failed to fetch TWG details:', error);
+                setAgentName('Your TWG Agent');
+            }
+        };
+        fetchTwgDetails();
+    }, [twgId]);
+
     const [messages, setMessages] = useState<Message[]>([]);
+
+
     const [inputMessage, setInputMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [conversationId, setConversationId] = useState<string | undefined>();
@@ -88,9 +120,6 @@ export default function TwgAgent() {
     // Email approval state
     const [pendingEmailApproval, setPendingEmailApproval] = useState<EmailApprovalRequest | null>(null);
     const [showApprovalModal, setShowApprovalModal] = useState(false);
-
-    // Sidebar state
-    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
 
     // Settings modal state
     const [showSettingsModal, setShowSettingsModal] = useState(false);
@@ -125,6 +154,7 @@ export default function TwgAgent() {
             const response = await agentService.chat({
                 message: messageToSend,
                 conversation_id: conversationId,
+                twg_id: twgId,
             });
 
             setConversationId(response.conversation_id);
@@ -402,177 +432,11 @@ export default function TwgAgent() {
     return (
         <>
             <div className="h-[calc(100vh-140px)] flex overflow-hidden">
-                {/* Sidebar */}
-                <aside className={`${isSidebarCollapsed ? 'w-0' : 'w-80'} bg-white dark:bg-[#1a202c] border-r border-[#e7ebf3] dark:border-[#2d3748] flex flex-col transition-all duration-300 overflow-hidden hidden lg:flex`}>
-                    <div className="p-6 border-b border-[#e7ebf3] dark:border-[#2d3748]">
-                        <div className="flex items-center justify-between mb-2">
-                            <div className="text-xs font-bold text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider">Active Workspace</div>
-                            <button
-                                onClick={() => setIsSidebarCollapsed(true)}
-                                className="p-1 hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded transition-colors"
-                                title="Collapse sidebar"
-                            >
-                                <span className="material-symbols-outlined text-[18px] text-[#6b7280]">chevron_left</span>
-                            </button>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <div className="size-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-[#1152d4] flex items-center justify-center">
-                                <span className="material-symbols-outlined">local_shipping</span>
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-[#0d121b] dark:text-white leading-tight">Trade & Customs</h3>
-                                <p className="text-xs text-[#4c669a] dark:text-[#a0aec0]">Member States: 15</p>
-                            </div>
-                            <button className="ml-auto text-[#4c669a] hover:text-[#1152d4]">
-                                <span className="material-symbols-outlined">expand_more</span>
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                        <div>
-                            <h4 className="px-2 text-xs font-bold text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider mb-3">AI Agents</h4>
-                            <div className="space-y-1">
-                                {/* Secretariat Assistant (Main Supervisor) */}
-                                <button className="w-full flex items-center gap-3 px-3 py-2.5 bg-[#1152d4]/10 text-[#1152d4] dark:text-blue-400 rounded-lg transition-colors">
-                                    <div className="relative">
-                                        <span className="material-symbols-outlined">smart_toy</span>
-                                        <span className="absolute -bottom-0.5 -right-0.5 size-2.5 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
-                                    </div>
-                                    <div className="text-left flex-1">
-                                        <div className="font-bold text-sm">Secretariat Assistant</div>
-                                        <div className="text-[11px] opacity-80">Main Coordinator</div>
-                                    </div>
-                                </button>
-
-                                {/* TWG Agents */}
-                                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-[#4c669a] dark:text-[#a0aec0] hover:bg-gray-50 dark:hover:bg-[#2d3748] rounded-lg transition-colors">
-                                    <div className="relative size-8 rounded-full bg-gradient-to-br from-yellow-500 to-orange-600 flex items-center justify-center flex-shrink-0">
-                                        <span className="material-symbols-outlined text-white text-[16px]">bolt</span>
-                                        <span className="absolute -bottom-0.5 -right-0.5 size-2.5 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
-                                    </div>
-                                    <div className="text-left flex-1">
-                                        <div className="font-medium text-sm text-[#0d121b] dark:text-white">Energy Agent</div>
-                                        <div className="text-[11px] opacity-70">@EnergyAgent</div>
-                                    </div>
-                                </button>
-
-                                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-[#4c669a] dark:text-[#a0aec0] hover:bg-gray-50 dark:hover:bg-[#2d3748] rounded-lg transition-colors">
-                                    <div className="relative size-8 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center flex-shrink-0">
-                                        <span className="material-symbols-outlined text-white text-[16px]">agriculture</span>
-                                        <span className="absolute -bottom-0.5 -right-0.5 size-2.5 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
-                                    </div>
-                                    <div className="text-left flex-1">
-                                        <div className="font-medium text-sm text-[#0d121b] dark:text-white">Agriculture Agent</div>
-                                        <div className="text-[11px] opacity-70">@AgricultureAgent</div>
-                                    </div>
-                                </button>
-
-                                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-[#4c669a] dark:text-[#a0aec0] hover:bg-gray-50 dark:hover:bg-[#2d3748] rounded-lg transition-colors">
-                                    <div className="relative size-8 rounded-full bg-gradient-to-br from-gray-500 to-slate-600 flex items-center justify-center flex-shrink-0">
-                                        <span className="material-symbols-outlined text-white text-[16px]">science</span>
-                                        <span className="absolute -bottom-0.5 -right-0.5 size-2.5 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
-                                    </div>
-                                    <div className="text-left flex-1">
-                                        <div className="font-medium text-sm text-[#0d121b] dark:text-white">Minerals Agent</div>
-                                        <div className="text-[11px] opacity-70">@MineralsAgent</div>
-                                    </div>
-                                </button>
-
-                                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-[#4c669a] dark:text-[#a0aec0] hover:bg-gray-50 dark:hover:bg-[#2d3748] rounded-lg transition-colors">
-                                    <div className="relative size-8 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center flex-shrink-0">
-                                        <span className="material-symbols-outlined text-white text-[16px]">computer</span>
-                                        <span className="absolute -bottom-0.5 -right-0.5 size-2.5 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
-                                    </div>
-                                    <div className="text-left flex-1">
-                                        <div className="font-medium text-sm text-[#0d121b] dark:text-white">Digital Agent</div>
-                                        <div className="text-[11px] opacity-70">@DigitalAgent</div>
-                                    </div>
-                                </button>
-
-                                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-[#4c669a] dark:text-[#a0aec0] hover:bg-gray-50 dark:hover:bg-[#2d3748] rounded-lg transition-colors">
-                                    <div className="relative size-8 rounded-full bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center flex-shrink-0">
-                                        <span className="material-symbols-outlined text-white text-[16px]">gavel</span>
-                                        <span className="absolute -bottom-0.5 -right-0.5 size-2.5 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
-                                    </div>
-                                    <div className="text-left flex-1">
-                                        <div className="font-medium text-sm text-[#0d121b] dark:text-white">Protocol Agent</div>
-                                        <div className="text-[11px] opacity-70">@ProtocolAgent</div>
-                                    </div>
-                                </button>
-
-                                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-[#4c669a] dark:text-[#a0aec0] hover:bg-gray-50 dark:hover:bg-[#2d3748] rounded-lg transition-colors">
-                                    <div className="relative size-8 rounded-full bg-gradient-to-br from-amber-500 to-yellow-600 flex items-center justify-center flex-shrink-0">
-                                        <span className="material-symbols-outlined text-white text-[16px]">account_balance</span>
-                                        <span className="absolute -bottom-0.5 -right-0.5 size-2.5 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
-                                    </div>
-                                    <div className="text-left flex-1">
-                                        <div className="font-medium text-sm text-[#0d121b] dark:text-white">Resource Agent</div>
-                                        <div className="text-[11px] opacity-70">@ResourceAgent</div>
-                                    </div>
-                                </button>
-                            </div>
-                        </div>
-
-                        <div>
-                            <h4 className="px-2 text-xs font-bold text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider mb-3">Chat History</h4>
-                            <div className="space-y-2 max-h-96 overflow-y-auto">
-                                {messages.length === 0 ? (
-                                    <div className="px-3 py-6 text-center">
-                                        <span className="material-symbols-outlined text-[#9ca3af] text-[32px] mb-2 block">chat_bubble_outline</span>
-                                        <p className="text-xs text-[#9ca3af]">No messages yet</p>
-                                    </div>
-                                ) : (
-                                    messages.map((message) => (
-                                        <div
-                                            key={message.id}
-                                            className="flex items-start gap-2 px-3 py-2 hover:bg-gray-50 dark:hover:bg-[#2d3748] rounded-lg group cursor-pointer transition-colors"
-                                        >
-                                            <div className="flex-shrink-0 mt-0.5">
-                                                {message.role === 'user' ? (
-                                                    <div className="size-6 rounded-full bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center">
-                                                        <span className="material-symbols-outlined text-white text-[14px]">person</span>
-                                                    </div>
-                                                ) : (
-                                                    <div className="size-6 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center">
-                                                        <span className="material-symbols-outlined text-white text-[14px]">smart_toy</span>
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className="flex-1 min-w-0">
-                                                <div className="text-xs font-medium text-[#0d121b] dark:text-white truncate">
-                                                    {message.role === 'user' ? 'You' : 'Assistant'}
-                                                </div>
-                                                <div className="text-[11px] text-[#6b7280] dark:text-[#9ca3af] truncate">
-                                                    {message.content.substring(0, 50)}{message.content.length > 50 ? '...' : ''}
-                                                </div>
-                                                <div className="text-[10px] text-[#9ca3af] mt-0.5">
-                                                    {message.timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </aside>
-
                 {/* Chat Area */}
                 <div className="flex-1 flex flex-col bg-[#f6f6f8] dark:bg-[#0d121b]">
                     {/* Agent Header */}
                     <div className="bg-white dark:bg-[#1a202c] border-b border-[#e7ebf3] dark:border-[#2d3748] px-6 py-4 flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                            {/* Expand sidebar button (shown when collapsed) */}
-                            {isSidebarCollapsed && (
-                                <button
-                                    onClick={() => setIsSidebarCollapsed(false)}
-                                    className="p-2 hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded-lg transition-colors"
-                                    title="Expand sidebar"
-                                >
-                                    <span className="material-symbols-outlined text-[#6b7280]">menu</span>
-                                </button>
-                            )}
                             <div className="relative">
                                 <div className="size-10 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white">
                                     <span className="material-symbols-outlined">smart_toy</span>
@@ -580,7 +444,7 @@ export default function TwgAgent() {
                                 <span className="absolute bottom-0 right-0 size-3 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
                             </div>
                             <div>
-                                <h3 className="font-bold text-[#0d121b] dark:text-white">Secretariat Assistant</h3>
+                                <h3 className="font-bold text-[#0d121b] dark:text-white">{agentName}</h3>
                                 <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
                                     <span className="size-1.5 bg-green-500 rounded-full"></span>
                                     Online
@@ -706,82 +570,6 @@ export default function TwgAgent() {
                                                     <div className="flex-1 min-w-0">
                                                         <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-1">/broadcast</div>
                                                         <div className="text-xs text-[#6b7280] dark:text-[#9ca3af] leading-relaxed">Broadcast to all TWGs</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Available Agents */}
-                                    <div>
-                                        <h4 className="text-sm font-semibold text-[#0d121b] dark:text-white mb-4 flex items-center gap-2">
-                                            <span className="material-symbols-outlined text-[20px] text-purple-600">alternate_email</span>
-                                            TWG Specialist Agents
-                                        </h4>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-orange-300 dark:hover:border-orange-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-full bg-gradient-to-br from-yellow-500 to-orange-600 flex items-center justify-center flex-shrink-0 shadow-sm group-hover:shadow-md transition-shadow">
-                                                        <span className="material-symbols-outlined text-white text-[18px]">bolt</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-0.5">@EnergyAgent</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af]">Energy & Infrastructure TWG</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-emerald-300 dark:hover:border-emerald-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center flex-shrink-0 shadow-sm group-hover:shadow-md transition-shadow">
-                                                        <span className="material-symbols-outlined text-white text-[18px]">agriculture</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-0.5">@AgricultureAgent</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af]">Agriculture & Food Security TWG</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-full bg-gradient-to-br from-gray-500 to-slate-600 flex items-center justify-center flex-shrink-0 shadow-sm group-hover:shadow-md transition-shadow">
-                                                        <span className="material-symbols-outlined text-white text-[18px]">science</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-0.5">@MineralsAgent</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af]">Mineral Industrialization TWG</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-cyan-300 dark:hover:border-cyan-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-full bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center flex-shrink-0 shadow-sm group-hover:shadow-md transition-shadow">
-                                                        <span className="material-symbols-outlined text-white text-[18px]">computer</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-0.5">@DigitalAgent</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af]">Digital Economy TWG</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-rose-300 dark:hover:border-rose-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-full bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center flex-shrink-0 shadow-sm group-hover:shadow-md transition-shadow">
-                                                        <span className="material-symbols-outlined text-white text-[18px]">gavel</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-0.5">@ProtocolAgent</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af]">Protocol & Procedures TWG</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-amber-300 dark:hover:border-amber-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-full bg-gradient-to-br from-amber-500 to-yellow-600 flex items-center justify-center flex-shrink-0 shadow-sm group-hover:shadow-md transition-shadow">
-                                                        <span className="material-symbols-outlined text-white text-[18px]">account_balance</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-0.5">@ResourceAgent</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af]">Resource Mobilization TWG</div>
                                                     </div>
                                                 </div>
                                             </div>

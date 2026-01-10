@@ -20,7 +20,7 @@ if (apiUrl.toLowerCase().includes('railway.app')) {
 // Debug logging (will be visible in browser console)
 console.log('[API Config] Final API URL:', apiUrl);
 
-const API_URL = apiUrl;
+export const API_URL = apiUrl;
 
 const api = axios.create({
     baseURL: API_URL,
@@ -96,7 +96,7 @@ export const meetings = {
 
     getMinutes: (id: string) => api.get(`/meetings/${id}/minutes`),
     updateMinutes: (id: string, data: { content: string, status?: string }) => api.post(`/meetings/${id}/minutes`, data),
-    generateMinutes: (id: string) => api.post(`/meetings/${id}/minutes/generate`),
+    generateMinutes: (id: string) => api.post(`/meetings/${id}/generate-minutes`),
     submitMinutesForApproval: (id: string) => api.post(`/meetings/${id}/minutes/submit-for-approval`),
     approveMinutes: (id: string) => api.post(`/meetings/${id}/minutes/approve`),
 
@@ -106,6 +106,9 @@ export const meetings = {
 
     getDocuments: (id: string) => api.get(`/meetings/${id}/documents`),
     uploadDocument: (id: string, formData: FormData) => api.post(`/meetings/${id}/documents`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    }),
+    uploadRecording: (id: string, formData: FormData) => api.post(`/meetings/${id}/upload-recording`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
     }),
     compileMeetingPack: (id: string) => api.post(`/meetings/${id}/meeting-pack`),

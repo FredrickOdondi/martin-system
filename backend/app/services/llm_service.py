@@ -25,6 +25,9 @@ class LLMService:
     def chat_with_history(self, messages: List[Dict[str, str]], system_prompt: Optional[str] = None, **kwargs) -> str:
         raise NotImplementedError
 
+    def transcribe_audio(self, file_path: str, **kwargs) -> str:
+        raise NotImplementedError
+
 
 class OllamaLLMService(LLMService):
     """Service for interacting with local Ollama LLM"""
@@ -151,6 +154,86 @@ class OpenAILLMService(LLMService):
             raise Exception(f"OpenAI Error: {str(e)}")
 
 
+class GroqLLMService(LLMService):
+    """Service for interacting with Groq API"""
+
+    def __init__(self, api_key: str, model: str = "llama-3.3-70b-versatile", temperature: float = 0.7):
+        # Use OpenAI compatibility client for Groq if available, or direct requests
+        try:
+            from groq import Groq
+            self.client = Groq(api_key=api_key, timeout=300.0)
+            self.client_type = "groq"
+        except ImportError:
+            # Fallback to OpenAI compatible client if groq package missing but OpenAI exists
+            if OpenAI:
+                self.client = OpenAI(base_url="https://api.groq.com/openai/v1", api_key=api_key)
+                self.client_type = "openai_compat"
+            else:
+                raise ImportError("groq package not installed. Run 'pip install groq' or 'pip install openai'")
+        
+        self.model = model
+        self.temperature = temperature
+        logger.info(f"Initialized Groq LLM Service: {self.model}")
+
+    def chat(self, prompt: str, system_prompt: Optional[str] = None, temperature: Optional[float] = None, max_tokens: int = 2000) -> str:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                temperature=temperature if temperature is not None else self.temperature,
+                max_tokens=max_tokens
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Groq API error: {e}")
+            raise Exception(f"Groq Error: {str(e)}")
+
+    def chat_with_history(self, messages: List[Dict[str, str]], system_prompt: Optional[str] = None, temperature: Optional[float] = None) -> str:
+        full_messages = []
+        if system_prompt:
+            full_messages.append({"role": "system", "content": system_prompt})
+        
+        for m in messages:
+            role = m.get("role", "user")
+            # Groq supports system, user, assistant
+            if role not in ["system", "user", "assistant"]:
+                role = "user"
+            full_messages.append({"role": role, "content": m.get("content", "")})
+
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=full_messages,
+                temperature=temperature if temperature is not None else self.temperature
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Groq History error: {e}")
+            raise Exception(f"Groq Error: {str(e)}")
+
+    def transcribe_audio(self, file_path: str, model: str = "whisper-large-v3", **kwargs) -> str:
+        """
+        Transcribe audio file using Groq's Whisper API.
+        """
+        try:
+            with open(file_path, "rb") as file:
+                transcription = self.client.audio.transcriptions.create(
+                    file=(file_path, file.read()),
+                    model=model,
+                    response_format="text",
+                    temperature=0.0
+                )
+            return transcription
+        except Exception as e:
+            logger.error(f"Groq Transcription error: {e}")
+            raise Exception(f"Groq Transcription Error: {str(e)}")
+
+
 # Singleton instance
 _llm_service = None
 
@@ -169,9 +252,17 @@ def get_llm_service() -> LLMService:
                 model=getattr(settings, "OPENAI_MODEL", "gpt-4-turbo-preview"),
                 temperature=settings.LLM_TEMPERATURE
             )
+        elif provider == "groq" and getattr(settings, "GROQ_API_KEY", None):
+            _llm_service = GroqLLMService(
+                api_key=settings.GROQ_API_KEY,
+                model=getattr(settings, "GROQ_MODEL", "llama-3.3-70b-versatile"),
+                temperature=settings.LLM_TEMPERATURE
+            )
         else:
             if provider == "openai":
                 logger.warning("OpenAI provider selected but no API key found. Falling back to Ollama.")
+            if provider == "groq":
+                logger.warning("Groq provider selected but no API key found. Falling back to Ollama.")
             
             _llm_service = OllamaLLMService(
                 base_url=settings.OLLAMA_BASE_URL,
@@ -181,3 +272,6 @@ def get_llm_service() -> LLMService:
             )
     return _llm_service
 
+
+# Create singleton instance for import
+llm_service = get_llm_service()

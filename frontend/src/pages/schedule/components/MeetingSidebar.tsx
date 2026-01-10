@@ -62,8 +62,13 @@ export default function MeetingSidebar({ meeting }: MeetingSidebarProps) {
                         <div className="flex-1">
                             <div className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Venue</div>
                             <div className="text-sm font-bold text-slate-900 dark:text-white">{meeting.location || 'Virtual'}</div>
-                            {meeting.location === 'Virtual' && (
-                                <a href="#" className="text-sm text-blue-600 dark:text-blue-400 hover:underline">Zoom Video Link</a>
+                            {meeting.video_link ? (
+                                <a href={meeting.video_link} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mt-1">
+                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                    Join Video Call
+                                </a>
+                            ) : (
+                                meeting.location === 'Virtual' && <span className="text-xs text-slate-400 italic">No video link yet</span>
                             )}
                         </div>
                     </div>
@@ -131,29 +136,31 @@ export default function MeetingSidebar({ meeting }: MeetingSidebarProps) {
                 </div>
 
                 <div className="space-y-2">
-                    <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors cursor-pointer">
-                        <div className="w-8 h-8 rounded bg-red-100 dark:bg-red-900/30 flex items-center justify-center shrink-0">
-                            <svg className="w-4 h-4 text-red-600 dark:text-red-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-                            </svg>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <div className="text-sm font-bold text-slate-900 dark:text-white truncate">Q3_Infrastructure_Report.pdf</div>
-                            <div className="text-xs text-slate-500 dark:text-slate-400">2.4 MB • Uploaded yesterday</div>
-                        </div>
-                    </div>
-
-                    <div className="flex items-center gap-3 p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors cursor-pointer">
-                        <div className="w-8 h-8 rounded bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
-                            <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
-                            </svg>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <div className="text-sm font-bold text-slate-900 dark:text-white truncate">Meeting_Agenda_v2.docx</div>
-                            <div className="text-xs text-slate-500 dark:text-slate-400">145 KB • Uploaded 2 days ago</div>
-                        </div>
-                    </div>
+                    {meeting.documents && meeting.documents.length > 0 ? (
+                        meeting.documents.map((doc: any) => (
+                            <a
+                                key={doc.id}
+                                href={`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/documents/${doc.id}/download`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="flex items-center gap-3 p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors cursor-pointer group"
+                            >
+                                <div className="w-8 h-8 rounded bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0 group-hover:bg-blue-200 dark:group-hover:bg-blue-900/50 transition-colors">
+                                    <svg className="w-4 h-4 text-blue-600 dark:text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                                        <path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clipRule="evenodd" />
+                                    </svg>
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-bold text-slate-900 dark:text-white truncate">{doc.file_name}</div>
+                                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                                        {new Date(doc.created_at).toLocaleDateString()}
+                                    </div>
+                                </div>
+                            </a>
+                        ))
+                    ) : (
+                        <div className="text-sm text-slate-500 italic p-2">No attachments</div>
+                    )}
                 </div>
             </div>
         </div>
