@@ -70,8 +70,6 @@ async def create_meeting(
                      generated_video_link = calendar_event.get('hangoutLink')
                 else:
                      logger.warning(f"CREATE_MEETING: Event created but NO link found")
-                else:
-                     logger.warning(f"CREATE_MEETING: Event created but NO link found")
             except Exception as e:
                 # Log detailed error but DO NOT fail the meeting creation
                 logger.error(f"CREATE_MEETING: Failed to generate Meet link: {e}")
