@@ -1,5 +1,5 @@
 import api from './api';
-import { User } from '../types/auth';
+
 
 export interface Document {
     id: string;
@@ -12,7 +12,8 @@ export interface Document {
     metadata_json: Record<string, any> | null;
     created_at: string;
     ingested_at?: string;
-    uploaded_by?: User;
+    uploaded_by?: { full_name: string; email: string };
+    twg?: { id: string; name: string; pillar: string };
 }
 
 export interface IngestionResponse {

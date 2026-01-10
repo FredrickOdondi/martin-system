@@ -85,7 +85,16 @@ export default function DocumentLibrary({ twgId }: { twgId?: string } = {}) {
 
         try {
             setIsSearching(true)
-            const results = await documentService.searchDocuments(searchQuery)
+
+            // RBAC Fix: Non-admins must specify a TWG ID for vector search
+            // If we have a prop twgId, use it.
+            // If not, and not admin, default to the user's first assigned TWG.
+            let searchTargetTwgId = twgId;
+            if (!isAdmin && !searchTargetTwgId && userTwgIds.length > 0) {
+                searchTargetTwgId = userTwgIds[0];
+            }
+
+            const results = await documentService.searchDocuments(searchQuery, searchTargetTwgId)
             setSearchResults(results)
         } catch (error) {
             console.error('Search failed:', error)
@@ -444,7 +453,8 @@ export default function DocumentLibrary({ twgId }: { twgId?: string } = {}) {
                                         />
                                     </th>
                                     <th className="px-6 py-4 text-[11px] font-black text-[#8a9dbd] uppercase tracking-wider">Name</th>
-                                    <th className="px-6 py-4 text-[11px] font-black text-[#8a9dbd] uppercase tracking-wider text-center">Owner</th>
+                                    <th className="px-6 py-4 text-[11px] font-black text-[#8a9dbd] uppercase tracking-wider text-center">Context (TWG)</th>
+                                    <th className="px-6 py-4 text-[11px] font-black text-[#8a9dbd] uppercase tracking-wider text-center">Uploader</th>
                                     <th className="px-6 py-4 text-[11px] font-black text-[#8a9dbd] uppercase tracking-wider text-center">Modified</th>
                                     <th className="px-6 py-4 text-[11px] font-black text-[#8a9dbd] uppercase tracking-wider text-center text-center">RAG Sync</th>
                                     <th className="px-6 py-4 text-[11px] font-black text-[#8a9dbd] uppercase tracking-wider text-center">Label</th>
@@ -453,9 +463,9 @@ export default function DocumentLibrary({ twgId }: { twgId?: string } = {}) {
                             </thead>
                             <tbody className="divide-y divide-[#f0f2f5] dark:divide-[#2d3748]">
                                 {loading ? (
-                                    <tr><td colSpan={7} className="p-12 text-center text-[#4c669a] font-bold tracking-widest uppercase text-xs">Initializing Document Stream...</td></tr>
+                                    <tr><td colSpan={8} className="p-12 text-center text-[#4c669a] font-bold tracking-widest uppercase text-xs">Initializing Document Stream...</td></tr>
                                 ) : paginatedDocs.length === 0 ? (
-                                    <tr><td colSpan={7} className="p-12 text-center text-[#4c669a] font-bold">No documents match the current filters.</td></tr>
+                                    <tr><td colSpan={8} className="p-12 text-center text-[#4c669a] font-bold">No documents match the current filters.</td></tr>
                                 ) : paginatedDocs.map((doc) => (
                                     <tr key={doc.id} className={`hover:bg-blue-50/50 dark:hover:bg-blue-900/5 transition-colors group ${selectedDocs.includes(doc.id) ? 'bg-blue-50/30' : ''}`}>
                                         <td className="px-6 py-5 text-center">
@@ -478,6 +488,17 @@ export default function DocumentLibrary({ twgId }: { twgId?: string } = {}) {
                                                     <p className="text-[10px] font-bold text-[#8a9dbd] uppercase">{doc.file_name.toLowerCase().includes('minutes') ? 'Meeting Minutes' : 'Policy Draft'}</p>
                                                 </div>
                                             </div>
+                                        </td>
+                                        <td className="px-6 py-5 text-center">
+                                            {doc.twg ? (
+                                                <span className="inline-block px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-300 uppercase tracking-wider">
+                                                    {doc.twg.name}
+                                                </span>
+                                            ) : (
+                                                <span className="inline-block px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-900/20 text-[10px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+                                                    Global / Secretariat
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="px-6 py-5 text-center text-[#4c669a] font-bold">
                                             {doc.uploaded_by?.full_name || 'System Admin'}

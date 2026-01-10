@@ -122,7 +122,14 @@ async def list_documents(
     """
     List documents.
     """
-    query = select(Document).offset(skip).limit(limit)
+    # Filtered documents for display: Eager load relationships
+    # We need to import selectinload
+    from sqlalchemy.orm import selectinload
+    
+    query = select(Document).options(
+        selectinload(Document.uploaded_by),
+        selectinload(Document.twg)
+    ).offset(skip).limit(limit)
     
     if twg_id:
         query = query.where(Document.twg_id == twg_id)
@@ -134,15 +141,14 @@ async def list_documents(
             # Admins see all documents
             pass
         else:
-            # Regular users see:
-            # 1. Documents from their TWGs
+            # STRICT RBAC: Regular users ONLY see:
+            # 1. Documents from their assigned TWGs
             # 2. Global Secretariat documents (twg_id is NULL)
-            # 3. Non-confidential documents
+            # This enforces the "locked room" principle - no cross-TWG visibility
             user_twg_ids = [twg.id for twg in current_user.twgs]
             query = query.where(
                 (Document.twg_id.in_(user_twg_ids)) | 
-                (Document.twg_id == None) |
-                (Document.is_confidential == False)
+                (Document.twg_id == None)
             )
         
     result = await db.execute(query)

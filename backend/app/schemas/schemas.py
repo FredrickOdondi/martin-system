@@ -165,7 +165,8 @@ class DocumentRead(DocumentBase):
     id: uuid.UUID
     file_path: str
     uploaded_by_id: uuid.UUID
-    # Removed uploaded_by to prevent MissingGreenlet errors
+    uploaded_by: Optional["UserRead"] = None
+    twg: Optional["TWGBase"] = None
     ingested_at: Optional[datetime] = None
     created_at: datetime
 
