@@ -297,7 +297,7 @@ export default function TwgWorkspace() {
                                                                 </td>
                                                                 <td className="px-6 py-4 text-right">
                                                                     <button
-                                                                        onClick={() => navigate(`/meetings/${m.id}`)}
+                                                                        onClick={() => navigate(`/meetings/${m.id}`, { state: { from: 'twg-workspace' } })}
                                                                         className="text-[10px] font-black text-blue-600 hover:text-blue-700 uppercase tracking-widest transition-all"
                                                                     >
                                                                         View Details
