@@ -5,7 +5,7 @@ This service provides an interface to Groq's ultra-fast LLM API.
 """
 
 import os
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from loguru import logger
 from groq import Groq
 from dotenv import load_dotenv
