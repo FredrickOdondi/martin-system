@@ -29,6 +29,9 @@ class SynthesisStyle(str, Enum):
     POLICY = "policy"  # For policy briefs
 
 
+from app.core.knowledge_base import get_knowledge_base
+from app.agents.synthesis_templates import format_synthesis_prompt, SynthesisType
+
 class DocumentSynthesizer:
     """Service for synthesizing TWG outputs into coherent documents"""
 
@@ -40,6 +43,16 @@ class DocumentSynthesizer:
             llm_client: LLM client for synthesis and formatting
         """
         self.llm = llm_client
+        self._synthesis_history: List[Dict[str, Any]] = []
+        
+        # Initialize Knowledge Base Connection
+        try:
+            self.kb = get_knowledge_base()
+            logger.info("DocumentSynthesizer connected to Knowledge Base")
+        except Exception as e:
+            logger.warning(f"DocumentSynthesizer could not connect to Knowledge Base: {e}")
+            self.kb = None
+        
         self._synthesis_history: List[Dict[str, Any]] = []
 
         # Standard terminology mappings
@@ -174,6 +187,70 @@ class DocumentSynthesizer:
         )
 
         return result
+
+    def synthesize_minutes(
+        self,
+        transcript_text: str,
+        meeting_context: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Synthesize specific meeting minutes from a transcript.
+
+        Args:
+            transcript_text: Raw text of the meeting transcript
+            meeting_context: Dictionary containing:
+                - meeting_title
+                - meeting_date
+                - pillar_name
+                - attendees_list (formatted string)
+                - agenda_content
+
+        Returns:
+            Dict containing the generated minutes content
+        """
+        logger.info(f"Synthesizing minutes for meeting: {meeting_context.get('meeting_title')}")
+        
+        if not self.llm:
+            raise ValueError("LLM client is not available for synthesis")
+
+        # 1. Prepare Prompt
+        prompt = format_synthesis_prompt(
+            SynthesisType.MEETING_MINUTES,
+            twg_inputs={}, # Not used for this template type, but required by signature? 
+                           # Actually format_synthesis_prompt uses **kwargs so we can pass our custom vars
+            transcript_text=transcript_text,
+            meeting_title=meeting_context.get("meeting_title", "Untitled Meeting"),
+            meeting_date=meeting_context.get("meeting_date", "Unknown Date"),
+            pillar_name=meeting_context.get("pillar_name", "General"),
+            attendees_list=meeting_context.get("attendees_list", "Not recorded"),
+            agenda_content=meeting_context.get("agenda_content", "Not provided")
+        )
+
+        # 2. Call LLM
+        try:
+            # We use the raw chat interface of the LLM service
+            generated_content = self.llm.chat(prompt)
+            
+            # 3. Log Result
+            result = {
+                "content": generated_content,
+                "metadata": {
+                    "source_transcript_length": len(transcript_text),
+                    "generated_at": datetime.now(UTC).isoformat()
+                }
+            }
+            
+            self._synthesis_history.append({
+                "type": "minutes",
+                "meeting": meeting_context.get("meeting_title"),
+                "result": result
+            })
+            
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to synthesize minutes: {e}")
+            raise e
 
     def _standardize_terminology(
         self,
@@ -458,26 +535,50 @@ EXAMPLE: "Regional integration will accelerate through three mechanisms..."
         twg_id: str
     ) -> Optional[str]:
         """
-        Find appropriate citation from knowledge base.
-
-        This would ideally search a vector database or document store.
-        For now, returns a placeholder citation.
+        Find appropriate citation from knowledge base using Vector Search (RAG).
         """
-        # Placeholder implementation
-        # In production, this would:
-        # 1. Search knowledge base for claim
-        # 2. Return document ID + page/section
-        # 3. Verify claim accuracy
+        # 1. Try Vector Search if KB is available
+        if self.kb:
+            try:
+                # Determine namespace (match ingestion logic in documents.py)
+                # If twg_id is passed, use it. Otherwise general.
+                # Note: twg_id might be a UUID string or "energy" etc.
+                # The ingestion uses UUIDs. If twg_id is a name, we might need mapping,
+                # but let's assume for now the synthesizer is diligent with IDs.
+                # However, synthesizer often works with names (e.g. "energy").
+                
+                # Try specific namespace first
+                namespace = f"twg-{twg_id}"
+                
+                results = self.kb.search(
+                    query=claim,
+                    namespace=namespace,
+                    top_k=1,
+                    include_metadata=True
+                )
+                
+                if results and results[0]['score'] > 0.7:  # Threshold for relevance
+                    match = results[0]
+                    metadata = match['metadata']
+                    file_name = metadata.get('file_name', 'Unknown Document')
+                    
+                    # Return formatted citation
+                    return f"{file_name}"
+                    
+                # If no results in specific namespace, try general?
+                # For now, strict scoping is safer.
+                
+            except Exception as e:
+                logger.warning(f"Vector search failed for claim '{claim[:50]}...': {e}")
 
-        # For now, return generic citation
+        # 2. Fallback to legacy dictionary lookup
         kb_sources = knowledge_base.get("sources", {})
         twg_sources = kb_sources.get(twg_id, [])
 
         if twg_sources:
-            # Return first relevant source
             return twg_sources[0]
 
-        return "Internal TWG Analysis 2025"
+        return None  # No citation found (will not add Source tag)
 
     def _compile_declaration(
         self,

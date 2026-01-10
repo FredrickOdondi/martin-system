@@ -31,7 +31,7 @@ export default function MeetingDetail() {
     const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false)
     const [isSubmittingForApproval, setIsSubmittingForApproval] = useState(false)
     const [isApprovingMinutes, setIsApprovingMinutes] = useState(false)
-    const [actionItems, setActionItems] = useState<any[]>([])
+    const [meetingActionItems, setMeetingActionItems] = useState<any[]>([])
 
     // Participant State
     const [guestName, setGuestName] = useState('')
@@ -129,10 +129,10 @@ export default function MeetingDetail() {
             // Load action items
             try {
                 const actionsRes = await meetings.getActionItems(meetingId)
-                setActionItems(actionsRes.data || [])
+                setMeetingActionItems(actionsRes.data || [])
             } catch (e) {
                 console.log("No action items yet")
-                setActionItems([])
+                setMeetingActionItems([])
             }
 
             // Load documents
@@ -182,7 +182,7 @@ export default function MeetingDetail() {
         setIsGeneratingMinutes(true)
         try {
             const res = await meetings.generateMinutes(meetingId)
-            setMinutesContent(res.data.generated_minutes)
+            setMinutesContent(res.data.content)
             setMinutesStatus('draft')
             setIsTranscriptExpanded(false)
             setMinutesStatus('draft')  // Generated content starts as draft
@@ -387,7 +387,7 @@ export default function MeetingDetail() {
             setIsLoadingAction(true)
             await actionItems.delete(selectedAction.id)
             const res = await meetings.getActionItems(meetingId!)
-            setActionItems(res.data)
+            setMeetingActionItems(res.data)
             setSelectedAction(null)
             setStatusModal({ isOpen: true, type: 'success', title: 'Deleted', message: 'Action item deleted' })
         } catch (error) {
@@ -409,7 +409,7 @@ export default function MeetingDetail() {
                 due_date: selectedDueDate || null
             })
             const res = await meetings.getActionItems(meetingId!)
-            setActionItems(res.data)
+            setMeetingActionItems(res.data)
             setSelectedAction(null)
             setStatusModal({ isOpen: true, type: 'success', title: 'Updated', message: 'Action item updated' })
         } catch (error) {
@@ -503,10 +503,13 @@ export default function MeetingDetail() {
         if (!meetingId || !e.target.files || e.target.files.length === 0) return;
 
         const file = e.target.files[0];
+        const formData = new FormData();
+        formData.append('file', file);
+
         setIsUploadingDoc(true);
 
         try {
-            await meetings.uploadDocument(meetingId, file);
+            await meetings.uploadDocument(meetingId, formData);
             await loadMeetingDetails();
             // Reset file input
             e.target.value = '';
@@ -641,6 +644,20 @@ export default function MeetingDetail() {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                                 </svg>
                                 Edit Meeting
+                            </button>
+                            {meeting?.video_link && (
+                                <button onClick={() => window.open(meeting.video_link, '_blank')} className="btn-secondary text-sm flex items-center gap-2 bg-white text-slate-700 hover:bg-slate-50 border-slate-300">
+                                    <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                    Join Video Call
+                                </button>
+                            )}
+                            <button onClick={() => navigate(`/meetings/${meetingId}/live`)} className="btn-primary text-sm flex items-center gap-2 bg-red-600 hover:bg-red-700 border-red-600">
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                </svg>
+                                Join Live Session
                             </button>
                             {minutesStatus === 'pending_approval' && (
                                 <button onClick={handleApproveMinutes} className="btn-primary text-sm flex items-center gap-2">
@@ -784,7 +801,43 @@ export default function MeetingDetail() {
                                                     </div>
 
                                                     {isTranscriptExpanded && (
-                                                        <div className="mt-4 animate-in fade-in slide-in-from-top-2 duration-200">
+                                                        <div className="mt-4 animate-in fade-in slide-in-from-top-2 duration-200 space-y-4">
+                                                            {/* Audio Upload Section */}
+                                                            <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                                                                <h4 className="text-sm font-semibold mb-2 text-slate-700 dark:text-slate-300">🎙️ Transcribe Audio Recording</h4>
+                                                                <p className="text-xs text-slate-500 mb-3">Upload an MP3/WAV file to automatically transcribe and generate minutes.</p>
+                                                                <div className="flex gap-4 items-center">
+                                                                    <input
+                                                                        type="file"
+                                                                        accept="audio/*"
+                                                                        className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                                                                        onChange={async (e) => {
+                                                                            if (!meetingId || !e.target.files?.length) return;
+                                                                            const file = e.target.files[0];
+                                                                            const formData = new FormData();
+                                                                            formData.append('file', file);
+
+                                                                            setIsGeneratingMinutes(true); // Re-use loading state
+                                                                            setStatusModal({ isOpen: true, type: 'info', title: 'Processing Audio', message: 'Uploading and transcribing audio. This may take a minute...' });
+
+                                                                            try {
+                                                                                const res = await meetings.uploadRecording(meetingId, formData);
+                                                                                setMinutesContent(res.data.content);
+                                                                                setTranscript(res.data.transcript || 'Transcript updated from audio.'); // Would need to re-fetch meeting to get full transcript if not returned in minutes, but let's assume standard flow
+                                                                                setMinutesStatus('draft'); // Or res.data.status
+                                                                                await loadMeetingDetails(); // Refresh everything
+                                                                                setStatusModal({ isOpen: true, type: 'success', title: 'Success', message: 'Audio transcribed and minutes generated!' });
+                                                                            } catch (error: any) {
+                                                                                console.error("Audio upload failed", error);
+                                                                                setStatusModal({ isOpen: true, type: 'error', title: 'Error', message: error?.response?.data?.detail || 'Failed to process audio recording.' });
+                                                                            } finally {
+                                                                                setIsGeneratingMinutes(false);
+                                                                            }
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                            </div>
+
                                                             <textarea
                                                                 className="w-full h-64 p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-blue-500 font-mono text-sm leading-relaxed resize-y mb-4 transition-all"
                                                                 placeholder="[Facilitator]: Welcome everyone. Today we are discussing..."
@@ -987,7 +1040,7 @@ export default function MeetingDetail() {
                                                         )}
 
                                                         <div className="space-y-3">
-                                                            {actionItems.map(item => (
+                                                            {meetingActionItems.map(item => (
                                                                 <Card key={item.id} className="p-4">
                                                                     <div className="flex items-center gap-4">
                                                                         <input type="checkbox" className="w-5 h-5 rounded border-slate-300" />

@@ -247,13 +247,14 @@ class LangGraphSupervisor:
         logger.info("[SUPERVISOR] ✓ LangGraph StateGraph compiled successfully")
         logger.info(f"[SUPERVISOR] Nodes: route_query, supervisor, {', '.join(self._twg_agents.keys())}, synthesis, single_agent_response, dispatch_multiple")
 
-    def chat(self, message: str, thread_id: Optional[str] = None) -> str:
+    def chat(self, message: str, thread_id: Optional[str] = None, twg_id: Optional[str] = None) -> str:
         """
         Chat interface using LangGraph execution.
 
         Args:
             message: User query
             thread_id: Optional thread ID for conversation threading
+            twg_id: Optional TWG ID to restrict context (Strict RBAC)
 
         Returns:
             Agent response
@@ -263,7 +264,7 @@ class LangGraphSupervisor:
 
         thread_id = thread_id or self.session_id
 
-        logger.info(f"[SUPERVISOR:{thread_id}] Received: {message[:100]}...")
+        logger.info(f"[SUPERVISOR:{thread_id}] Received: {message[:100]}... (Context: {twg_id or 'General'})")
 
         # Initialize state
         initial_state: AgentState = {
@@ -277,7 +278,7 @@ class LangGraphSupervisor:
             "delegation_type": "supervisor_only",
             "session_id": self.session_id,
             "user_id": None,
-            "context": None
+            "context": {"twg_id": twg_id} if twg_id else None
         }
 
         # Run the graph

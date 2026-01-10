@@ -24,7 +24,7 @@ class SupervisorAPIAdapter:
         )
         logger.info("[ADAPTER] LangGraph supervisor initialized for API")
 
-    async def chat_with_tools(self, message: str) -> str:
+    async def chat_with_tools(self, message: str, twg_id: str = None) -> str:
         """
         Async wrapper around LangGraph supervisor chat.
 
@@ -33,7 +33,7 @@ class SupervisorAPIAdapter:
         """
         try:
             # Call the sync method (LangGraph handles state internally)
-            response = self.supervisor.chat(message)
+            response = self.supervisor.chat(message, twg_id=twg_id)
             return response
         except Exception as e:
             logger.error(f"[ADAPTER] Error in chat_with_tools: {e}")

@@ -18,7 +18,7 @@ export default function CreateMeetingModal({ isOpen, onClose, twgId, onSuccess }
         duration: '60',
         location: 'Virtual',
         description: '',
-        type: 'technical_session' // standard default
+        type: 'virtual' // Default to virtual for Google Meet link generation
     });
 
     if (!isOpen) return null;
@@ -111,15 +111,35 @@ export default function CreateMeetingModal({ isOpen, onClose, twgId, onSuccess }
                             </select>
                         </div>
                         <div>
-                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Location</label>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Meeting Type</label>
+                            <select
+                                className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:text-white"
+                                value={formData.type}
+                                onChange={e => setFormData({
+                                    ...formData,
+                                    type: e.target.value,
+                                    location: e.target.value === 'virtual' ? 'Virtual' : ''
+                                })}
+                            >
+                                <option value="virtual">🎥 Virtual (Google Meet)</option>
+                                <option value="in_person">📍 In-Person</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    {formData.type === 'in_person' && (
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Location / Venue</label>
                             <input
+                                required
                                 type="text"
+                                placeholder="e.g. Conference Room A, ECOWAS HQ"
                                 className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:text-white"
                                 value={formData.location}
                                 onChange={e => setFormData({ ...formData, location: e.target.value })}
                             />
                         </div>
-                    </div>
+                    )}
 
                     <div className="pt-4 flex gap-3">
                         <button
