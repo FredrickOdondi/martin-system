@@ -8,8 +8,14 @@ import ReactMarkdown from 'react-markdown';
 export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
     // Determine TWG Context: Use prop if available, otherwise fallback to user's primary TWG
     const user = useSelector((state: RootState) => state.auth.user);
-    const twgId = propTwgId || (user?.role !== 'admin' ? user?.twg_ids?.[0] : undefined);
+    // State for Mentions
+    const [twgs, setTwgs] = useState<any[]>([]);
+    const [showMentions, setShowMentions] = useState(false);
+    const [mentionQuery, setMentionQuery] = useState('');
+    const [mentionIndex, setMentionIndex] = useState(0);
+    const inputRef = useRef<HTMLInputElement>(null);
 
+    // Chat State
     const [input, setInput] = useState('');
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -59,7 +65,7 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
         const request: EnhancedChatRequest = {
             message: content,
             conversation_id: conversationId,
-            twg_id: twgId // Pass TWG Context
+            twg_id: propTwgId || (user?.role !== 'admin' ? user?.twg_ids?.[0] : undefined) // Pass TWG Context
         };
 
         await sendStreamingMessage(
@@ -68,8 +74,6 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
                 if (event.type === 'start' && event.conversation_id) {
                     setConversationId(event.conversation_id);
                 }
-                // We could handle intermediate events here if needed, 
-                // but streamingState handles status/tool updates automatically
             },
             (finalMsg: any) => {
                 setMessages(prev => [...prev, finalMsg]);
@@ -87,8 +91,69 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
         );
     };
 
+    // Fetch TWGs if authorized
+    useEffect(() => {
+        const canMention = user?.role === 'admin' || user?.role === 'secretariat_lead';
+        if (canMention && twgs.length === 0) {
+            import('../../services/twgService').then(mod => {
+                mod.default.listTWGs().then(data => setTwgs(data)).catch(console.error);
+            });
+        }
+    }, [user?.role]);
+
+    const filteredTwgs = twgs.filter(t =>
+        t.name.toLowerCase().includes(mentionQuery.toLowerCase()) ||
+        t.pillar?.toLowerCase().includes(mentionQuery.toLowerCase())
+    );
+
+    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const val = e.target.value;
+        setInput(val);
+
+        // Detect @mention
+        // improved regex to check if the cursor is at a word starting with @
+        const words = val.split(" ");
+        const lastWord = words[words.length - 1];
+
+        if ((lastWord.startsWith('@') || lastWord === '@') && (user?.role === 'admin' || user?.role === 'secretariat_lead')) {
+            setShowMentions(true);
+            setMentionQuery(lastWord.slice(1));
+            setMentionIndex(0);
+        } else {
+            setShowMentions(false);
+        }
+    };
+
+    const insertMention = (twg: any) => {
+        const words = input.split(' ');
+        words.pop(); // Remove the partial @mention
+        const newValue = [...words, `@${twg.name} `].join(' ');
+        setInput(newValue);
+        setShowMentions(false);
+        inputRef.current?.focus();
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (showMentions && filteredTwgs.length > 0) {
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                setMentionIndex(prev => (prev > 0 ? prev - 1 : filteredTwgs.length - 1));
+            } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                setMentionIndex(prev => (prev < filteredTwgs.length - 1 ? prev + 1 : 0));
+            } else if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault();
+                insertMention(filteredTwgs[mentionIndex]);
+            } else if (e.key === 'Escape') {
+                setShowMentions(false);
+            }
+        } else if (e.key === 'Enter') {
+            handleSendMessage();
+        }
+    };
+
     return (
-        <div className="flex flex-col h-full bg-white dark:bg-dark-card">
+        <div className="flex flex-col h-full bg-white dark:bg-dark-card relative">
             {/* Header */}
             <div className="p-4 border-b border-slate-100 dark:border-dark-border flex items-center justify-between transition-colors">
                 <div className="flex items-center gap-3">
@@ -99,7 +164,7 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
                         <h3 className="font-bold text-sm text-slate-900 dark:text-white">ECOWAS AI Copilot</h3>
                         <p className="text-[10px] text-green-500 font-bold uppercase flex items-center gap-1 transition-colors">
                             <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                            Online • Energy Context
+                            Online • {user?.role === 'admin' ? 'Secretariat Mode' : 'Energy Context'}
                         </p>
                     </div>
                 </div>
@@ -210,17 +275,50 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
             </div>
 
             {/* Input Area */}
-            <div className="p-3 border-t border-slate-100 dark:border-dark-border bg-slate-50/50 dark:bg-slate-800/20">
+            <div className="p-3 border-t border-slate-100 dark:border-dark-border bg-slate-50/50 dark:bg-slate-800/20 relative">
+                {/* Mentions Popup */}
+                {showMentions && filteredTwgs.length > 0 && (
+                    <div className="absolute bottom-full left-4 mb-2 w-64 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 overflow-hidden z-50 animate-in fade-in slide-in-from-bottom-2 duration-200">
+                        <div className="px-3 py-2 bg-slate-50 dark:bg-slate-700/50 border-b border-slate-100 dark:border-slate-700">
+                            <p className="text-[10px] font-bold uppercase text-slate-500 dark:text-slate-400">Mention TWG Agent</p>
+                        </div>
+                        <ul className="max-h-48 overflow-y-auto py-1">
+                            {filteredTwgs.map((twg, idx) => (
+                                <li
+                                    key={twg.id}
+                                    className={`px-3 py-2 text-xs cursor-pointer flex items-center gap-2 ${idx === mentionIndex
+                                        ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
+                                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                                        }`}
+                                    onMouseDown={(e) => {
+                                        e.preventDefault(); // Prevent blur
+                                        insertMention(twg);
+                                    }}
+                                >
+                                    <div className={`w-3 h-3 rounded-full flex-shrink-0 ${idx === mentionIndex ? 'bg-blue-500' : 'bg-slate-300 dark:bg-slate-600'
+                                        }`} />
+                                    <div className="flex-1 truncate">
+                                        <span className="font-medium">{twg.name}</span>
+                                        {twg.pillar && <span className="ml-1 text-[10px] opacity-60">({twg.pillar})</span>}
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+
                 <div className="relative">
                     <input
+                        ref={inputRef}
                         type="text"
                         value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-                        placeholder="Ask Copilot to analyze, draft, or schedule..."
-                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl py-3 pl-4 pr-12 text-xs font-medium text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 hover:border-blue-400 transition-all shadow-sm"
+                        onChange={handleInputChange}
+                        onKeyDown={handleKeyDown}
+                        placeholder={showMentions ? "Type to search TWGs..." : "Ask Copilot to analyze, draft, or schedule (@ to mention TWG)..."}
+                        className="w-full bg-white dark:bg-slate-800 rounded-xl py-3 pl-4 pr-12 text-xs font-medium text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 transition-all shadow-sm outline-none"
                         disabled={isStreaming}
                         autoFocus
+                        autoComplete="off"
                     />
                     <button
                         onClick={handleSendMessage}

@@ -240,12 +240,21 @@ export default function TwgAgent() {
         // Check for mention trigger (@)
         const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
         if (mentionMatch) {
-            const query = '@' + mentionMatch[1];
+            const query = mentionMatch[1].toLowerCase();
             try {
-                const response = await axios.get(`/api/agents/mentions/autocomplete`, {
-                    params: { query }
-                });
-                setMentionSuggestions(response.data?.suggestions || []);
+                const twgs = await twgService.listTWGs();
+                const filtered = twgs.filter(t =>
+                    t.name.toLowerCase().includes(query) ||
+                    t.pillar?.toLowerCase().includes(query)
+                ).map(t => ({
+                    mention: `@${t.name}`,
+                    agent_id: t.id,
+                    name: t.name,
+                    icon: 'smart_toy',
+                    description: t.pillar || 'Technical Working Group'
+                }));
+
+                setMentionSuggestions(filtered as any); // Type assertion to handle interface mismatch if any
                 setAutocompleteType('mention');
                 setSelectedSuggestionIndex(0);
                 return;
@@ -649,7 +658,7 @@ export default function TwgAgent() {
                             </button>
                         </div>
 
-                        <div className="relative bg-white dark:bg-[#0d121b] border-2 border-[#e7ebf3] dark:border-[#2d3748] rounded-2xl shadow-lg focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500 dark:focus-within:border-blue-400 transition-all">
+                        <div className="relative bg-white dark:bg-[#0d121b] border border-[#e7ebf3] dark:border-[#2d3748] rounded-2xl shadow-lg focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500 dark:focus-within:border-blue-400 transition-all">
                             {/* Command Autocomplete */}
                             {autocompleteType === 'command' && (commandSuggestions || []).length > 0 && (
                                 <CommandAutocomplete
