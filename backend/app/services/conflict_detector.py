@@ -351,9 +351,11 @@ Identify any:
 2. Conflicting targets or goals
 3. Incompatible recommendations
 4. Resource allocation conflicts
+5. Duplicate or redundant sessions/workshops
+6. Implicit dependencies where one TWG relies on another (e.g., "requires input from Energy") without a clear link.
 
-If conflicts exist, respond with:
-CONFLICT: [type]
+If conflicts or issues exist, respond with:
+CONFLICT: [type] (types: policy_clash, target_mismatch, duplicate_session, missing_dependency, resource_conflict)
 SEVERITY: [critical/high/medium/low]
 DESCRIPTION: [clear description]
 IMPACT: [what this affects]
