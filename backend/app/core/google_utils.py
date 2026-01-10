@@ -33,13 +33,21 @@ def setup_google_credentials():
             except json.JSONDecodeError:
                 logger.warning("GOOGLE_SERVICE_ACCOUNT_JSON env var might not be valid JSON.")
             
-            with open("backend/google_credentials.json", "w") as f:
+            # Determine path: if 'backend' dir exists, put it there (local root run), else CWD (prod/container)
+            creds_filename = "google_credentials.json"
+            if os.path.isdir("backend"):
+                target_path = os.path.join("backend", creds_filename)
+            else:
+                target_path = creds_filename
+            
+            with open(target_path, "w") as f:
                 f.write(service_account_json)
             
             # Set GOOGLE_APPLICATION_CREDENTIALS to point to this file
             # This is what google.auth.default() looks for by default
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath("backend/google_credentials.json")
-            logger.info(f"Set GOOGLE_APPLICATION_CREDENTIALS to {os.environ['GOOGLE_APPLICATION_CREDENTIALS']}")
+            abs_path = os.path.abspath(target_path)
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = abs_path
+            logger.info(f"Set GOOGLE_APPLICATION_CREDENTIALS to {abs_path}")
             
         except Exception as e:
             logger.error(f"Failed to restore google_credentials.json: {e}")
