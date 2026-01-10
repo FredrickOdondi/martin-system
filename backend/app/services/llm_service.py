@@ -155,8 +155,30 @@ class OpenAILLMService(LLMService):
 
     def transcribe_audio(self, file_path: str, model: str = "whisper-1", **kwargs) -> str:
         """
-        Transcribe audio file using OpenAI's Whisper API.
+        Transcribe audio file.
+        Strategy: checks if Groq API key is set for faster/cheaper transcription.
+        Fallback: OpenAI Whisper.
         """
+        # Hybrid Approach: Try Groq first for transcription (faster/cheaper)
+        if getattr(settings, "GROQ_API_KEY", None):
+            try:
+                # Lazy initialization to avoid circular dependency or complex init logic
+                from groq import Groq
+                groq_client = Groq(api_key=settings.GROQ_API_KEY)
+                
+                with open(file_path, "rb") as file:
+                    transcription = groq_client.audio.transcriptions.create(
+                        file=(file_path, file.read()),
+                        model="whisper-large-v3",
+                        response_format="text",
+                        temperature=0.0
+                    )
+                logger.info("Transcribed audio using Groq (Hybrid Provider)")
+                return transcription
+            except Exception as e:
+                logger.warning(f"Groq transcription failed, falling back to OpenAI: {e}")
+        
+        # Fallback to OpenAI
         try:
             with open(file_path, "rb") as file:
                 transcription = self.client.audio.transcriptions.create(
@@ -165,6 +187,7 @@ class OpenAILLMService(LLMService):
                     response_format="text",
                     temperature=0.0
                 )
+            logger.info("Transcribed audio using OPENAI Whisper")
             return transcription
         except Exception as e:
             logger.error(f"OpenAI Transcription error: {e}")
