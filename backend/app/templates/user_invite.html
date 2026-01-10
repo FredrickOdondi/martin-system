@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background-color: #f8f9fa;
+            padding: 20px;
+            text-align: center;
+            border-radius: 5px 5px 0 0;
+        }
+
+        .content {
+            padding: 30px 20px;
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-top: none;
+            border-radius: 0 0 5px 5px;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 12px 24px;
+            background-color: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-top: 20px;
+        }
+
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: #6c757d;
+            margin-top: 20px;
+        }
+
+        .credential-box {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+            font-family: monospace;
+            font-size: 16px;
+            text-align: center;
+            letter-spacing: 1px;
+        }
+
+        .warning {
+            color: #856404;
+            background-color: #fff3cd;
+            border: 1px solid #ffeeba;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Welcome to TWG Support System</h2>
+        </div>
+        <div class="content">
+            <p>Dear {{ full_name }},</p>
+
+            <p>You have been invited to join the ECOWAS Summit TWG Support System as a <strong>{{ role }}</strong>.</p>
+
+            <p>An account has been created for you. Please use the following temporary password to log in:</p>
+
+            <div class="credential-box">
+                {{ password }}
+            </div>
+
+            <p>You can log in at: <a href="{{ login_url }}">{{ login_url }}</a></p>
+
+            <a href="{{ login_url }}" class="button" style="color: white;">Log In to Dashboard</a>
+
+            <div class="warning">
+                <strong>Important:</strong> For security reasons, please change your password immediately after logging
+                in.
+            </div>
+
+            <p>If you have any questions, please contact the secretariat.</p>
+        </div>
+        <div class="footer">
+            <p>&copy; 2026 ECOWAS Summit TWG Support System. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+
+</html>
