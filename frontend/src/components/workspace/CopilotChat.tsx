@@ -111,8 +111,11 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
         setInput(val);
 
         // Detect @mention
-        const lastWord = val.split(' ').pop();
-        if (lastWord && lastWord.startsWith('@') && (user?.role === 'admin' || user?.role === 'secretariat_lead')) {
+        // improved regex to check if the cursor is at a word starting with @
+        const words = val.split(" ");
+        const lastWord = words[words.length - 1];
+
+        if ((lastWord.startsWith('@') || lastWord === '@') && (user?.role === 'admin' || user?.role === 'secretariat_lead')) {
             setShowMentions(true);
             setMentionQuery(lastWord.slice(1));
             setMentionIndex(0);
@@ -312,7 +315,7 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
                         onChange={handleInputChange}
                         onKeyDown={handleKeyDown}
                         placeholder={showMentions ? "Type to search TWGs..." : "Ask Copilot to analyze, draft, or schedule (@ to mention TWG)..."}
-                        className="w-full bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl py-3 pl-4 pr-12 text-xs font-medium text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 hover:border-blue-400 transition-all shadow-sm"
+                        className="w-full bg-white dark:bg-slate-800 rounded-xl py-3 pl-4 pr-12 text-xs font-medium text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-blue-500 transition-all shadow-sm outline-none"
                         disabled={isStreaming}
                         autoFocus
                         autoComplete="off"
