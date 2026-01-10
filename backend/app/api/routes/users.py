@@ -199,6 +199,12 @@ async def invite_user(
     
     user, _, _ = await auth_service.register_user(user_register)
     
+    # Re-fetch user with TWGs loaded to prevent MissingGreenlet error during assignment
+    # This ensures the relationship is ready for async modification
+    query = select(User).where(User.id == user.id).options(selectinload(User.twgs))
+    result = await db.execute(query)
+    user = result.scalar_one()
+    
     # Update role
     user.role = invite_data.role
     
