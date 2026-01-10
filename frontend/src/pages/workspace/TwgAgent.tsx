@@ -159,38 +159,49 @@ export default function TwgAgent() {
 
             setConversationId(response.conversation_id);
 
-            // Check if response contains an email approval request
-            if (response.response.includes('Approval Required') || response.response.includes('approval_request_id')) {
-                try {
-                    // Try to extract approval request ID from response (handles markdown backticks)
-                    const approvalMatch = response.response.match(/(?:approval_request_id|Approval Request ID)['":\s`*]+([a-f0-9-]{36})/i);
-                    if (approvalMatch) {
-                        const requestId = approvalMatch[1];
-                        console.log('Found approval request ID:', requestId);
+            console.log('[DEBUG] Full Agent Response:', response);
+            console.log('[DEBUG] Interrupted?', response.interrupted, 'Has Payload?', !!response.interrupt_payload);
 
-                        // Fetch the full approval request
-                        const approvalData = await agentService.getEmailApproval(requestId);
-                        console.log('Fetched approval data:', approvalData);
+            // NEW: Check for LangGraph interrupt (proper HITL pattern)
+            if (response.interrupted && response.interrupt_payload) {
+                console.log('[APPROVAL] Graph interrupted for approval:', response.interrupt_payload);
 
-                        setPendingEmailApproval(approvalData);
-                        setShowApprovalModal(true);
-                    } else {
-                        console.log('Could not extract approval request ID from response:', response.response);
-                    }
-                } catch (err) {
-                    console.error('Error fetching approval request:', err);
-                }
+                // The interrupt_payload contains the approval data directly
+                const draftData = response.interrupt_payload.draft || {};
+                const draftWithId: EmailDraft = {
+                    ...draftData,
+                    draft_id: draftData.draft_id || `draft-${Date.now()}`,
+                    to: draftData.to || [],
+                    subject: draftData.subject || '(No Subject)',
+                    body: draftData.body || '',
+                    created_at: draftData.created_at || new Date().toISOString()
+                };
+
+                const approvalRequest: EmailApprovalRequest = {
+                    request_id: response.interrupt_payload.request_id,
+                    draft: draftWithId,
+                    message: response.interrupt_payload.message || 'Email requires approval before sending.'
+                };
+
+                console.log('[APPROVAL] Setting approval state:', approvalRequest);
+                setPendingEmailApproval(approvalRequest);
+                setShowApprovalModal(true);
+                console.log('[APPROVAL] Modal triggered');
+                return; // Don't add another message below
             }
 
-            const agentMessage: Message = {
-                id: (Date.now() + 1).toString(),
-                role: 'agent',
-                content: response.response,
-                timestamp: new Date(),
-                citations: response.citations,
-            };
+            // Only add a regular message if there's actual content (not an interrupt-only response)
+            if (response.response && response.response.trim()) {
+                const agentMessage: Message = {
+                    id: (Date.now() + 1).toString(),
+                    role: 'agent',
+                    content: response.response,
+                    timestamp: new Date(),
+                    citations: response.citations,
+                };
 
-            setMessages(prev => [...prev, agentMessage]);
+                setMessages(prev => [...prev, agentMessage]);
+            }
         } catch (error: any) {
             // Don't show error if request was aborted
             if (error?.name === 'AbortError' || error?.message?.includes('abort')) {

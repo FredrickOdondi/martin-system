@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
 
 export interface EmailDraft {
     draft_id: string;
@@ -166,16 +168,19 @@ export default function EmailApprovalModal({
                             Message:
                         </label>
                         {isEditing ? (
-                            <textarea
-                                value={editedDraft.body}
-                                onChange={(e) => setEditedDraft({ ...editedDraft, body: e.target.value })}
-                                rows={10}
-                                className="w-full px-3 py-2 border border-[#e7ebf3] dark:border-[#2d3748] rounded-lg bg-white dark:bg-[#0d121b] text-sm text-[#0d121b] dark:text-white focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500 font-mono"
-                            />
-                        ) : (
-                            <div className="px-4 py-3 bg-gray-50 dark:bg-[#0d121b] border border-[#e7ebf3] dark:border-[#2d3748] rounded-lg text-sm text-[#0d121b] dark:text-white whitespace-pre-wrap max-h-64 overflow-y-auto">
-                                {approvalRequest.draft.body}
+                            <div className="bg-white dark:bg-[#0d121b] text-black dark:text-white rounded-lg overflow-hidden">
+                                <ReactQuill
+                                    theme="snow"
+                                    value={editedDraft.html_body || editedDraft.body}
+                                    onChange={(content) => setEditedDraft({ ...editedDraft, html_body: content, body: content.replace(/<[^>]+>/g, '') })}
+                                    className="h-64 mb-12"
+                                />
                             </div>
+                        ) : (
+                            <div
+                                className="px-4 py-3 bg-gray-50 dark:bg-[#0d121b] border border-[#e7ebf3] dark:border-[#2d3748] rounded-lg text-sm text-[#0d121b] dark:text-white max-h-64 overflow-y-auto prose dark:prose-invert max-w-none"
+                                dangerouslySetInnerHTML={{ __html: approvalRequest.draft.html_body || approvalRequest.draft.body.replace(/\n/g, '<br/>') }}
+                            />
                         )}
                     </div>
 

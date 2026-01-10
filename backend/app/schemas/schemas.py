@@ -372,6 +372,9 @@ class AgentChatResponse(SchemaBase):
     conversation_id: uuid.UUID
     citations: List[dict] = []
     agent_id: str
+    interrupted: Optional[bool] = False
+    interrupt_payload: Optional[dict] = None
+    thread_id: Optional[str] = None
 
 class AgentTaskRequest(SchemaBase):
     task_type: str # drafting, research, analysis, synthesis

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Citation } from '../../services/agentService';
+import { EmailApprovalRequest } from './EmailApprovalModal';
 
 interface Message {
     id: string;
@@ -10,6 +11,7 @@ interface Message {
     reactions?: MessageReaction[];
     agentName?: string;
     agentIcon?: string;
+    approvalRequest?: EmailApprovalRequest;
 }
 
 interface MessageReaction {
@@ -23,6 +25,8 @@ interface EnhancedMessageBubbleProps {
     onReact?: (messageId: string, emoji: string) => void;
     onCopy?: (content: string) => void;
     onReply?: (messageId: string) => void;
+    onApprove?: (requestId: string) => void;
+    onDecline?: (requestId: string) => void;
 }
 
 // Function to parse and format markdown-like text with better styling
@@ -121,7 +125,12 @@ const formatMarkdownText = (text: string): JSX.Element => {
     return <>{elements}</>;
 };
 
-export default function EnhancedMessageBubble({ message, onReact, onCopy, onReply }: EnhancedMessageBubbleProps) {
+export default function EnhancedMessageBubble({ message, onReact, onCopy, onReply, onApprove, onDecline }: EnhancedMessageBubbleProps) {
+    // Debug log to trace approval rendering
+    if (message.approvalRequest) {
+        console.log('[BUBBLE] Rendering bubble with approval request:', message.id, message.approvalRequest);
+    }
+
     const [showActions, setShowActions] = useState(false);
     const [showReactions, setShowReactions] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -180,11 +189,10 @@ export default function EnhancedMessageBubble({ message, onReact, onCopy, onRepl
 
                 <div className="relative">
                     {/* Message bubble */}
-                    <div className={`${
-                        message.role === 'user'
-                            ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg'
-                            : 'bg-white dark:bg-[#1a202c] shadow-md border border-[#e7ebf3] dark:border-[#2d3748]'
-                    } rounded-2xl ${message.role === 'user' ? 'rounded-tr-sm' : 'rounded-tl-sm'} p-4 transition-all`}>
+                    <div className={`${message.role === 'user'
+                        ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg'
+                        : 'bg-white dark:bg-[#1a202c] shadow-md border border-[#e7ebf3] dark:border-[#2d3748]'
+                        } rounded-2xl ${message.role === 'user' ? 'rounded-tr-sm' : 'rounded-tl-sm'} p-4 transition-all`}>
                         {/* Content */}
                         <div className={`text-sm leading-relaxed ${message.role === 'agent' ? 'text-[#0d121b] dark:text-white' : 'text-white'}`}>
                             {message.role === 'agent' ? formatMarkdownText(message.content) : message.content}
@@ -208,6 +216,44 @@ export default function EnhancedMessageBubble({ message, onReact, onCopy, onRepl
                                             <span className="text-[10px] opacity-60">Page {citation.page}</span>
                                         </div>
                                     ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Inline Approval UI */}
+                        {message.approvalRequest && (
+                            <div className="mt-4 pt-4 border-t border-[#e7ebf3] dark:border-[#2d3748]">
+                                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 mb-3 border border-blue-100 dark:border-blue-800">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-[18px]">mail</span>
+                                        <span className="text-xs font-bold text-blue-800 dark:text-blue-200">Email Draft</span>
+                                    </div>
+                                    <div className="text-sm font-medium text-slate-900 dark:text-white mb-1">
+                                        {message.approvalRequest.draft.subject}
+                                    </div>
+                                    <div className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
+                                        {message.approvalRequest.draft.body}
+                                    </div>
+                                </div>
+                                <div className="flex gap-2">
+                                    {onApprove && (
+                                        <button
+                                            onClick={() => onApprove(message.approvalRequest!.request_id)}
+                                            className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-xs font-semibold py-2 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-1.5"
+                                        >
+                                            <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                                            Approve & Send
+                                        </button>
+                                    )}
+                                    {onDecline && (
+                                        <button
+                                            onClick={() => onDecline(message.approvalRequest!.request_id)}
+                                            className="px-4 bg-white dark:bg-[#1a202c] border border-gray-200 dark:border-gray-700 text-red-600 dark:text-red-400 text-xs font-semibold py-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors flex items-center gap-1.5"
+                                        >
+                                            <span className="material-symbols-outlined text-[16px]">cancel</span>
+                                            Decline
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         )}

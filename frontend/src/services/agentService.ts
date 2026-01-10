@@ -22,6 +22,15 @@ export interface AgentChatResponse {
     conversation_id: string;
     citations: Citation[];
     agent_id: string;
+    // LangGraph HITL interrupt fields (optional)
+    interrupted?: boolean;
+    interrupt_payload?: {
+        type: string;
+        request_id: string;
+        draft: any;
+        message: string;
+    };
+    thread_id?: string;
 }
 
 export interface AgentTaskRequest {
@@ -42,6 +51,8 @@ export const agentService = {
     // Chat with the agent
     chat: async (chatRequest: AgentChatRequest): Promise<AgentChatResponse> => {
         const response = await api.post<AgentChatResponse>('/agents/chat', chatRequest);
+        console.log('[AGENT_SERVICE] Raw response.data:', response.data);
+        console.log('[AGENT_SERVICE] interrupted?', response.data.interrupted, 'payload?', !!response.data.interrupt_payload);
         return response.data;
     },
 

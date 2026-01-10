@@ -6,6 +6,8 @@ while using the new LangGraph implementation underneath.
 """
 
 from app.agents.langgraph_supervisor import create_langgraph_supervisor
+from langgraph.types import interrupt
+from langgraph.errors import GraphInterrupt
 from loguru import logger
 
 
@@ -30,11 +32,18 @@ class SupervisorAPIAdapter:
 
         This method is async to maintain compatibility with the API routes,
         but the underlying LangGraph supervisor.chat() is sync.
+        
+        Raises:
+            GraphInterrupt: When the graph requires human approval before continuing.
         """
         try:
             # Call the sync method (LangGraph handles state internally)
             response = self.supervisor.chat(message, twg_id=twg_id)
             return response
+        except GraphInterrupt as gi:
+            # Re-raise GraphInterrupt so the API can catch it and return the approval payload
+            logger.info(f"[ADAPTER] GraphInterrupt detected - propagating to API layer")
+            raise gi
         except Exception as e:
             logger.error(f"[ADAPTER] Error in chat_with_tools: {e}")
             return f"I apologize, but I encountered an error: {str(e)}"
@@ -54,3 +63,4 @@ class SupervisorWithTools(SupervisorAPIAdapter):
     Alias for SupervisorAPIAdapter to maintain backward compatibility.
     """
     pass
+

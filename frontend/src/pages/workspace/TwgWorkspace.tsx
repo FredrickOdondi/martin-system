@@ -1,7 +1,6 @@
 import { Card, Badge, Avatar } from '../../components/ui'
 import { useSelector } from 'react-redux';
 import { RootState } from '../../store';
-import ConflictDashboard from '../../components/admin/ConflictDashboard'
 import PolicyFactory from '../../components/workspace/PolicyFactory'
 import CopilotChat from '../../components/workspace/CopilotChat'
 import { useState, useEffect } from 'react'
@@ -23,6 +22,10 @@ export default function TwgWorkspace() {
 
     // Modal State
     const [isScheduling, setIsScheduling] = useState(false)
+
+    // Pagination State for Meetings
+    const MEETINGS_PER_PAGE = 5;
+    const [meetingsPage, setMeetingsPage] = useState(0);
 
     // Load Meetings
     const loadMeetings = async () => {
@@ -229,9 +232,6 @@ export default function TwgWorkspace() {
                     {/* Content switching */}
                     {activeTab === 'overview' && (
                         <>
-                            {/* Admin Conflict Dashboard - Restricted Visibility */}
-                            {user?.role === 'admin' && <ConflictDashboard />}
-
                             <div className="grid grid-cols-12 gap-6">
                                 {/* Meeting Tracker */}
                                 <div className="col-span-12 space-y-4">
@@ -266,46 +266,72 @@ export default function TwgWorkspace() {
                                                             </td>
                                                         </tr>
                                                     )}
-                                                    {events.map((m, i) => (
-                                                        <tr key={m.id || i} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors group">
-                                                            <td className="px-6 py-4">
-                                                                <div className="font-bold text-slate-900 dark:text-white group-hover:text-blue-600 transition-colors">{m.title}</div>
-                                                                <div className="text-[10px] text-slate-400 uppercase font-black">
-                                                                    {new Date(m.scheduled_at).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                                                                </div>
-                                                            </td>
-                                                            <td className="px-6 py-4">
-                                                                <Badge variant="neutral" size="sm" className="font-bold">{m.type || 'Session'}</Badge>
-                                                            </td>
-                                                            <td className="px-6 py-4">
-                                                                <Badge variant={m.status === 'scheduled' ? 'info' : m.status === 'completed' ? 'success' : 'warning'} size="sm" className="font-bold tracking-tighter uppercase">
-                                                                    {m.status || 'Scheduled'}
-                                                                </Badge>
-                                                            </td>
-                                                            <td className="px-6 py-4">
-                                                                <div className="flex justify-center gap-2">
-                                                                    {/* Simple indicators for now until backend eagerly loads metadata */}
-                                                                    <div title="Agenda" className="p-1.5 rounded-lg border bg-blue-50 border-blue-100 text-blue-600 dark:bg-blue-900/20 dark:border-blue-900/30 dark:text-blue-400 cursor-pointer hover:scale-110 transition-all">
-                                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                                    {events
+                                                        .slice(meetingsPage * MEETINGS_PER_PAGE, (meetingsPage + 1) * MEETINGS_PER_PAGE)
+                                                        .map((m, i) => (
+                                                            <tr key={m.id || i} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors group">
+                                                                <td className="px-6 py-4">
+                                                                    <div className="font-bold text-slate-900 dark:text-white group-hover:text-blue-600 transition-colors">{m.title}</div>
+                                                                    <div className="text-[10px] text-slate-400 uppercase font-black">
+                                                                        {new Date(m.scheduled_at).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                                                     </div>
-                                                                    <div title="Participants" className="p-1.5 rounded-lg border bg-slate-50 border-slate-100 text-slate-300 dark:bg-slate-800 dark:border-slate-700/50 opacity-50 transition-all">
-                                                                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                                                                </td>
+                                                                <td className="px-6 py-4">
+                                                                    <Badge variant="neutral" size="sm" className="font-bold">{m.type || 'Session'}</Badge>
+                                                                </td>
+                                                                <td className="px-6 py-4">
+                                                                    <Badge variant={m.status === 'scheduled' ? 'info' : m.status === 'completed' ? 'success' : 'warning'} size="sm" className="font-bold tracking-tighter uppercase">
+                                                                        {m.status || 'Scheduled'}
+                                                                    </Badge>
+                                                                </td>
+                                                                <td className="px-6 py-4">
+                                                                    <div className="flex justify-center gap-2">
+                                                                        {/* Simple indicators for now until backend eagerly loads metadata */}
+                                                                        <div title="Agenda" className="p-1.5 rounded-lg border bg-blue-50 border-blue-100 text-blue-600 dark:bg-blue-900/20 dark:border-blue-900/30 dark:text-blue-400 cursor-pointer hover:scale-110 transition-all">
+                                                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                                                                        </div>
+                                                                        <div title="Participants" className="p-1.5 rounded-lg border bg-slate-50 border-slate-100 text-slate-300 dark:bg-slate-800 dark:border-slate-700/50 opacity-50 transition-all">
+                                                                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+                                                                        </div>
                                                                     </div>
-                                                                </div>
-                                                            </td>
-                                                            <td className="px-6 py-4 text-right">
-                                                                <button
-                                                                    onClick={() => navigate(`/meetings/${m.id}`)}
-                                                                    className="text-[10px] font-black text-blue-600 hover:text-blue-700 uppercase tracking-widest transition-all"
-                                                                >
-                                                                    View Details
-                                                                </button>
-                                                            </td>
-                                                        </tr>
-                                                    ))}
+                                                                </td>
+                                                                <td className="px-6 py-4 text-right">
+                                                                    <button
+                                                                        onClick={() => navigate(`/meetings/${m.id}`)}
+                                                                        className="text-[10px] font-black text-blue-600 hover:text-blue-700 uppercase tracking-widest transition-all"
+                                                                    >
+                                                                        View Details
+                                                                    </button>
+                                                                </td>
+                                                            </tr>
+                                                        ))}
                                                 </tbody>
                                             </table>
                                         </div>
+                                        {/* Pagination Controls */}
+                                        {events.length > MEETINGS_PER_PAGE && (
+                                            <div className="flex items-center justify-between px-6 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
+                                                <span className="text-xs text-slate-500">
+                                                    Showing {meetingsPage * MEETINGS_PER_PAGE + 1}-{Math.min((meetingsPage + 1) * MEETINGS_PER_PAGE, events.length)} of {events.length}
+                                                </span>
+                                                <div className="flex gap-2">
+                                                    <button
+                                                        onClick={() => setMeetingsPage(p => Math.max(0, p - 1))}
+                                                        disabled={meetingsPage === 0}
+                                                        className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                                    >
+                                                        Previous
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setMeetingsPage(p => Math.min(Math.ceil(events.length / MEETINGS_PER_PAGE) - 1, p + 1))}
+                                                        disabled={meetingsPage >= Math.ceil(events.length / MEETINGS_PER_PAGE) - 1}
+                                                        className="px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                                                    >
+                                                        Next
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        )}
                                     </Card>
                                 </div>
 

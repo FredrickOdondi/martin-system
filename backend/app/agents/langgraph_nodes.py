@@ -7,6 +7,7 @@ Each function represents a node in the agent graph.
 from typing import Dict, List
 from loguru import logger
 from langchain_core.messages import HumanMessage, AIMessage
+from langgraph.errors import GraphInterrupt
 
 from app.agents.langgraph_state import AgentState
 from app.agents.langgraph_base_agent import LangGraphBaseAgent
@@ -168,6 +169,9 @@ def create_twg_agent_node(agent_id: str, agent: LangGraphBaseAgent):
             response = _agent.chat(query)
             state["agent_responses"][_agent_id] = response
             logger.info(f"[{_agent_id.upper()}] Response generated")
+        except GraphInterrupt:
+            # Re-raise GraphInterrupt so it bubbles up to Supervisor and API
+            raise
         except Exception as e:
             logger.error(f"[{_agent_id.upper()}] Error: {e}")
             state["agent_responses"][_agent_id] = f"Error: {str(e)}"
