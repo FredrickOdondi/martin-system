@@ -240,12 +240,21 @@ export default function TwgAgent() {
         // Check for mention trigger (@)
         const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
         if (mentionMatch) {
-            const query = '@' + mentionMatch[1];
+            const query = mentionMatch[1].toLowerCase();
             try {
-                const response = await axios.get(`/api/agents/mentions/autocomplete`, {
-                    params: { query }
-                });
-                setMentionSuggestions(response.data?.suggestions || []);
+                const twgs = await twgService.listTWGs();
+                const filtered = twgs.filter(t =>
+                    t.name.toLowerCase().includes(query) ||
+                    t.pillar?.toLowerCase().includes(query)
+                ).map(t => ({
+                    mention: `@${t.name}`,
+                    agent_id: t.id,
+                    name: t.name,
+                    icon: 'smart_toy',
+                    description: t.pillar || 'Technical Working Group'
+                }));
+
+                setMentionSuggestions(filtered as any); // Type assertion to handle interface mismatch if any
                 setAutocompleteType('mention');
                 setSelectedSuggestionIndex(0);
                 return;
