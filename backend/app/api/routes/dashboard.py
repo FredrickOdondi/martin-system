@@ -625,6 +625,7 @@ async def force_reconciliation(
                         })
                     
                     if is_new_conflict(conflict_desc):
+                        new_conflict = Conflict(
                             id=uuid.uuid4(),
                             conflict_type=ConflictType.RESOURCE_CONSTRAINT,
                             description=conflict_desc,
