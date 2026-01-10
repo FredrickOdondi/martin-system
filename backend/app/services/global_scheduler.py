@@ -325,6 +325,10 @@ class GlobalScheduler:
         """Check for location double-booking"""
         conflicts = []
 
+        # Skip for virtual events or undefined locations
+        if not event.location or event.location.lower() == 'virtual':
+            return conflicts
+
         for existing_event in self._events.values():
             if existing_event.location == event.location:
                 if self._times_overlap(
