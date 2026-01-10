@@ -9,7 +9,7 @@ import EmailApprovalModal, { EmailApprovalRequest, EmailDraft } from '../../comp
 import SettingsModal from '../../components/agent/SettingsModal';
 import { CommandAutocompleteResult } from '../../types/agent';
 
-import axios from 'axios';
+
 
 interface Message {
     id: string;
@@ -223,29 +223,51 @@ export default function TwgAgent() {
         // Check for command trigger (/)
         const commandMatch = textBeforeCursor.match(/\/(\w*)$/);
         if (commandMatch) {
-            const query = '/' + commandMatch[1];
-            try {
-                const response = await axios.get(`/api/agents/commands/autocomplete`, {
-                    params: { query }
-                });
-                setCommandSuggestions(response.data?.suggestions || []);
+            const query = '/' + commandMatch[1].toLowerCase();
+
+            // Client-side command list with role-based access control
+            const ALL_COMMANDS: CommandAutocompleteResult[] = [
+                { command: '/email', description: 'Send emails or search inbox', category: 'communication', examples: '/email summary' },
+                { command: '/search', description: 'Search knowledge base', category: 'general', examples: '/search mining' },
+                { command: '/schedule', description: 'Check schedules or create meetings', category: 'meetings', examples: '/schedule meeting' },
+                { command: '/draft', description: 'Draft documents or minutes', category: 'documents', examples: '/draft minutes' },
+                { command: '/analyze', description: 'Analyze uploaded documents', category: 'analysis', examples: '/analyze report.pdf' },
+                { command: '/broadcast', description: 'Broadcast message to all TWGs', category: 'communication', examples: '/broadcast unexpected delay', roles: ['admin', 'secretariat_lead'] }
+            ];
+
+            // Filter commands based on query and user role
+            const filteredCommands = ALL_COMMANDS.filter(cmd => {
+                const matchesQuery = cmd.command.toLowerCase().startsWith(query);
+                const hasRole = !cmd.roles || (user?.role && cmd.roles.includes(user.role as any)); // Check if user has required role
+                return matchesQuery && hasRole;
+            });
+
+            if (filteredCommands.length > 0) {
+                setCommandSuggestions(filteredCommands);
                 setAutocompleteType('command');
                 setSelectedSuggestionIndex(0);
                 return;
-            } catch (error) {
-                console.error('Error fetching command suggestions:', error);
             }
         }
 
         // Check for mention trigger (@)
         const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
         if (mentionMatch) {
-            const query = '@' + mentionMatch[1];
+            const query = mentionMatch[1].toLowerCase();
             try {
-                const response = await axios.get(`/api/agents/mentions/autocomplete`, {
-                    params: { query }
-                });
-                setMentionSuggestions(response.data?.suggestions || []);
+                const twgs = await twgService.listTWGs();
+                const filtered = twgs.filter((t: any) =>
+                    t.name.toLowerCase().includes(query) ||
+                    t.pillar?.toLowerCase().includes(query)
+                ).map((t: any) => ({
+                    mention: `@${t.name}`,
+                    agent_id: t.id,
+                    name: t.name,
+                    icon: 'smart_toy',
+                    description: t.pillar || 'Technical Working Group'
+                }));
+
+                setMentionSuggestions(filtered as any); // Type assertion to handle interface mismatch if any
                 setAutocompleteType('mention');
                 setSelectedSuggestionIndex(0);
                 return;
@@ -649,7 +671,7 @@ export default function TwgAgent() {
                             </button>
                         </div>
 
-                        <div className="relative bg-white dark:bg-[#0d121b] border-2 border-[#e7ebf3] dark:border-[#2d3748] rounded-2xl shadow-lg focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500 dark:focus-within:border-blue-400 transition-all">
+                        <div className="relative bg-white dark:bg-[#0d121b] border border-[#e7ebf3] dark:border-[#2d3748] rounded-2xl shadow-lg focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500 dark:focus-within:border-blue-400 transition-all">
                             {/* Command Autocomplete */}
                             {autocompleteType === 'command' && (commandSuggestions || []).length > 0 && (
                                 <CommandAutocomplete

@@ -22,56 +22,41 @@ export function CommandAutocomplete({
   if (suggestions.length === 0) return null;
 
   return (
-    <div className="absolute bottom-full left-0 mb-2 w-full max-w-md bg-slate-800 border border-slate-700 rounded-lg shadow-2xl z-50 overflow-hidden">
-      <div className="p-2 border-b border-slate-700 bg-slate-900/50">
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <span className="material-symbols-outlined text-[16px]">terminal</span>
-          <span>Commands</span>
-          <span className="ml-auto text-slate-500">↑↓ navigate • ↵ select</span>
-        </div>
-      </div>
-
-      <div className="max-h-64 overflow-y-auto">
+    <div className="absolute bottom-full left-0 mb-2 w-72 bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden transform transition-all">
+      <div className="max-h-64 overflow-y-auto py-1">
         {suggestions.map((suggestion, index) => (
           <button
             key={suggestion.command}
             onClick={() => onSelect(suggestion)}
             onMouseEnter={() => onHover(index)}
-            className={`w-full text-left px-4 py-3 transition-colors ${
-              index === selectedIndex
-                ? 'bg-blue-600 text-white'
-                : 'hover:bg-slate-700 text-slate-200'
-            }`}
+            className={`w-full text-left px-3 py-2.5 transition-colors flex items-center gap-3 ${index === selectedIndex
+                ? 'bg-blue-50 dark:bg-blue-900/40'
+                : 'hover:bg-gray-50 dark:hover:bg-slate-800'
+              }`}
           >
-            <div className="flex items-start gap-3">
-              <span className="material-symbols-outlined text-[20px] mt-0.5">
+            {/* Icon */}
+            <div className={`size-8 rounded-md flex items-center justify-center flex-shrink-0 ${index === selectedIndex
+                ? 'bg-blue-100 dark:bg-blue-800 text-blue-600 dark:text-blue-200'
+                : 'bg-gray-100 dark:bg-slate-700 text-gray-500 dark:text-gray-400'
+              }`}>
+              <span className="material-symbols-outlined text-[18px]">
                 {getCategoryIcon(suggestion.category || 'general')}
               </span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-sm font-mono">{suggestion.command}</span>
-                  {suggestion.category && (
-                    <span className={`text-xs px-2 py-0.5 rounded ${
-                      index === selectedIndex
-                        ? 'bg-white/20'
-                        : 'bg-slate-700'
-                    }`}>
-                      {suggestion.category}
-                    </span>
-                  )}
-                </div>
-                <p className={`text-xs mt-0.5 ${
-                  index === selectedIndex ? 'text-blue-100' : 'text-slate-400'
+            </div>
+
+            {/* Info */}
+            <div className="min-w-0 flex-1">
+              <div className={`text-sm font-medium font-mono ${index === selectedIndex
+                  ? 'text-blue-700 dark:text-blue-100'
+                  : 'text-gray-900 dark:text-gray-100'
                 }`}>
-                  {suggestion.description}
-                </p>
-                {suggestion.examples && (
-                  <p className={`text-xs mt-1 font-mono ${
-                    index === selectedIndex ? 'text-blue-200/80' : 'text-slate-500'
-                  }`}>
-                    e.g., {suggestion.examples}
-                  </p>
-                )}
+                {suggestion.command}
+              </div>
+              <div className={`text-xs truncate ${index === selectedIndex
+                  ? 'text-blue-600/80 dark:text-blue-300/80'
+                  : 'text-gray-500 dark:text-gray-400'
+                }`}>
+                {suggestion.description}
               </div>
             </div>
           </button>

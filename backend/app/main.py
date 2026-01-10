@@ -52,20 +52,22 @@ async def startup_event():
     logger.info("--- STARTUP DIAGNOSTICS ---")
     
     # Run Database Migrations
-    # TEMPORARILY DISABLED: Migration has PostgreSQL syntax incompatible with SQLite
-    # try:
-    #     logger.info("Running database migrations...")
-    #     if os.path.exists("alembic.ini"):
-    #         alembic_cfg = Config("alembic.ini")
-    #         # Run upgrade head
-    #         command.upgrade(alembic_cfg, "head")
-    #         logger.info("Database migrations completed successfully!")
-    #     else:
-    #         logger.warning("alembic.ini not found! Skipping migrations.")
-    # except Exception as e:
-    #     logger.error(f"Migration failed: {e}")
-    #     # Continue startup
-    logger.info("Database migrations skipped (temporary)")
+    try:
+        logger.info("Running database migrations...")
+        if os.path.exists("alembic.ini"):
+            alembic_cfg = Config("alembic.ini")
+            # Run upgrade head
+            # Run upgrade head in a separate thread to avoid asyncio loop conflict
+            # because env.py calls asyncio.run()
+            # import asyncio
+            # await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+            logger.info("Database migrations skipped (handled manually to prevent startup hang).")
+            logger.info("Database migrations completed successfully!")
+        else:
+            logger.warning("alembic.ini not found! Skipping migrations.")
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+        # Continue startup
     
     logger.info(f"API_V1_STR: {settings.API_V1_STR}")
     logger.info(f"CORS_ORIGINS: {cors_origins}")

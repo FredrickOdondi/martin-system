@@ -24,6 +24,15 @@ class SchedulerService:
             id="check_missing_minutes",
             replace_existing=True
         )
+
+        # Poll Google Drive for new meeting transcripts
+        from app.services.drive_service import drive_service
+        self.scheduler.add_job(
+            drive_service.process_new_transcripts,
+            trigger=IntervalTrigger(minutes=10),
+            id="drive_transcript_poll",
+            replace_existing=True
+        )
         
         self.scheduler.start()
         logger.info("APScheduler started")

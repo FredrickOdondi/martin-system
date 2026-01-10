@@ -143,6 +143,7 @@ export interface CommandAutocompleteResult {
   examples: string;
   category?: string;
   match_score?: number;
+  roles?: string[];
 }
 
 // Agent mention types
