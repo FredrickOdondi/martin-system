@@ -43,6 +43,10 @@ async def startup_event():
     import os
     from alembic.config import Config
     from alembic import command
+    from app.core.google_utils import setup_google_credentials
+    
+    # Initialize Google Auth (restore credentials from env if needed)
+    setup_google_credentials()
     
     logger = logging.getLogger("uvicorn.info")
     logger.info("--- STARTUP DIAGNOSTICS ---")
