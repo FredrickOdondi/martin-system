@@ -9,7 +9,7 @@ import EmailApprovalModal, { EmailApprovalRequest, EmailDraft } from '../../comp
 import SettingsModal from '../../components/agent/SettingsModal';
 import { CommandAutocompleteResult } from '../../types/agent';
 
-import axios from 'axios';
+
 
 interface Message {
     id: string;
@@ -223,17 +223,30 @@ export default function TwgAgent() {
         // Check for command trigger (/)
         const commandMatch = textBeforeCursor.match(/\/(\w*)$/);
         if (commandMatch) {
-            const query = '/' + commandMatch[1];
-            try {
-                const response = await axios.get(`/api/agents/commands/autocomplete`, {
-                    params: { query }
-                });
-                setCommandSuggestions(response.data?.suggestions || []);
+            const query = '/' + commandMatch[1].toLowerCase();
+
+            // Client-side command list with role-based access control
+            const ALL_COMMANDS: CommandAutocompleteResult[] = [
+                { command: '/email', description: 'Send emails or search inbox', category: 'communication', examples: '/email summary' },
+                { command: '/search', description: 'Search knowledge base', category: 'general', examples: '/search mining' },
+                { command: '/schedule', description: 'Check schedules or create meetings', category: 'meetings', examples: '/schedule meeting' },
+                { command: '/draft', description: 'Draft documents or minutes', category: 'documents', examples: '/draft minutes' },
+                { command: '/analyze', description: 'Analyze uploaded documents', category: 'analysis', examples: '/analyze report.pdf' },
+                { command: '/broadcast', description: 'Broadcast message to all TWGs', category: 'communication', examples: '/broadcast unexpected delay', roles: ['admin', 'secretariat_lead'] }
+            ];
+
+            // Filter commands based on query and user role
+            const filteredCommands = ALL_COMMANDS.filter(cmd => {
+                const matchesQuery = cmd.command.toLowerCase().startsWith(query);
+                const hasRole = !cmd.roles || (user?.role && cmd.roles.includes(user.role as any)); // Check if user has required role
+                return matchesQuery && hasRole;
+            });
+
+            if (filteredCommands.length > 0) {
+                setCommandSuggestions(filteredCommands);
                 setAutocompleteType('command');
                 setSelectedSuggestionIndex(0);
                 return;
-            } catch (error) {
-                console.error('Error fetching command suggestions:', error);
             }
         }
 
@@ -243,10 +256,10 @@ export default function TwgAgent() {
             const query = mentionMatch[1].toLowerCase();
             try {
                 const twgs = await twgService.listTWGs();
-                const filtered = twgs.filter(t =>
+                const filtered = twgs.filter((t: any) =>
                     t.name.toLowerCase().includes(query) ||
                     t.pillar?.toLowerCase().includes(query)
-                ).map(t => ({
+                ).map((t: any) => ({
                     mention: `@${t.name}`,
                     agent_id: t.id,
                     name: t.name,
