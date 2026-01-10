@@ -71,7 +71,10 @@ const ProjectMemo: React.FC = () => {
     setMemoContent('');
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/agents/chat/stream`, {
+      // Use API_URL from services/api to ensure HTTPS and authorization
+      const baseUrl = (await import('../services/api')).API_URL;
+
+      const response = await fetch(`${baseUrl}/agents/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

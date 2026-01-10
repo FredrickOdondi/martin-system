@@ -521,8 +521,9 @@ export default function MeetingDetail() {
         }
     }
 
-    const handleDownloadDocument = (docId: string) => {
-        const downloadUrl = `${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1'}/meetings/documents/${docId}/download`;
+    const handleDownloadDocument = async (docId: string) => {
+        const { API_URL } = await import('../../services/api');
+        const downloadUrl = `${API_URL}/meetings/documents/${docId}/download`;
         window.open(downloadUrl, '_blank');
     }
 
@@ -530,7 +531,8 @@ export default function MeetingDetail() {
         if (!confirm('Are you sure you want to delete this document?')) return;
 
         try {
-            await fetch(`${import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000/api/v1'}/meetings/documents/${docId}`, {
+            const { API_URL } = await import('../../services/api');
+            await fetch(`${API_URL}/meetings/documents/${docId}`, {
                 method: 'DELETE',
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('token')}`

@@ -400,6 +400,10 @@ class EmailService:
         
         if attachments:
             params["attachments"] = attachments
+            
+        # Debug logging
+        print(f"[Resend] Sending email to {len(to_emails)} recipients. Subject: {subject}")
+        print(f"[Resend] Has attachments: {bool(attachments)} Count: {len(attachments) if attachments else 0}")
 
         try:
             result = resend.Emails.send(params)

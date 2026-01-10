@@ -757,10 +757,15 @@ async def approve_and_send_invite(
     # 1. Attach Agenda (PDF)
     if agenda and agenda.content:
         try:
+            # Safeguard TWG/Pillar
+            pillar_val = "TWG"
+            if db_meeting.twg and db_meeting.twg.pillar:
+                pillar_val = db_meeting.twg.pillar.value
+                
             pdf_bytes = pdf_service.generate_agenda_pdf(
                 agenda_markdown=agenda.content,
                 template_context={
-                    "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "TWG",
+                    "pillar_name": pillar_val,
                     "meeting_title": db_meeting.title,
                     "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d"),
                     "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC"),
@@ -865,6 +870,11 @@ async def approve_and_send_invite(
     # Send emails
     try:
         if participant_emails:
+            # Safeguard for potentially missing TWG or Pillar
+            pillar_name = "TWG"
+            if db_meeting.twg and db_meeting.twg.pillar:
+                pillar_name = db_meeting.twg.pillar.value
+            
             await email_service.send_meeting_invite(
                 to_emails=participant_emails,
                 subject=f"INVITATION: {db_meeting.title}",
@@ -876,7 +886,7 @@ async def approve_and_send_invite(
                     "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC"),
                     "location": db_meeting.location or "Virtual",
                     "video_link": db_meeting.video_link,
-                    "pillar_name": db_meeting.twg.pillar.value,
+                    "pillar_name": pillar_name,
                     "portal_url": f"{settings.FRONTEND_URL}/schedule"
                 },
                 meeting_details={
@@ -890,7 +900,8 @@ async def approve_and_send_invite(
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"CRITICAL ERROR: Failed to send invitations:\n{error_trace}")
+        print(f"CRITICAL ERROR: Failed to send invitations for meeting {meeting_id}:\n{error_trace}")
+        # We raise 500 so frontend sees it, but the log above will help debug
         raise HTTPException(status_code=500, detail=f"Failed to send invitations: {str(e)}")
 
     
