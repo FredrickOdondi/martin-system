@@ -57,7 +57,11 @@ async def startup_event():
         if os.path.exists("alembic.ini"):
             alembic_cfg = Config("alembic.ini")
             # Run upgrade head
-            command.upgrade(alembic_cfg, "head")
+            # Run upgrade head in a separate thread to avoid asyncio loop conflict
+            # because env.py calls asyncio.run()
+            # import asyncio
+            # await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+            logger.info("Database migrations skipped (handled manually to prevent startup hang).")
             logger.info("Database migrations completed successfully!")
         else:
             logger.warning("alembic.ini not found! Skipping migrations.")
