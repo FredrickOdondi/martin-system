@@ -230,6 +230,16 @@ class Settings(BaseSettings):
         default=None,
         description="Default sender email address"
     )
+    
+    # Resend-specific email settings (using verified domain)
+    EMAIL_FROM: str = Field(
+        default="noreply@ecowasiisummit.net",
+        description="Sender email address for Resend (must use verified domain)"
+    )
+    EMAIL_FROM_NAME: str = Field(
+        default="ECOWAS Summit",
+        description="Sender name for emails"
+    )
 
     # Storage
     UPLOAD_DIR: str = Field(

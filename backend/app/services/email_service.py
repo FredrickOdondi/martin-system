@@ -26,8 +26,10 @@ class EmailService:
             autoescape=select_autoescape(['html', 'xml'])
         )
         
-        self.from_email = settings.EMAILS_FROM_EMAIL
-        self.from_name = settings.EMAILS_FROM_NAME
+        # Use EMAIL_FROM and EMAIL_FROM_NAME for Resend (verified domain)
+        # Fall back to EMAILS_FROM_EMAIL for SMTP compatibility
+        self.from_email = getattr(settings, 'EMAIL_FROM', settings.EMAILS_FROM_EMAIL)
+        self.from_name = getattr(settings, 'EMAIL_FROM_NAME', settings.EMAILS_FROM_NAME)
         
         # Configure Resend if available
         if RESEND_AVAILABLE and settings.RESEND_API_KEY:

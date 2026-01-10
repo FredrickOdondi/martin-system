@@ -9,6 +9,7 @@ import os
 import logging
 from typing import List, Dict, Any, Optional, Union
 import resend
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -24,17 +25,18 @@ class ResendService:
         Initialize Resend service.
 
         Args:
-            api_key: Resend API key (defaults to env RESEND_API_KEY)
-            default_from: Default sender email (defaults to env EMAILS_FROM_EMAIL)
+            api_key: Resend API key (defaults to settings.RESEND_API_KEY)
+            default_from: Default sender email (defaults to settings.EMAIL_FROM)
         """
         self.api_key = api_key or os.getenv("RESEND_API_KEY")
-        self.default_from = default_from or os.getenv("EMAILS_FROM_EMAIL", "onboarding@resend.dev")
+        # Use verified domain from settings
+        self.default_from = default_from or getattr(settings, "EMAIL_FROM", os.getenv("EMAILS_FROM_EMAIL", "onboarding@resend.dev"))
         
         if not self.api_key:
             logger.warning("RESEND_API_KEY not found in environment")
         
         resend.api_key = self.api_key
-        logger.info("Resend service initialized")
+        logger.info(f"Resend service initialized (sender: {self.default_from})")
 
     def send_message(
         self,

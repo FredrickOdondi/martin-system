@@ -110,7 +110,7 @@ class LangGraphBaseAgent:
         
         # Tools Configuration
         from app.tools.calendar_tools import GET_SCHEDULE_TOOL_DEF, get_schedule
-        from app.tools.email_tools import EMAIL_TOOLS, send_email, search_emails, list_recent_emails, get_email, create_email_draft, get_email_thread
+        from app.tools.email_tools import EMAIL_TOOLS, send_email, create_email_draft
         import json
         
         # Register default tools available to all agents (or specific ones)
@@ -163,8 +163,8 @@ class LangGraphBaseAgent:
                         "description": param_desc
                     }
                 
-                # 'cc', 'bcc', and 'html_body' can also receive null from LLM
-                if param_name in ["cc", "bcc", "html_body"]:
+                # 'cc', 'bcc', 'html_body', and 'pillar_name' can also receive null from LLM
+                if param_name in ["cc", "bcc", "html_body", "pillar_name", "context"]:
                     new_props[param_name] = {
                         "anyOf": [
                             {"type": "string"},
@@ -176,15 +176,11 @@ class LangGraphBaseAgent:
             tool_def["function"]["parameters"]["properties"] = new_props
             self.tools_def.append(tool_def)
 
-        # 3. Build Tool Map
+        # 3. Build Tool Map (only include available tools)
         self.tool_map = {
             "get_schedule": get_schedule,
             "send_email": send_email,
-            "search_emails": search_emails,
-            "list_recent_emails": list_recent_emails,
-            "get_email": get_email,
-            "create_email_draft": create_email_draft,
-            "get_email_thread": get_email_thread
+            "create_email_draft": create_email_draft
         }
         
         # Get Knowledge Base (RAG)
