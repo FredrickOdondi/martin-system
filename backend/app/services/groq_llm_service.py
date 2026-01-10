@@ -73,8 +73,9 @@ class GroqLLMService:
         prompt: str,
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
-    ) -> str:
+        max_tokens: Optional[int] = None,
+        tools: Optional[List[Dict]] = None
+    ) -> Any:
         """
         Send a chat message to Groq and get a response.
 
@@ -83,12 +84,10 @@ class GroqLLMService:
             system_prompt: Optional system prompt to set context
             temperature: Override default temperature
             max_tokens: Override default max tokens
+            tools: Optional list of tool definitions
 
         Returns:
-            str: LLM response text
-
-        Raises:
-            Exception: If API request fails
+            str or object: LLM response text or full message object if tools used
         """
         messages = []
 
@@ -107,18 +106,25 @@ class GroqLLMService:
 
         try:
             logger.debug(f"Sending request to Groq: {prompt[:100]}...")
+            
+            kwargs = {
+                "model": self.model,
+                "messages": messages,
+                "temperature": temperature if temperature is not None else self.temperature,
+                "max_tokens": max_tokens if max_tokens is not None else self.max_tokens
+            }
+            
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
 
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=temperature if temperature is not None else self.temperature,
-                max_tokens=max_tokens if max_tokens is not None else self.max_tokens
-            )
+            response = self.client.chat.completions.create(**kwargs)
 
-            response_text = response.choices[0].message.content.strip()
-
-            logger.debug(f"Received response: {response_text[:100]}...")
-            return response_text
+            # If tools were passed, return the full message object to handle tool_calls
+            if tools:
+                return response.choices[0].message
+            
+            return response.choices[0].message.content.strip()
 
         except Exception as e:
             logger.error(f"Groq API error: {e}")
@@ -128,19 +134,20 @@ class GroqLLMService:
         self,
         messages: List[Dict[str, str]],
         system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None
-    ) -> str:
+        temperature: Optional[float] = None,
+        tools: Optional[List[Dict]] = None
+    ) -> Any:
         """
         Chat with conversation history.
 
         Args:
             messages: List of message dicts with 'role' and 'content'
-                     Example: [{"role": "user", "content": "Hello"}]
             system_prompt: Optional system prompt
             temperature: Override default temperature
+            tools: Optional list of tool definitions
 
         Returns:
-            str: LLM response
+            str or object: LLM response or message object
         """
         groq_messages = []
 
@@ -153,21 +160,35 @@ class GroqLLMService:
 
         # Add conversation history
         for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-
-            groq_messages.append({
-                "role": role,
-                "content": content
-            })
+            # Safe copy of message to avoid mutating original
+            msg_dict = {
+                "role": msg.get("role", "user"),
+                "content": msg.get("content", "")
+            }
+            # Include tool_calls if present in history
+            if "tool_calls" in msg:
+                msg_dict["tool_calls"] = msg["tool_calls"]
+            if "tool_call_id" in msg:
+                msg_dict["tool_call_id"] = msg["tool_call_id"]
+                
+            groq_messages.append(msg_dict)
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=groq_messages,
-                temperature=temperature if temperature is not None else self.temperature,
-                max_tokens=self.max_tokens
-            )
+            kwargs = {
+                "model": self.model,
+                "messages": groq_messages,
+                "temperature": temperature if temperature is not None else self.temperature,
+                "max_tokens": self.max_tokens
+            }
+
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
+
+            response = self.client.chat.completions.create(**kwargs)
+
+            if tools:
+                return response.choices[0].message
 
             return response.choices[0].message.content.strip()
 
