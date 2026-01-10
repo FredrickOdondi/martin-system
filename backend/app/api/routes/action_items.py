@@ -103,3 +103,26 @@ async def update_action_item_status(
     await db.commit()
     await db.refresh(db_item)
     return db_item
+
+
+@router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_action_item(
+    item_id: uuid.UUID,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete an action item.
+    """
+    result = await db.execute(select(ActionItem).where(ActionItem.id == item_id))
+    db_item = result.scalar_one_or_none()
+    
+    if not db_item:
+        raise HTTPException(status_code=404, detail="Action item not found")
+        
+    if not has_twg_access(current_user, db_item.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    await db.delete(db_item)
+    await db.commit()
+    return None

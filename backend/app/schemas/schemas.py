@@ -147,6 +147,28 @@ class TWGRead(TWGBase):
     stats: Optional[TWGStats] = None
     # Removed action_items and documents to prevent MissingGreenlet errors
 
+# --- Document Schemas ---
+
+class DocumentBase(SchemaBase):
+    twg_id: Optional[uuid.UUID] = None
+    file_name: str
+    file_type: str
+    stage: DocumentStage = DocumentStage.FINAL
+    is_confidential: bool = False
+    metadata_json: Optional[dict] = None
+
+class DocumentCreate(DocumentBase):
+    file_path: str
+    uploaded_by_id: uuid.UUID
+
+class DocumentRead(DocumentBase):
+    id: uuid.UUID
+    file_path: str
+    uploaded_by_id: uuid.UUID
+    # Removed uploaded_by to prevent MissingGreenlet errors
+    ingested_at: Optional[datetime] = None
+    created_at: datetime
+
 # --- Meeting Schemas ---
 
 class MeetingBase(SchemaBase):
@@ -179,6 +201,20 @@ class MeetingUpdateNotification(SchemaBase):
     changes: List[str] = []
     notify_participants: bool = True
 
+class InviteStatus(str, enum.Enum):
+    DRAFT = "draft"
+    SENT = "sent"
+    FAILED = "failed"
+
+class InvitePreview(SchemaBase):
+    """Preview of meeting invitation before sending"""
+    meeting_id: uuid.UUID
+    subject: str
+    html_content: str
+    participants: List[str]  # List of email addresses
+    ics_attached: bool = True
+    status: InviteStatus = InviteStatus.DRAFT
+
 # --- Meeting Participant Schema ---
 
 class MeetingParticipantRead(SchemaBase):
@@ -203,7 +239,9 @@ class MeetingParticipantUpdate(SchemaBase):
 
 class MeetingRead(MeetingBase):
     id: uuid.UUID
+    video_link: Optional[str] = None
     participants: List[MeetingParticipantRead] = []
+    documents: List["DocumentRead"] = []
 
 # --- Agenda Schemas ---
 
@@ -279,27 +317,7 @@ class ProjectCreate(ProjectBase):
 class ProjectRead(ProjectBase):
     id: uuid.UUID
 
-# --- Document Schemas ---
 
-class DocumentBase(SchemaBase):
-    twg_id: Optional[uuid.UUID] = None
-    file_name: str
-    file_type: str
-    stage: DocumentStage = DocumentStage.FINAL
-    is_confidential: bool = False
-    metadata_json: Optional[dict] = None
-
-class DocumentCreate(DocumentBase):
-    file_path: str
-    uploaded_by_id: uuid.UUID
-
-class DocumentRead(DocumentBase):
-    id: uuid.UUID
-    file_path: str
-    uploaded_by_id: uuid.UUID
-    # Removed uploaded_by to prevent MissingGreenlet errors
-    ingested_at: Optional[datetime] = None
-    created_at: datetime
 
 # --- Notification Schemas ---
 

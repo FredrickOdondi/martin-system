@@ -139,8 +139,9 @@ async def chat_with_martin(
         # Get the supervisor agent
         supervisor = get_supervisor()
 
-        # Chat with the supervisor using tools
-        response_text = await supervisor.chat_with_tools(chat_in.message)
+        # Chat with the supervisor using tools (Pass TWG Context for strict RBAC)
+        twg_context = str(chat_in.twg_id) if chat_in.twg_id else None
+        response_text = await supervisor.chat_with_tools(chat_in.message, twg_id=twg_context)
 
         return {
             "response": response_text,
@@ -308,7 +309,9 @@ async def stream_chat(
             elif parsed["type"] == MessageParseType.MENTION:
                 # Send agent routing event
                 agent_ids = parsed["agent_mentions"]
-                yield f"data: {json.dumps({'type': 'agent_routing', 'agents': agent_ids, 'status': f'Routing to {', '.join(agent_ids)} agent(s)...'})}\n\n"
+                agents_joined = ", ".join(agent_ids)
+                routing_status = f"Routing to {agents_joined} agent(s)..."
+                yield f"data: {json.dumps({'type': 'agent_routing', 'agents': agent_ids, 'status': routing_status})}\n\n"
 
                 # Execute with mentioned agent
                 response_text = await handle_mention(supervisor, parsed)

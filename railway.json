@@ -10,7 +10,7 @@
             "deploy": {
                 "numReplicas": 1,
                 "restartPolicy": "ALWAYS",
-                "startCommand": "sh -c 'cd /app/backend && alembic upgrade head && cd /app && uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT'"
+                "startCommand": "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT"
             }
         },
         "frontend": {
@@ -18,7 +18,13 @@
             "build": {
                 "builder": "DOCKERFILE",
                 "dockerfilePath": "Dockerfile",
-                "target": "production"
+                "target": "production",
+                "buildArgs": {
+                    "VITE_API_URL": "${{VITE_API_URL}}",
+                    "VITE_GOOGLE_CLIENT_ID": "${{VITE_GOOGLE_CLIENT_ID}}",
+                    "VITE_APP_NAME": "${{VITE_APP_NAME}}",
+                    "VITE_APP_VERSION": "${{VITE_APP_VERSION}}"
+                }
             },
             "deploy": {
                 "numReplicas": 1,
@@ -34,7 +40,7 @@
             "deploy": {
                 "numReplicas": 1,
                 "restartPolicy": "ALWAYS",
-                "startCommand": "celery -A backend.app.core.celery_app worker --loglevel=info"
+                "startCommand": "celery -A app.core.celery_app worker --loglevel=info"
             }
         },
         "celery-beat": {
@@ -46,7 +52,7 @@
             "deploy": {
                 "numReplicas": 1,
                 "restartPolicy": "ALWAYS",
-                "startCommand": "celery -A backend.app.core.celery_app beat --loglevel=info"
+                "startCommand": "celery -A app.core.celery_app beat --loglevel=info"
             }
         }
     }

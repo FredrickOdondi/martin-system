@@ -205,6 +205,7 @@ class Meeting(Base):
     status: Mapped[MeetingStatus] = mapped_column(Enum(MeetingStatus), default=MeetingStatus.SCHEDULED)
     meeting_type: Mapped[str] = mapped_column(String(50), default="virtual") # virtual, in-person
     transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True) # Text or link to transcript
+    video_link: Mapped[Optional[str]] = mapped_column(String(512), nullable=True) # Google Meet / Zoom link
     
     # Relationships
     twg: Mapped["TWG"] = relationship(back_populates="meetings")
@@ -214,6 +215,7 @@ class Meeting(Base):
     agenda: Mapped[Optional["Agenda"]] = relationship(back_populates="meeting", uselist=False)
     minutes: Mapped[Optional["Minutes"]] = relationship(back_populates="meeting", uselist=False)
     action_items: Mapped[List["ActionItem"]] = relationship(back_populates="meeting")
+    documents: Mapped[List["Document"]] = relationship(back_populates="meeting")
 
 class Agenda(Base):
     __tablename__ = "agendas"
@@ -284,6 +286,7 @@ class Document(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     twg_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("twgs.id"), nullable=True)
+    meeting_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("meetings.id"), nullable=True)
     file_name: Mapped[str] = mapped_column(String(255))
     file_path: Mapped[str] = mapped_column(String(512))
     file_type: Mapped[str] = mapped_column(String(255))  # MIME type can be long
@@ -294,6 +297,7 @@ class Document(Base):
     
     # Relationships
     twg: Mapped[Optional["TWG"]] = relationship(back_populates="documents")
+    meeting: Mapped[Optional["Meeting"]] = relationship(back_populates="documents")
     uploaded_by: Mapped["User"] = relationship("User", foreign_keys=[uploaded_by_id])
 
 class RefreshToken(Base):

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import ModernLayout from '../layouts/ModernLayout';
+
 
 // UUID generator function
 const generateUUID = () => {
@@ -172,141 +172,139 @@ Format the memo professionally with clear sections and bullet points where appro
   };
 
   return (
-    <ModernLayout>
-      <div className="max-w-5xl mx-auto space-y-6">
-        {/* Breadcrumbs */}
-        <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-          <button onClick={() => navigate('/dashboard')} className="hover:text-primary transition-colors">
-            Home
-          </button>
-          <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-          <button onClick={() => navigate('/deal-pipeline')} className="hover:text-primary transition-colors">
-            Deal Pipeline
-          </button>
-          <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+    <div className="max-w-5xl mx-auto space-y-6">
+      {/* Breadcrumbs */}
+      <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+        <button onClick={() => navigate('/dashboard')} className="hover:text-primary transition-colors">
+          Home
+        </button>
+        <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+        <button onClick={() => navigate('/deal-pipeline')} className="hover:text-primary transition-colors">
+          Deal Pipeline
+        </button>
+        <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+        <button
+          onClick={() => navigate(`/deal-pipeline/${encodeURIComponent(projectData.id)}`)}
+          className="hover:text-primary transition-colors"
+        >
+          {projectData.name}
+        </button>
+        <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+        <span className="text-slate-900 dark:text-white font-medium">Investment Memo</span>
+      </div>
+
+      {/* Page Header */}
+      <div className="flex flex-wrap justify-between items-start gap-3">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <h1 className="text-3xl md:text-4xl font-black text-slate-900 dark:text-white leading-tight tracking-tight">
+              Investment Memo
+            </h1>
+            {isGenerating && (
+              <div className="flex items-center gap-2 px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-sm font-medium">
+                <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                <span>AI Generating...</span>
+              </div>
+            )}
+          </div>
+          <p className="text-slate-500 dark:text-slate-400 text-sm">
+            AI-Generated Investment Analysis for {projectData.name}
+          </p>
+        </div>
+        <div className="flex gap-3">
           <button
-            onClick={() => navigate(`/deal-pipeline/${encodeURIComponent(projectData.id)}`)}
-            className="hover:text-primary transition-colors"
+            onClick={copyToClipboard}
+            disabled={!memoContent || isGenerating}
+            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-bold rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {projectData.name}
+            <span className="material-symbols-outlined text-[18px]">content_copy</span>
+            Copy
           </button>
-          <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-          <span className="text-slate-900 dark:text-white font-medium">Investment Memo</span>
-        </div>
-
-        {/* Page Header */}
-        <div className="flex flex-wrap justify-between items-start gap-3">
-          <div>
-            <div className="flex items-center gap-3 mb-2">
-              <h1 className="text-3xl md:text-4xl font-black text-slate-900 dark:text-white leading-tight tracking-tight">
-                Investment Memo
-              </h1>
-              {isGenerating && (
-                <div className="flex items-center gap-2 px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-sm font-medium">
-                  <div className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
-                  <span>AI Generating...</span>
-                </div>
-              )}
-            </div>
-            <p className="text-slate-500 dark:text-slate-400 text-sm">
-              AI-Generated Investment Analysis for {projectData.name}
-            </p>
-          </div>
-          <div className="flex gap-3">
-            <button
-              onClick={copyToClipboard}
-              disabled={!memoContent || isGenerating}
-              className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-bold rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span className="material-symbols-outlined text-[18px]">content_copy</span>
-              Copy
-            </button>
-            <button
-              onClick={exportMemo}
-              disabled={!memoContent || isGenerating}
-              className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-bold rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span className="material-symbols-outlined text-[18px]">download</span>
-              Export
-            </button>
-            <button
-              onClick={generateMemo}
-              disabled={isGenerating}
-              className="flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg shadow-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span className="material-symbols-outlined text-[18px]">refresh</span>
-              Regenerate
-            </button>
-          </div>
-        </div>
-
-        {/* AI Info Banner */}
-        <div className="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-100 dark:border-purple-800/50 rounded-xl p-4 flex items-start gap-4">
-          <div className="p-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm shrink-0 text-purple-600 dark:text-purple-400">
-            <span className="material-symbols-outlined">auto_awesome</span>
-          </div>
-          <div className="flex-1">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white">AI-Powered Analysis</h3>
-            <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-              This investment memo has been generated by our AI Supervisor Agent using advanced analysis of project
-              data, market conditions, and regional development priorities.
-            </p>
-          </div>
-        </div>
-
-        {/* Error Display */}
-        {error && (
-          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 flex items-start gap-3">
-            <span className="material-symbols-outlined text-red-600 dark:text-red-400">error</span>
-            <div>
-              <h4 className="text-sm font-bold text-red-900 dark:text-red-200">Error Generating Memo</h4>
-              <p className="text-sm text-red-700 dark:text-red-300 mt-1">{error}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Memo Content */}
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
-          <div className="p-6 md:p-8">
-            {isGenerating && !memoContent && (
-              <div className="flex flex-col items-center justify-center py-16">
-                <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
-                <p className="text-slate-600 dark:text-slate-400 font-medium">
-                  Generating investment memo with AI...
-                </p>
-                <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">
-                  This may take 30-60 seconds
-                </p>
-              </div>
-            )}
-
-            {memoContent && (
-              <div className="prose prose-slate dark:prose-invert max-w-none">
-                <div className="whitespace-pre-wrap text-slate-800 dark:text-slate-200 leading-relaxed">
-                  {memoContent}
-                </div>
-              </div>
-            )}
-
-            {!isGenerating && !memoContent && !error && (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <span className="material-symbols-outlined text-6xl text-slate-300 dark:text-slate-600 mb-4">
-                  description
-                </span>
-                <p className="text-slate-600 dark:text-slate-400 font-medium">No memo generated yet</p>
-                <button
-                  onClick={generateMemo}
-                  className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg shadow-md hover:bg-blue-700 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
-                  Generate Memo
-                </button>
-              </div>
-            )}
-          </div>
+          <button
+            onClick={exportMemo}
+            disabled={!memoContent || isGenerating}
+            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-bold rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-[18px]">download</span>
+            Export
+          </button>
+          <button
+            onClick={generateMemo}
+            disabled={isGenerating}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg shadow-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-[18px]">refresh</span>
+            Regenerate
+          </button>
         </div>
       </div>
-    </ModernLayout>
+
+      {/* AI Info Banner */}
+      <div className="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border border-purple-100 dark:border-purple-800/50 rounded-xl p-4 flex items-start gap-4">
+        <div className="p-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm shrink-0 text-purple-600 dark:text-purple-400">
+          <span className="material-symbols-outlined">auto_awesome</span>
+        </div>
+        <div className="flex-1">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">AI-Powered Analysis</h3>
+          <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
+            This investment memo has been generated by our AI Supervisor Agent using advanced analysis of project
+            data, market conditions, and regional development priorities.
+          </p>
+        </div>
+      </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl p-4 flex items-start gap-3">
+          <span className="material-symbols-outlined text-red-600 dark:text-red-400">error</span>
+          <div>
+            <h4 className="text-sm font-bold text-red-900 dark:text-red-200">Error Generating Memo</h4>
+            <p className="text-sm text-red-700 dark:text-red-300 mt-1">{error}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Memo Content */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+        <div className="p-6 md:p-8">
+          {isGenerating && !memoContent && (
+            <div className="flex flex-col items-center justify-center py-16">
+              <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4"></div>
+              <p className="text-slate-600 dark:text-slate-400 font-medium">
+                Generating investment memo with AI...
+              </p>
+              <p className="text-sm text-slate-500 dark:text-slate-500 mt-2">
+                This may take 30-60 seconds
+              </p>
+            </div>
+          )}
+
+          {memoContent && (
+            <div className="prose prose-slate dark:prose-invert max-w-none">
+              <div className="whitespace-pre-wrap text-slate-800 dark:text-slate-200 leading-relaxed">
+                {memoContent}
+              </div>
+            </div>
+          )}
+
+          {!isGenerating && !memoContent && !error && (
+            <div className="flex flex-col items-center justify-center py-16 text-center">
+              <span className="material-symbols-outlined text-6xl text-slate-300 dark:text-slate-600 mb-4">
+                description
+              </span>
+              <p className="text-slate-600 dark:text-slate-400 font-medium">No memo generated yet</p>
+              <button
+                onClick={generateMemo}
+                className="mt-4 flex items-center gap-2 px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg shadow-md hover:bg-blue-700 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
+                Generate Memo
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 };
 

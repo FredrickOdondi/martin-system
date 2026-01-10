@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request, WebSocket
+from app.services.audit_service import audit_service
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from typing import List
+from typing import List, Optional
 import uuid
 
 from app.core.database import get_db
@@ -17,6 +18,8 @@ from app.api.deps import get_current_active_user, require_facilitator, require_t
 from app.services.email_service import email_service
 from app.core.config import settings
 from sqlalchemy.orm import selectinload
+from app.services.document_synthesizer import DocumentSynthesizer
+from app.services.llm_service import llm_service
 
 router = APIRouter(prefix="/meetings", tags=["Meetings"])
 
@@ -44,21 +47,59 @@ async def create_meeting(
         if meeting_in.scheduled_at and meeting_in.scheduled_at.tzinfo:
              meeting_in.scheduled_at = meeting_in.scheduled_at.astimezone(timezone.utc).replace(tzinfo=None)
 
-        db_meeting = Meeting(**meeting_in.model_dump())
+        # GENERATE GOOGLE MEET LINK
+        # Only if configured and virtual
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"CREATE_MEETING: meeting_type='{meeting_in.meeting_type}'")
+        
+        generated_video_link = None
+        if meeting_in.meeting_type == "virtual":
+            logger.warning("CREATE_MEETING: Entering virtual meeting block")
+            try:
+                from app.services.calendar_service import calendar_service
+                calendar_event = calendar_service.create_meeting_event(
+                    title=meeting_in.title,
+                    start_time=meeting_in.scheduled_at,
+                    duration_minutes=meeting_in.duration_minutes,
+                    description=f"Automated meeting for TWG: {meeting_in.twg_id}",
+                    attendees=[]
+                )
+                if calendar_event.get('hangoutLink'):
+                     logger.warning(f"CREATE_MEETING: Generated link: {calendar_event.get('hangoutLink')}")
+                     generated_video_link = calendar_event.get('hangoutLink')
+                else:
+                     logger.warning(f"CREATE_MEETING: Event created but NO link found")
+            except Exception as e:
+                # Log detailed error but DO NOT fail the meeting creation
+                logger.error(f"CREATE_MEETING: Failed to generate Meet link: {e}")
+                # If it's an HttpError, it might be the 'Invalid conference type value'
+                # causing issues with service accounts. We proceed without video link.
+
+        # Create meeting with video_link
+        meeting_data = meeting_in.model_dump()
+        meeting_data['video_link'] = generated_video_link
+        db_meeting = Meeting(**meeting_data)
         db.add(db_meeting)
         await db.commit()
         
         # Eagerly load relationships to avoid MissingGreenlet during serialization
+        # Eagerly load relationships to avoid MissingGreenlet during serialization
         result = await db.execute(
             select(Meeting)
-            .options(selectinload(Meeting.participants))
+            .options(
+                selectinload(Meeting.participants),
+                selectinload(Meeting.documents), # Added to satisfy MeetingRead schema
+                selectinload(Meeting.twg)        # Good practice to include parent
+            )
             .where(Meeting.id == db_meeting.id)
         )
         db_meeting = result.scalar_one()
         return db_meeting
     except Exception as e:
-        with open("debug_error.log", "w") as f:
-            f.write(traceback.format_exc())
+        logger.error(f"CREATE_MEETING FAILED: {str(e)}") # Improved logging
+        import traceback
+        traceback.print_exc()
         raise e
 
 @router.get("/", response_model=List[MeetingRead])
@@ -81,7 +122,8 @@ async def list_meetings(
         
     query = query.options(
         selectinload(Meeting.participants),
-        selectinload(Meeting.twg)
+        selectinload(Meeting.twg),
+        selectinload(Meeting.documents)
     )
         
     result = await db.execute(query)
@@ -100,7 +142,8 @@ async def get_meeting(
         selectinload(Meeting.participants),
         selectinload(Meeting.agenda),
         selectinload(Meeting.minutes),
-        selectinload(Meeting.twg)
+        selectinload(Meeting.twg),
+        selectinload(Meeting.documents)
     )
     result = await db.execute(query)
     db_meeting = result.scalar_one_or_none()
@@ -165,7 +208,12 @@ async def update_meeting(
     """
     Update meeting details (e.g., add transcript, change status).
     """
-    result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+    query = select(Meeting).where(Meeting.id == meeting_id).options(
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+        selectinload(Meeting.twg),
+        selectinload(Meeting.agenda)
+    )
+    result = await db.execute(query)
     db_meeting = result.scalar_one_or_none()
     
     if not db_meeting:
@@ -224,22 +272,404 @@ async def upsert_minutes(
     await db.refresh(db_minutes)
     return db_minutes
 
-@router.post("/{meeting_id}/schedule", status_code=status.HTTP_200_OK)
-async def schedule_meeting_trigger(
+@router.post("/{meeting_id}/generate-minutes", response_model=MinutesRead)
+async def generate_minutes(
     meeting_id: uuid.UUID,
     current_user: User = Depends(require_facilitator),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Finalize and schedule a meeting. 
-    Triggers automated email invitations and calendar invites.
+    Generate 'Zero Draft' minutes from the meeting transcript using AI.
     """
-    # Verify meeting exists and access rights
+    # 1. Fetch Meeting with all context
+    query = select(Meeting).where(Meeting.id == meeting_id).options(
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+        selectinload(Meeting.agenda),
+        selectinload(Meeting.twg)
+    )
+    result = await db.execute(query)
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+        
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # 2. Validation
+    if not db_meeting.transcript:
+        raise HTTPException(status_code=400, detail="No transcript available for this meeting. Please add a transcript first.")
+
+    # 3. Prepare Context for Synthesizer
+    attendees_list = []
+    for p in db_meeting.participants:
+        name = p.user.full_name if (p.user and p.user.full_name) else (p.name or p.email or "Unknown")
+        role = f" ({p.user.role.value})" if (p.user and p.user.role) else ""
+        attendees_list.append(f"- {name}{role}")
+    
+    meeting_context = {
+        "meeting_title": db_meeting.title,
+        "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d"),
+        "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "General",
+        "attendees_list": "\n".join(attendees_list),
+        "agenda_content": db_meeting.agenda.content if db_meeting.agenda else "No formal agenda provided."
+    }
+
+    # 4. Generate Minutes
+    synthesizer = DocumentSynthesizer(llm_client=llm_service)
+    try:
+        minutes_result = synthesizer.synthesize_minutes(
+            transcript_text=db_meeting.transcript,
+            meeting_context=meeting_context
+        )
+        generated_content = minutes_result["content"]
+        
+        # 5. Save to DB (Upsert)
+        # Check for existing minutes
+        min_result = await db.execute(select(Minutes).where(Minutes.meeting_id == meeting_id))
+        db_minutes = min_result.scalar_one_or_none()
+        
+        if db_minutes:
+             db_minutes.content = generated_content
+             # Keep status as whatever it was, or reset to DRAFT? Usually reset to DRAFT if re-generated.
+             db_minutes.status = MinutesStatus.DRAFT
+        else:
+            db_minutes = Minutes(
+                meeting_id=meeting_id,
+                content=generated_content,
+                status=MinutesStatus.DRAFT
+            )
+            db.add(db_minutes)
+            
+        # Log activity
+        await audit_service.log_activity(
+            db=db,
+            user_id=current_user.id,
+            action="MINUTES_GENERATED",
+            resource_type="meeting",
+            resource_id=meeting_id,
+            details={"transcript_length": len(db_meeting.transcript)}
+        )
+        
+        await db.commit()
+        await db.refresh(db_minutes)
+        return db_minutes
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to generate minutes: {str(e)}")
+
+
+@router.post("/{meeting_id}/upload-recording", response_model=MinutesRead)
+async def upload_recording(
+    meeting_id: uuid.UUID,
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Upload an audio recording, transcribe it using Groq Whisper, saving the transcript,
+    and then automatically generate minutes.
+    """
+    import shutil
+    import os
+    from app.core.config import settings
+    
+    # 1. Validation
+    if not file.filename.lower().endswith(('.mp3', '.wav', '.m4a', '.mp4', '.mpeg', '.mpga', '.webm')):
+        raise HTTPException(status_code=400, detail="Invalid file format. Supported: mp3, wav, m4a, mp4, mpeg, mpga, webm")
+
+    # 2. Save File Temporarily
+    upload_dir = os.path.join(settings.UPLOAD_DIR, "recordings")
+    os.makedirs(upload_dir, exist_ok=True)
+    temp_file_path = os.path.join(upload_dir, f"{meeting_id}_{file.filename}")
+    
+    try:
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        print(f"File saved to {temp_file_path}, starting transcription...")
+
+        # 3. Transcribe using LLM Service (Groq)
+        try:
+            transcript_text = llm_service.transcribe_audio(temp_file_path)
+        except NotImplementedError:
+             raise HTTPException(status_code=500, detail="Audio transcription is not supported by the current LLM provider configuration.")
+        
+        print(f"Transcription complete. Length: {len(transcript_text)}")
+
+        # 4. Update Meeting Transcript in DB
+        result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+        db_meeting = result.scalar_one_or_none()
+        
+        if not db_meeting:
+            raise HTTPException(status_code=404, detail="Meeting not found")
+            
+        if not has_twg_access(current_user, db_meeting.twg_id):
+             raise HTTPException(status_code=403, detail="Access denied")
+
+        db_meeting.transcript = transcript_text
+        await db.commit()
+        
+        # 5. Trigger Minute Generation (Reuse logic)
+        # We can call the generate_minutes endpoint handler directly or reuse the logic.
+        # Calling handler directly is tricky due to Dependency Injection.
+        # Better to reuse the service logic.
+        
+        # Re-fetch with full relationships for context
+        query = select(Meeting).where(Meeting.id == meeting_id).options(
+            selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+            selectinload(Meeting.agenda),
+            selectinload(Meeting.twg)
+        )
+        result = await db.execute(query)
+        db_meeting = result.scalar_one_or_none()
+        
+        attendees_list = []
+        for p in db_meeting.participants:
+            name = p.user.full_name if (p.user and p.user.full_name) else (p.name or p.email or "Unknown")
+            role = f" ({p.user.role.value})" if (p.user and p.user.role) else ""
+            attendees_list.append(f"- {name}{role}")
+        
+        meeting_context = {
+            "meeting_title": db_meeting.title,
+            "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d"),
+            "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "General",
+            "attendees_list": "\n".join(attendees_list),
+            "agenda_content": db_meeting.agenda.content if db_meeting.agenda else "No formal agenda provided."
+        }
+
+        synthesizer = DocumentSynthesizer(llm_client=llm_service)
+        minutes_result = synthesizer.synthesize_minutes(
+             transcript_text=db_meeting.transcript,
+             meeting_context=meeting_context
+        )
+        generated_content = minutes_result["content"]
+        
+        # Upsert Minutes
+        min_result = await db.execute(select(Minutes).where(Minutes.meeting_id == meeting_id))
+        db_minutes = min_result.scalar_one_or_none()
+        
+        if db_minutes:
+             db_minutes.content = generated_content
+             db_minutes.status = MinutesStatus.DRAFT
+        else:
+            db_minutes = Minutes(
+                meeting_id=meeting_id,
+                content=generated_content,
+                status=MinutesStatus.DRAFT
+            )
+            db.add(db_minutes)
+            
+        await db.commit()
+        await db.refresh(db_minutes)
+        
+        # Cleanup
+        if os.path.exists(temp_file_path):
+             os.remove(temp_file_path)
+
+        return db_minutes
+
+    except Exception as e:
+        # Cleanup on error
+        if os.path.exists(temp_file_path):
+             os.remove(temp_file_path)
+        import traceback
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to process recording: {str(e)}")
+
+@router.websocket("/{meeting_id}/live")
+async def live_meeting_transcription_websocket(
+    websocket: WebSocket, 
+    meeting_id: uuid.UUID,
+    token: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    from app.services.speech_service import speech_service
+    from app.utils.security import verify_token
+    import asyncio
+    import time
+    from fastapi import WebSocketDisconnect
+    from app.models.models import Agenda
+    from app.agents.agenda_monitor import AgendaMonitor
+    
+    # 1. Connection & Auth
+    await websocket.accept()
+    
+    user_id = "anonymous"
+    if token:
+        payload = verify_token(token, "access")
+        if payload:
+            user_id = payload.get("sub")
+    
+    print(f"WS Connected to Meeting {meeting_id} | User: {user_id}")
+    
+    # Fetch Agenda for Context
+    result = await db.execute(select(Agenda).where(Agenda.meeting_id == meeting_id))
+    agenda = result.scalar_one_or_none()
+    agenda_text = agenda.content if agenda else "No agenda content available."
+
+    # Init Agent
+    monitor = AgendaMonitor()
+    transcript_buffer = ""
+    last_analysis_time = time.time()
+
+    # Async Queue to buffer audio chunks from Client -> Google
+    audio_queue = asyncio.Queue()
+    
+    async def receive_audio():
+        """Reads audio chunks from WebSocket and puts into queue."""
+        try:
+            while True:
+                data = await websocket.receive_bytes()
+                await audio_queue.put(data)
+        except WebSocketDisconnect:
+             await audio_queue.put(None)
+        except Exception as e:
+            print(f"Receive Error: {e}")
+            await audio_queue.put(None) # Signal EOF
+
+    async def audio_generator():
+        """Yields chunks from queue to Google Speech Service."""
+        while True:
+            chunk = await audio_queue.get()
+            if chunk is None:
+                break
+            yield chunk
+
+    # 3. Main Loop
+    try:
+        # Start receiver task
+        receiver_task = asyncio.create_task(receive_audio())
+        
+        # Start Google Stream (Bi-directional)
+        async for transcript_data in speech_service.stream_audio(audio_generator()):
+            # 1. Send Transcript
+            await websocket.send_json({
+                "type": "transcript",
+                "data": transcript_data
+            })
+            
+            # 2. Agenda Monitor Analysis
+            # Only analyze "final" results to save tokens/stability
+            if transcript_data.get('is_final'):
+                new_text = transcript_data.get('text', '')
+                transcript_buffer += " " + new_text
+                
+                # Check triggers (Time + buffer size)
+                # Analyze every 15 seconds if there is new content
+                if time.time() - last_analysis_time > 15 and len(new_text) > 10:
+                    print(f"Running Agenda Monitor Analysis... Buffer: {len(transcript_buffer)}")
+                    analysis = await monitor.analyze(transcript_buffer, agenda_text)
+                    
+                    if analysis:
+                        await websocket.send_json({
+                            "type": "agenda_update",
+                            "data": analysis
+                        })
+                    
+                    last_analysis_time = time.time()
+                    
+                    # Manage Buffer Size (keep context but don't explode)
+                    if len(transcript_buffer) > 4000:
+                        transcript_buffer = transcript_buffer[-2000:]
+            
+    except Exception as e:
+        print(f"WebSocket Error: {e}")
+        try:
+             await websocket.send_json({"type": "error", "message": str(e)})
+        except:
+            pass
+    finally:
+        try:
+            await websocket.close()
+        except:
+            pass
+        print(f"WS Closed for Meeting {meeting_id}")
+
+@router.get("/{meeting_id}/invite-preview")
+async def get_invite_preview(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a preview of the meeting invitation email and participant list.
+    This allows the facilitator to review before approving.
+    """
+    from app.schemas.schemas import InvitePreview, InviteStatus
+    
     query = select(Meeting).where(Meeting.id == meeting_id).options(
         selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
         selectinload(Meeting.twg)
     )
+    result = await db.execute(query)
+    db_meeting = result.scalar_one_or_none()
 
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Collect participant emails
+    participant_emails = []
+    for participant in db_meeting.participants:
+        if participant.user and participant.user.email:
+            participant_emails.append(participant.user.email)
+        elif participant.email:
+            participant_emails.append(participant.email)
+    participant_emails = list(set(participant_emails))
+
+    # Render email template for preview
+    template_context = {
+        "user_name": "Valued Participant",
+        "meeting_title": db_meeting.title,
+        "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d") if db_meeting.scheduled_at else "TBD",
+        "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC") if db_meeting.scheduled_at else "TBD",
+        "location": db_meeting.location or "Virtual",
+        "video_link": db_meeting.video_link,
+        "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "TWG",
+        "portal_url": f"{settings.FRONTEND_URL}/schedule"
+    }
+    
+    # Render the template
+    try:
+        template = email_service.jinja_env.get_template("meeting_invite.html")
+        html_content = template.render(**template_context)
+    except Exception as e:
+        html_content = f"<p>Template rendering failed: {str(e)}</p>"
+
+    # Determine status
+    status = InviteStatus.SENT if db_meeting.status == MeetingStatus.SCHEDULED else InviteStatus.DRAFT
+
+    return InvitePreview(
+        meeting_id=meeting_id,
+        subject=f"INVITATION: {db_meeting.title}",
+        html_content=html_content,
+        participants=participant_emails,
+        ics_attached=True,
+        status=status
+    )
+
+
+@router.post("/{meeting_id}/schedule", status_code=status.HTTP_200_OK)
+async def schedule_meeting_draft(
+    meeting_id: uuid.UUID,
+    request: Request,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Mark a meeting as ready to schedule (DRAFT state).
+    Does NOT send emails - use /approve-invite after reviewing the preview.
+    """
+    query = select(Meeting).where(Meeting.id == meeting_id).options(
+        selectinload(Meeting.participants),
+        selectinload(Meeting.twg)
+    )
     result = await db.execute(query)
     db_meeting = result.scalar_one_or_none()
 
@@ -252,63 +682,246 @@ async def schedule_meeting_trigger(
     if not db_meeting.participants:
         raise HTTPException(status_code=400, detail="No participants assigned to this meeting")
 
-    # Change status
+    # Don't change status yet - wait for approval
+    # Just return the preview info
+    participant_count = len(db_meeting.participants)
+
+    # Log activity
+    await audit_service.log_activity(
+        db=db,
+        user_id=current_user.id,
+        action="MEETING_DRAFT_CREATED",
+        resource_type="meeting",
+        resource_id=meeting_id,
+        details={"status": "draft_ready", "participant_count": participant_count},
+        ip_address=request.client.host if request.client else None
+    )
+
+    return {
+        "status": "ready_for_approval",
+        "message": "Please review the invite preview and click 'Approve & Send' to dispatch invitations.",
+        "participant_count": participant_count
+    }
+
+
+@router.post("/{meeting_id}/approve-invite", status_code=status.HTTP_200_OK)
+async def approve_and_send_invite(
+    meeting_id: uuid.UUID,
+    request: Request,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    HITL Approval Gate: Actually send the meeting invitations after human review.
+    This is the final step that dispatches emails to participants.
+    """
+    query = select(Meeting).where(Meeting.id == meeting_id).options(
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+        selectinload(Meeting.twg)
+    )
+    result = await db.execute(query)
+    db_meeting = result.scalar_one_or_none()
+
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if not db_meeting.participants:
+        raise HTTPException(status_code=400, detail="No participants assigned to this meeting")
+
+    # Mark as scheduled
     db_meeting.status = MeetingStatus.SCHEDULED
 
-    # Send emails
+    # Collect emails
     participant_emails = []
-    
-    # Iterate through MeetingParticipant objects
     for participant in db_meeting.participants:
-        # Check if registered user
         if participant.user and participant.user.email:
-             participant_emails.append(participant.user.email)
-        # Check if external guest with email
+            participant_emails.append(participant.user.email)
         elif participant.email:
-             participant_emails.append(participant.email)
-            
-    # Remove duplicates
+            participant_emails.append(participant.email)
     participant_emails = list(set(participant_emails))
+
+    # Fetch Agenda for Meeting Pack
+    from app.services.pdf_service import pdf_service
+    from app.models.models import Agenda, Document, Minutes
+    from sqlalchemy import desc, and_
     
+    agenda_query = select(Agenda).where(Agenda.meeting_id == meeting_id)
+    agenda_result = await db.execute(agenda_query)
+    agenda = agenda_result.scalar_one_or_none()
+    
+    attachments = []
+    
+    # 1. Attach Agenda (PDF)
+    if agenda and agenda.content:
+        try:
+            pdf_bytes = pdf_service.generate_agenda_pdf(
+                agenda_markdown=agenda.content,
+                template_context={
+                    "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "TWG",
+                    "meeting_title": db_meeting.title,
+                    "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d"),
+                    "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC"),
+                    "location": db_meeting.location or "Virtual"
+                }
+            )
+            attachments.append({
+                "filename": f"Agenda - {db_meeting.title}.pdf",
+                "content": pdf_bytes,
+                "content_type": "application/pdf"
+            })
+            print(f"Generated PDF Agenda size: {len(pdf_bytes)} bytes")
+        except Exception as e:
+            print(f"Failed to generate PDF Agenda: {e}")
+
+    # 2. Compile Meeting Pack (Previous Minutes & Concept Notes)
+    # ---------------------------------------------------------
+    try:
+        # A. Find Previous Approved Minutes for this TWG
+        # Sort by created_at desc, filter by status=FINAL/APPROVED
+        from sqlalchemy import or_
+        minutes_query = select(Minutes).join(Meeting).where(
+            Meeting.twg_id == db_meeting.twg_id,
+            Meeting.id != meeting_id, # Not this meeting
+            or_(Minutes.status == MinutesStatus.FINAL, Minutes.status == MinutesStatus.APPROVED)
+        ).order_by(desc(Minutes.created_at)).limit(1)
+        
+        minutes_result = await db.execute(minutes_query)
+        prev_minutes = minutes_result.scalar_one_or_none()
+        
+        if prev_minutes and prev_minutes.content:
+             # Generate PDF from content
+             try:
+                 # Need to fetch the meeting title for the previous minutes
+                 # Lazy load might trigger error if not eager loaded, but let's try
+                 # We joined Meeting in query so it might be attached if we selected it, 
+                 # but we selected Minutes.
+                 # Let's just use generic title or try to access relationship
+                 
+                 # Better: fetch meeting details for context
+                 prev_meeting_result = await db.execute(select(Meeting).where(Meeting.id == prev_minutes.meeting_id))
+                 prev_meeting_obj = prev_meeting_result.scalar_one_or_none()
+                 
+                 prev_title = prev_meeting_obj.title if prev_meeting_obj else "Previous Meeting"
+                 prev_date = prev_meeting_obj.scheduled_at.strftime("%Y-%m-%d") if (prev_meeting_obj and prev_meeting_obj.scheduled_at) else "Date Unknown"
+                 
+                 minutes_pdf = pdf_service.generate_minutes_pdf(
+                    minutes_markdown=prev_minutes.content,
+                    template_context={
+                        "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "TWG",
+                        "meeting_title": prev_title,
+                        "meeting_date": prev_date,
+                        "location": prev_meeting_obj.location if prev_meeting_obj else "Virtual",
+                        "attendees": [] # Simplified for now
+                    }
+                 )
+                 
+                 attachments.append({
+                     "filename": f"Minutes - {prev_title}.pdf",
+                     "content": minutes_pdf,
+                     "content_type": "application/pdf"
+                 })
+                 print(f"Attached Previous Minutes PDF")
+             except Exception as e:
+                 print(f"Failed to generate previous minutes PDF: {e}")
+
+        # B. Find relevant "Zero Draft" or "Concept Note" from last 30 days
+        # This is a heuristic for "Pre-read materials"
+        from datetime import datetime as dt_cls, timedelta
+        thirty_days_ago = dt_cls.utcnow() - timedelta(days=30)  # Naive UTC to match DB
+        
+        docs_query = select(Document).where(
+            Document.twg_id == db_meeting.twg_id,
+            Document.created_at >= thirty_days_ago, # Recent
+            (Document.file_name.ilike("%concept note%") | Document.file_name.ilike("%zero draft%"))
+        ).limit(3)
+        
+        docs_result = await db.execute(docs_query)
+        concept_notes = docs_result.scalars().all()
+        
+        for doc in concept_notes:
+            try:
+                import os
+                if doc.file_path and os.path.exists(doc.file_path):
+                    with open(doc.file_path, "rb") as f:
+                        content = f.read()
+                    attachments.append({
+                        "filename": doc.file_name,
+                        "content": content,
+                        "content_type": doc.file_type or "application/pdf"
+                    })
+                    print(f"Attached Concept Note: {doc.file_name}")
+            except Exception as e:
+                print(f"Failed to attach concept note {doc.file_name}: {e}")
+                
+    except Exception as e:
+        print(f"Error compiling meeting pack: {e}")
+        # Don't fail the whole send just for attachments
+    
+    # ---------------------------------------------------------
+
+    # Send emails
     try:
         if participant_emails:
             await email_service.send_meeting_invite(
-            to_emails=participant_emails,
-            subject=f"INVITATION: {db_meeting.title}",
-            template_name="meeting_invite.html",
-            template_context={
-                "user_name": "Valued Participant", # Simplified
-                "meeting_title": db_meeting.title,
-                "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d"),
-                "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC"),
-                "location": db_meeting.location or "Virtual",
-                "pillar_name": db_meeting.twg.pillar.value,
-                "pillar_name": db_meeting.twg.pillar.value,
-                "portal_url": f"{settings.FRONTEND_URL}/schedule"
-            },
-            meeting_details={
-                "title": db_meeting.title,
-                "start_time": db_meeting.scheduled_at,
-                "duration": db_meeting.duration_minutes,
-                "location": db_meeting.location
-            }
-        )
+                to_emails=participant_emails,
+                subject=f"INVITATION: {db_meeting.title}",
+                template_name="meeting_invite.html",
+                template_context={
+                    "user_name": "Valued Participant",
+                    "meeting_title": db_meeting.title,
+                    "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d"),
+                    "meeting_time": db_meeting.scheduled_at.strftime("%H:%M UTC"),
+                    "location": db_meeting.location or "Virtual",
+                    "video_link": db_meeting.video_link,
+                    "pillar_name": db_meeting.twg.pillar.value,
+                    "portal_url": f"{settings.FRONTEND_URL}/schedule"
+                },
+                meeting_details={
+                    "title": db_meeting.title,
+                    "start_time": db_meeting.scheduled_at,
+                    "duration": db_meeting.duration_minutes,
+                    "location": db_meeting.location
+                },
+                attachments=attachments
+            )
     except Exception as e:
-        # Log full traceback for debugging
         import traceback
-        with open("debug_error.log", "w") as f:
-            f.write(f"Schedule Meeting Error:\n{traceback.format_exc()}")
+        error_trace = traceback.format_exc()
+        print(f"CRITICAL ERROR: Failed to send invitations:\n{error_trace}")
         raise HTTPException(status_code=500, detail=f"Failed to send invitations: {str(e)}")
 
+    
+    # Log Audit
+    await audit_service.log_activity(
+        db=db,
+        user_id=current_user.id,
+        action="MEETING_INVITES_SENT",
+        resource_type="meeting",
+        resource_id=meeting_id,
+        details={
+            "participant_count": len(participant_emails),
+            "pdf_attached": bool(agenda and agenda.content),
+            "invite_mode": "email"
+        },
+        ip_address=request.client.host if request.client else None
+    )
+
     await db.commit()
-    await db.commit()
-    return {"status": "successfully scheduled", "emails_sent": len(participant_emails)}
+    return {
+        "status": "invites_sent",
+        "message": f"Successfully sent invitations to {len(participant_emails)} participant(s).",
+        "emails_sent": len(participant_emails)
+    }
 
 
 @router.post("/{meeting_id}/cancel", status_code=status.HTTP_200_OK)
 async def cancel_meeting(
     meeting_id: uuid.UUID,
     cancel_data: MeetingCancel,
+    request: Request,
     current_user: User = Depends(require_facilitator),
     db: AsyncSession = Depends(get_db)
 ):
@@ -368,8 +981,26 @@ async def cancel_meeting(
                 )
                 emails_sent = len(participant_emails)
             except Exception as e:
-                # Log but don't fail the cancellation
-                print(f"Failed to send cancellation emails: {str(e)}")
+                # Log full traceback for debugging to stdout
+                import traceback
+                error_trace = traceback.format_exc()
+                print(f"CRITICAL ERROR: Failed to send cancellation emails:\n{error_trace}")
+                # Don't fail the cancellation just because email failed
+                pass
+
+    await audit_service.log_activity(
+        db=db,
+        user_id=current_user.id,
+        action="MEETING_CANCELLED",
+        resource_type="meeting",
+        resource_id=meeting_id,
+        details={
+            "reason": cancel_data.reason,
+            "notify_participants": cancel_data.notify_participants,
+            "emails_sent": emails_sent
+        },
+        ip_address=request.client.host if request.client else None
+    )
 
     await db.commit()
     return {"status": "cancelled", "emails_sent": emails_sent}
@@ -436,6 +1067,13 @@ async def notify_meeting_update(
                 )
                 emails_sent = len(participant_emails)
             except Exception as e:
+                # Log full traceback for debugging to stdout
+                import traceback
+                error_trace = traceback.format_exc()
+                print(f"CRITICAL ERROR: Failed to send update emails:\n{error_trace}")
+                # Raise warning but don't strictly crash 500 if we want to be lenient,
+                # BUT since this endpoint is *only* for notification, a failure IS an error.
+                # Use 500 but log it properly so user sees it in Railway.
                 raise HTTPException(status_code=500, detail=f"Failed to send update emails: {str(e)}")
 
     return {"status": "notification_sent", "emails_sent": emails_sent}
@@ -649,7 +1287,8 @@ async def generate_agenda(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Generate a draft agenda using AI agent based on meeting context and TWG pillar.
+    Generate a draft agenda using the Supervisor AI agent.
+    The Supervisor coordinates the specific TWG agent to draft the content.
     """
     from app.agents.langgraph_base_agent import create_langgraph_agent
     
@@ -667,22 +1306,29 @@ async def generate_agenda(
     if not has_twg_access(current_user, db_meeting.twg_id):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    # Determine agent based on TWG pillar
-    pillar = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
-    agent_id = pillar.split("_")[0]  # e.g., "energy" from "energy_infrastructure"
+    # Use Supervisor Agent ("Secretariat AI")
+    agent = create_langgraph_agent(agent_id="supervisor", session_id=str(meeting_id))
     
-    # Create agent and generate agenda
-    agent = create_langgraph_agent(agent_id=agent_id, session_id=str(meeting_id))
+    pillar_name = db_meeting.twg.pillar.value if db_meeting.twg else "Unspecified"
     
-    prompt = f"""Generate a professional meeting agenda for the following TWG session:
+    # Prompt Supervisor to coordinate the task
+    prompt = f"""Act as the Summit Secretariat Supervisor. Instruct the {pillar_name} TWG Agent to draft a professional meeting agenda for the following session.
 
-Meeting Title: {db_meeting.title}
-Date: {db_meeting.scheduled_at.strftime('%Y-%m-%d %H:%M UTC') if db_meeting.scheduled_at else 'TBD'}
-Duration: {db_meeting.duration_minutes} minutes
-Location: {db_meeting.location or 'Virtual'}
-TWG Pillar: {pillar}
+Meeting Details:
+- Title: {db_meeting.title}
+- Date: {db_meeting.scheduled_at.strftime('%Y-%m-%d %H:%M UTC') if db_meeting.scheduled_at else 'TBD'}
+- Duration: {db_meeting.duration_minutes} minutes
+- Location: {db_meeting.location or 'Virtual'}
+- TWG Pillar: {pillar_name}
 
-Create a structured agenda using MARKDOWN HEADERS:
+INSTRUCTIONS:
+1. Generate the agenda CONTENT ONLY.
+2. Use the strict MARKDOWN structure below.
+3. DO NOT include any conversational text (e.g., "Here is the agenda...").
+4. DO NOT simulate sending emails or calling tools.
+5. The output must be PURE MARKDOWN.
+
+STRUCTURE:
 
 # Meeting Agenda: {db_meeting.title}
 
@@ -695,9 +1341,9 @@ Create a structured agenda using MARKDOWN HEADERS:
 - Outstanding items
 
 ## 3. Main Discussion Topics
-Discussion topics relevant to the {pillar.replace('_', ' ').title()} pillar:
-- **Topic 1**: [description]
-- **Topic 2**: [description]
+Discussion topics relevant to the {pillar_name} pillar:
+- **Topic 1**: [description based on context]
+- **Topic 2**: [description based on context]
 
 ## 4. Action Items & Next Steps
 - New assignments
@@ -705,9 +1351,7 @@ Discussion topics relevant to the {pillar.replace('_', ' ').title()} pillar:
 
 ## 5. Closing Remarks (5 min)
 - Summary
-- Adjournment
-
-Use markdown headers (#, ##), bold (**) for emphasis, and bullet points for lists."""
+- Adjournment"""
 
     generated_content = agent.chat(prompt)
     
@@ -885,7 +1529,8 @@ async def generate_minutes(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Generate draft meeting minutes using AI agent based on transcript or agenda.
+    Generate draft meeting minutes using the Supervisor AI agent.
+    The Supervisor coordinates the specific TWG agent (Rapporteur Mode) to draft the minutes.
     """
     from app.agents.langgraph_base_agent import create_langgraph_agent
     
@@ -903,65 +1548,109 @@ async def generate_minutes(
     if not has_twg_access(current_user, db_meeting.twg_id):
         raise HTTPException(status_code=403, detail="Access denied")
     
-    # Determine agent based on TWG pillar
-    pillar = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
-    agent_id = pillar.split("_")[0]
+    # Use Supervisor Agent ("Secretariat AI")
+    agent = create_langgraph_agent(agent_id="supervisor", session_id=str(meeting_id))
     
-    # Create agent and generate minutes
-    agent = create_langgraph_agent(agent_id=agent_id, session_id=str(meeting_id))
+    pillar_name = db_meeting.twg.pillar.value if db_meeting.twg else "Unspecified"
     
     # Use transcript if available, otherwise use agenda
     context = db_meeting.transcript if db_meeting.transcript else ""
     agenda_content = db_meeting.agenda.content if db_meeting.agenda else ""
     
-    prompt = f"""Generate professional meeting minutes for the following TWG session:
+    # RAG: Retrieve context from Summit Knowledge Repository
+    from app.core.knowledge_base import get_knowledge_base
+    kb = get_knowledge_base()
+    search_query = f"{db_meeting.title} {agenda_content[:100]}"
+    try:
+        # Search global namespace for general policy (Vision 2050 etc)
+        rag_results = kb.search(query=search_query, namespace="global", top_k=3)
+        
+        # Also search TWG namespace for continuity
+        if db_meeting.twg_id:
+             twg_results = kb.search(query=search_query, namespace=f"twg-{db_meeting.twg_id}", top_k=2)
+             rag_results.extend(twg_results)
+             
+        rag_context = "\n".join([f"- {r['metadata'].get('file_name', 'Doc')}: {r['text'][:300]}..." for r in rag_results])
+    except Exception as e:
+        print(f"RAG Retrieval failed: {e}")
+        rag_context = "No specific policy context available."
 
-Meeting Title: {db_meeting.title}
-Date: {db_meeting.scheduled_at.strftime('%Y-%m-%d %H:%M UTC') if db_meeting.scheduled_at else 'TBD'}
-Duration: {db_meeting.duration_minutes} minutes
-Location: {db_meeting.location or 'Virtual'}
-TWG Pillar: {pillar}
+    prompt = f"""Act as the Summit Secretariat Supervisor. Instruct the {pillar_name} TWG Agent to draft professional meeting minutes for the following session.
 
-Agenda:
+Meeting Details:
+- Title: {db_meeting.title}
+- Date: {db_meeting.scheduled_at.strftime('%Y-%m-%d %H:%M UTC') if db_meeting.scheduled_at else 'TBD'}
+- Duration: {db_meeting.duration_minutes} minutes
+- Location: {db_meeting.location or 'Virtual'}
+- TWG Pillar: {pillar_name}
+
+Reference Context (Knowledge Repository):
+{rag_context}
+
+Context (Agenda/Transcript):
 {agenda_content}
 
-{f"Transcript/Notes:{chr(10)}{context}" if context else "No transcript available - generate based on typical ECOWAS TWG proceedings."}
+{f"Transcript/Notes:{chr(10)}{context}" if context else "No transcript available. WARNING: Cannot generate minutes without a source record."}
 
-Create structured meeting minutes using MARKDOWN HEADERS (# and ##) for sections:
+INSTRUCTIONS:
+1. **Strict Adherence**: You are a Court Stenographer, not an author. Rely EXCLUSIVELY on the provided Transcript/Notes. Do NOT hallucinate, simulate, or invent details.
+2. **Policy Verification**: Cross-reference facts against the Reference Context. 
+   - If a claim matches the Reference, cite it (e.g., "Aligned with Vision 2050").
+   - If the Reference Context is empty or the claim cannot be verified, DO NOT invent a verification. 
+3. **Gap Flagging**: If the transcript is unclear or context is missing for a section, explicitly mark it as `[DRAFT - REQUIRES HUMAN INPUT]`.
+4. **Playbook Structure**: Follow the format below exactly.
+5. **Output Format**: PURE MARKDOWN only.
+
+STRUCTURE:
 
 # ECOWAS Technical Working Group Meeting Minutes
 
 ## Meeting Details
-- **Title:** [title]
-- **Date:** [date]
-- **Location:** [location]
-- **Attendees:** [placeholder]
+- **Title:** {db_meeting.title}
+- **Date:** {db_meeting.scheduled_at.strftime('%Y-%m-%d') if db_meeting.scheduled_at else 'TBD'}
+- **Location:** {db_meeting.location or 'Virtual'}
+- **Pillar:** {pillar_name}
 
-## Opening and Welcome
-[Opening remarks]
+## Pillar Alignment
+[Analyze alignment with Vision 2050 using Reference Context. IF Reference Context is empty, state: "Reference documents unavailable for alignment verification."]
 
-## Discussion Points
-1. **[Topic 1]**: [description]
-2. **[Topic 2]**: [description]
+## Executive Summary & Discussion
+[Comprehensive summary based ONLY on the transcript. Do not embellish.]
 
-## Key Decisions
-1. [Decision 1]
-2. [Decision 2]
+## Decisions Made
+[Clearly highlighted points of consensus]
+1. ...
+2. ...
 
 ## Action Items
 | Owner | Task | Due Date |
 |-------|------|----------|
-| TBD | [task] | [date] |
+| [Name/Title] | [Specific Task] | [Date or TBD] |
 
 ## Next Steps
-[Next steps]
+[Brief summary of immediate next steps]
 
 ## Closing
-[Closing remarks]
-
-Use proper markdown formatting with headers (#, ##), bold (**), lists, and tables."""
+[Closing remarks]"""
 
     generated_content = agent.chat(prompt)
+    
+    # Persist headers
+    result_min = await db.execute(select(Minutes).where(Minutes.meeting_id == meeting_id))
+    existing_minutes = result_min.scalar_one_or_none()
+    
+    if existing_minutes:
+        existing_minutes.content = generated_content
+        existing_minutes.status = MinutesStatus.DRAFT
+    else:
+        new_minutes = Minutes(
+            meeting_id=meeting_id,
+            content=generated_content,
+            status=MinutesStatus.DRAFT
+        )
+        db.add(new_minutes)
+    
+    await db.commit()
     
     return {"generated_minutes": generated_content}
 
@@ -979,7 +1668,11 @@ async def submit_minutes_for_approval(
     # Get meeting and minutes
     result = await db.execute(
         select(Meeting)
-        .options(selectinload(Meeting.minutes))
+        .options(
+            selectinload(Meeting.minutes),
+            selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+            selectinload(Meeting.twg)
+        )
         .where(Meeting.id == meeting_id)
     )
     db_meeting = result.scalar_one_or_none()
@@ -1004,24 +1697,30 @@ async def submit_minutes_for_approval(
     return {
         "message": "Minutes submitted for approval",
         "status": db_meeting.minutes.status.value,
-        "meeting_id": str(meeting_id)
+        "meeting_id": str(meeting_id),
+        "approved_by": current_user.full_name
     }
 
 
 @router.post("/{meeting_id}/minutes/approve")
 async def approve_minutes(
     meeting_id: uuid.UUID,
-    current_user: User = Depends(require_facilitator),  # Could be require_admin for stricter control
+    request: Request,
+    current_user: User = Depends(require_facilitator),
     db: AsyncSession = Depends(get_db)
 ):
     """
     Approve minutes. Changes status from PENDING_APPROVAL to APPROVED.
-    This is the human oversight gate - nothing is official until approved.
+    Triggers: PDF Generation, Email Distribution, KB Indexing, Audit Logging.
     """
     # Get meeting and minutes
     result = await db.execute(
         select(Meeting)
-        .options(selectinload(Meeting.minutes))
+        .options(
+            selectinload(Meeting.minutes),
+            selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+            selectinload(Meeting.twg)
+        )
         .where(Meeting.id == meeting_id)
     )
     db_meeting = result.scalar_one_or_none()
@@ -1043,14 +1742,90 @@ async def approve_minutes(
     await db.commit()
     await db.refresh(db_meeting.minutes)
     
-    # TODO: Optionally send notification email to participants
+    # --- Post-Approval Workflows ---
+    
+    # 1. Generate Official PDF
+    pdf_bytes = None
+    try:
+        from app.services.pdf_service import pdf_service
+        
+        pillar_display = db_meeting.twg.pillar.value.replace("_", " ").title() if db_meeting.twg else "General"
+        pdf_context = {
+            "pillar_name": pillar_display,
+            "meeting_title": db_meeting.title,
+            "meeting_date": db_meeting.scheduled_at.strftime('%Y-%m-%d') if db_meeting.scheduled_at else "TBD",
+            "meeting_time": db_meeting.scheduled_at.strftime('%H:%M') if db_meeting.scheduled_at else "",
+            "location": db_meeting.location or "Virtual",
+        }
+        pdf_bytes = pdf_service.generate_minutes_pdf(
+            minutes_markdown=db_meeting.minutes.content,
+            template_context=pdf_context
+        )
+    except Exception as e:
+        print(f"PDF Gen Failure: {e}")
+        # Log warning but don't crash, the status is already updated
+    
+    # 2. Index to Knowledge Base (RAG)
+    try:
+        from app.core.knowledge_base import get_knowledge_base
+        kb = get_knowledge_base()
+        kb.add_document(
+            content=db_meeting.minutes.content,
+            metadata={
+                "source": "official_minutes",
+                "meeting_id": str(db_meeting.id),
+                "date": db_meeting.scheduled_at.isoformat() if db_meeting.scheduled_at else None,
+                "pillar": db_meeting.twg.pillar.value if db_meeting.twg else "unknown",
+                "status": "approved",
+                "file_name": f"Minutes - {db_meeting.title}"
+            },
+            namespace=f"twg-{db_meeting.twg_id}" if db_meeting.twg_id else "global"
+        )
+    except Exception as e:
+        print(f"KB Indexing Failed: {e}")
+
+    # 3. Send Emails to Participants
+    if pdf_bytes:
+        try:
+            recipients = [p.user.email for p in db_meeting.participants if p.user and p.user.email]
+            if recipients:
+                 email_context = {
+                     "recipient_name": "Colleague", 
+                     "meeting_title": db_meeting.title,
+                     "date_str": db_meeting.scheduled_at.strftime('%Y-%m-%d') if db_meeting.scheduled_at else "TBD",
+                     "pillar_name": pillar_display,
+                     "dashboard_url": f"{settings.FRONTEND_URL}/meetings/{db_meeting.id}"
+                 }
+                 await email_service.send_minutes_published_email(
+                     to_emails=recipients,
+                     template_context=email_context,
+                     pdf_content=pdf_bytes,
+                     pdf_filename=f"Minutes_{db_meeting.title.replace(' ', '_')}.pdf"
+                 )
+        except Exception as e:
+            print(f"Email Sending Failed: {e}")
+
+    # 4. Audit Log
+    # 4. Audit Log
+    await audit_service.log_activity(
+        db=db,
+        user_id=current_user.id,
+        action="MEETING_MINUTES_APPROVED",
+        resource_type="meeting",
+        resource_id=meeting_id,
+        details={
+            "meeting_title": db_meeting.title,
+            "actions": "generated_pdf, sent_email, indexed_kb"
+        },
+        ip_address=request.client.host if request.client else None
+    )
     
     return {
-        "message": "Minutes approved",
+        "message": "Minutes approved and published",
         "status": db_meeting.minutes.status.value,
-        "meeting_id": str(meeting_id),
-        "approved_by": current_user.full_name
+        "workflows_triggered": ["pdf", "email", "audit", "kb_indexing"] 
     }
+
 
 
 # ==================== ACTION ITEMS ENDPOINTS ====================
@@ -1175,7 +1950,15 @@ async def extract_action_items(
     
     # Create agent to extract action items
     pillar = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
-    agent_id = pillar.split("_")[0]
+    agent_map = {
+        "energy_infrastructure": "energy",
+        "agriculture_food_systems": "agriculture",
+        "critical_minerals_industrialization": "minerals",
+        "digital_economy_transformation": "digital",
+        "protocol_logistics": "protocol",
+        "resource_mobilization": "resource_mobilization"
+    }
+    agent_id = agent_map.get(pillar, "energy")
     agent = create_langgraph_agent(agent_id=agent_id, session_id=str(meeting_id))
     
     prompt = f"""Extract action items from the following meeting minutes.
@@ -1212,8 +1995,23 @@ Return ONLY valid JSON, no markdown or other text."""
         return {"extracted_actions": [], "raw_response": response, "error": "Could not parse JSON"}
     
     # Auto-create ActionItem records
+    # Deduplication: Fetch existing actions first
+    try:
+        existing_result = await db.execute(select(ActionItem).where(ActionItem.meeting_id == meeting_id))
+        existing_actions = existing_result.scalars().all()
+        existing_descriptions = {a.description.strip().lower() for a in existing_actions}
+    except Exception as e:
+        print(f"DEDUPE ERROR: {e}")
+        # Fallback to empty to allow proceed
+        existing_descriptions = set()
+
     created_items = []
     for item in extracted_items:
+        # Check duplicate
+        desc = item.get("description", "").strip()
+        if not desc or desc.lower() in existing_descriptions:
+            continue
+
         try:
             from datetime import datetime, timedelta
             

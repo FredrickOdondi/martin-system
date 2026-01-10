@@ -8,6 +8,7 @@ import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
 import ForgotPassword from './pages/auth/ForgotPassword'
 import ResetPassword from './pages/auth/ResetPassword'
+import ModernLayout from './layouts/ModernLayout'
 import Settings from './pages/settings/Settings'
 import Dashboard from './pages/dashboard/Dashboard'
 import TwgWorkspace from './pages/workspace/TwgWorkspace'
@@ -21,9 +22,11 @@ import UserProfile from './pages/profile/UserProfile'
 import AgentAssistant from './pages/assistant/AgentAssistant'
 import SummitSchedule from './pages/schedule/SummitSchedule'
 import MeetingDetail from './pages/schedule/MeetingDetail'
+import LiveMeeting from './pages/schedule/LiveMeeting'
 import DocumentLibrary from './pages/documents/DocumentLibrary'
 import NotificationCenter from './pages/notifications/NotificationCenter'
 import TeamManagement from './pages/admin/TeamManagement'
+import AuditLogs from './pages/admin/AuditLogs'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function HomeRedirect() {
@@ -93,98 +96,45 @@ function App() {
             {/* Home Redirect */}
             <Route path="/" element={<HomeRedirect />} />
 
-            {/* Protected routes */}
-            <Route path="/dashboard" element={
+            {/* Protected routes wrapped in Layout */}
+            <Route element={
                 <ProtectedRoute>
-                    <Dashboard />
+                    <ModernLayout />
                 </ProtectedRoute>
-            } />
-            <Route path="/twgs" element={
-                <ProtectedRoute>
-                    <TwgAgent />
-                </ProtectedRoute>
-            } />
-            <Route path="/workspace/:id" element={
-                <ProtectedRoute>
-                    <TwgWorkspace />
-                </ProtectedRoute>
-            } />
-            <Route path="/documents" element={
-                <ProtectedRoute>
-                    <DocumentLibrary />
-                </ProtectedRoute>
-            } />
-            <Route path="/notifications" element={
-                <ProtectedRoute>
-                    <NotificationCenter />
-                </ProtectedRoute>
-            } />
-            <Route path="/settings" element={
-                <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
-                    <Settings />
-                </ProtectedRoute>
-            } />
-            <Route path="/profile" element={
-                <ProtectedRoute>
-                    <UserProfile />
-                </ProtectedRoute>
-            } />
-            <Route path="/schedule" element={
-                <ProtectedRoute>
-                    <SummitSchedule />
-                </ProtectedRoute>
-            } />
-            <Route path="/meetings/:id" element={
-                <ProtectedRoute>
-                    <MeetingDetail />
-                </ProtectedRoute>
-            } />
-            <Route path="/knowledge-base" element={
-                <ProtectedRoute>
-                    <KnowledgeBase />
-                </ProtectedRoute>
-            } />
-            <Route path="/deal-pipeline" element={
-                <ProtectedRoute>
-                    <DealPipeline />
-                </ProtectedRoute>
-            } />
-            <Route path="/deal-pipeline/:projectId" element={
-                <ProtectedRoute>
-                    <ProjectDetails />
-                </ProtectedRoute>
-            } />
-            <Route path="/deal-pipeline/:projectId/memo" element={
-                <ProtectedRoute>
-                    <ProjectMemo />
-                </ProtectedRoute>
-            } />
-            <Route path="/actions" element={
-                <ProtectedRoute>
-                    <ActionTracker />
-                </ProtectedRoute>
-            } />
-            <Route path="/assistant" element={
-                <ProtectedRoute>
-                    <AgentAssistant />
-                </ProtectedRoute>
-            } />
-            <Route path="/actions" element={
-                <ProtectedRoute>
-                    <ActionTracker />
-                </ProtectedRoute>
-            } />
-            <Route path="/assistant" element={
-                <ProtectedRoute>
-                    <AgentAssistant />
-                </ProtectedRoute>
-            } />
-            <Route path="/admin/team" element={
-                <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
-                    <TeamManagement />
-                </ProtectedRoute>
-            } />
+            }>
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/twgs" element={<TwgAgent />} />
+                <Route path="/workspace/:id" element={<TwgWorkspace />} />
+                <Route path="/documents" element={<DocumentLibrary />} />
+                <Route path="/notifications" element={<NotificationCenter />} />
+                <Route path="/profile" element={<UserProfile />} />
+                <Route path="/schedule" element={<SummitSchedule />} />
+                <Route path="/meetings/:id" element={<MeetingDetail />} />
+                <Route path="/meetings/:id/live" element={<LiveMeeting />} />
+                <Route path="/knowledge-base" element={<KnowledgeBase />} />
+                <Route path="/deal-pipeline" element={<DealPipeline />} />
+                <Route path="/deal-pipeline/:projectId" element={<ProjectDetails />} />
+                <Route path="/deal-pipeline/:projectId/memo" element={<ProjectMemo />} />
+                <Route path="/actions" element={<ActionTracker />} />
+                <Route path="/assistant" element={<AgentAssistant />} />
 
+                {/* Admin Routes */}
+                <Route path="/settings" element={
+                    <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                        <Settings />
+                    </ProtectedRoute>
+                } />
+                <Route path="/admin/team" element={
+                    <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                        <TeamManagement />
+                    </ProtectedRoute>
+                } />
+                <Route path="/admin/logs" element={
+                    <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                        <AuditLogs />
+                    </ProtectedRoute>
+                } />
+            </Route>
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

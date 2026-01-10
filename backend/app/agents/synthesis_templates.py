@@ -24,6 +24,7 @@ class SynthesisType(str, Enum):
     INVESTMENT_PIPELINE = "investment_pipeline"
     POLICY_COHERENCE = "policy_coherence"
     SUMMIT_READINESS = "summit_readiness"
+    MEETING_MINUTES = "meeting_minutes"
 
 
 # Synthesis prompt templates
@@ -277,6 +278,59 @@ OUTPUT FORMAT:
 
 ### Go/No-Go Recommendation
 [Assessment of whether summit is on track]
+""",
+
+    SynthesisType.MEETING_MINUTES: """
+You are the Digital Rapporteur for an ECOWAS Technical Working Group meeting.
+Your task is to generate the official "Zero Draft" of the meeting minutes based on the provided inputs.
+
+MEETING DETAILS:
+- Title: {meeting_title}
+- Date: {meeting_date}
+- Pillar/TWG: {pillar_name}
+
+ATTENDEES:
+{attendees_list}
+
+AGENDA:
+{agenda_content}
+
+RAW TRANSCRIPT:
+{transcript_text}
+
+SYNTHESIS TASK:
+Create clearly structured meeting minutes that accurately reflect the discussion.
+Focus on identifying distinct decisions and actionable next steps.
+
+OUTPUT FORMAT:
+
+# Minutes: {meeting_title}
+
+**Date:** {meeting_date}
+**TWG:** {pillar_name}
+
+## 1. Attendance
+*Present:*
+[List names]
+
+## 2. Agenda Summary
+[Brief 1-paragraph overview of what was discussed relative to the agenda]
+
+## 3. Key Discussion Points
+[For each agenda item, summarize the key points raised, arguments made, and consensus reached. Use subheaders if necessary.]
+
+## 4. Decisions Taken
+[List specific formal decisions made. Number them clearly.]
+1. **[DECISION]** ...
+2. **[DECISION]** ...
+
+## 5. Action Items
+[List specific tasks assigned w/ owners and due dates if mentioned, otherwise "TBD"]
+- [ ] **[Owner Name/Role]**: [Task Description] (Due: [Date/TBD])
+- [ ] **[Owner Name/Role]**: [Task Description] (Due: [Date/TBD])
+
+## 6. Next Steps
+[Brief summary of immediate next steps]
 """
 }
 

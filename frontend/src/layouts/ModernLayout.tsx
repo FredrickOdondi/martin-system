@@ -1,4 +1,4 @@
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { logout } from '../store/slices/authSlice';
 import { toggleTheme } from '../store/slices/themeSlice';
@@ -7,7 +7,7 @@ import { UserRole } from '../types/auth';
 import { useEffect, useRef, useState } from 'react';
 
 interface ModernLayoutProps {
-    children: React.ReactNode;
+    children?: React.ReactNode;
 }
 
 export default function ModernLayout({ children }: ModernLayoutProps) {
@@ -198,7 +198,7 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
                                         title={isSidebarCollapsed ? "Schedule" : ""}
                                     >
                                         <span className="material-symbols-outlined text-[20px]">calendar_month</span>
-                                        {!isSidebarCollapsed && <span>Schedule</span>}
+                                        {!isSidebarCollapsed && <span>Meetings (Schedule)</span>}
                                     </button>
                                     <button
                                         onClick={() => navigate('/notifications')}
@@ -259,6 +259,17 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
                                             {!isSidebarCollapsed && <span>Team</span>}
                                         </button>
                                         <button
+                                            onClick={() => navigate('/admin/logs')}
+                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/admin/logs')
+                                                ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
+                                                : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
+                                                } ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
+                                            title={isSidebarCollapsed ? "Logs" : ""}
+                                        >
+                                            <span className="material-symbols-outlined text-[20px]">history</span>
+                                            {!isSidebarCollapsed && <span>Audit Logs</span>}
+                                        </button>
+                                        <button
                                             onClick={() => navigate('/settings')}
                                             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/settings')
                                                 ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
@@ -303,7 +314,7 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
                 {/* Main Content Area */}
                 <main className="flex-1 overflow-y-auto p-4 lg:p-6">
                     <div className="max-w-[1440px] mx-auto w-full">
-                        {children}
+                        {children || <Outlet />}
                     </div>
                 </main>
             </div>

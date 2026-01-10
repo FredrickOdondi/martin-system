@@ -43,23 +43,27 @@ async def startup_event():
     import os
     from alembic.config import Config
     from alembic import command
+    from app.core.google_utils import setup_google_credentials
+    
+    # Initialize Google Auth (restore credentials from env if needed)
+    setup_google_credentials()
     
     logger = logging.getLogger("uvicorn.info")
     logger.info("--- STARTUP DIAGNOSTICS ---")
     
     # Run Database Migrations
-    # try:
-    #     logger.info("Running database migrations...")
-    #     if os.path.exists("alembic.ini"):
-    #         alembic_cfg = Config("alembic.ini")
-    #         # Run upgrade head
-    #         command.upgrade(alembic_cfg, "head")
-    #         logger.info("Database migrations completed successfully!")
-    #     else:
-    #         logger.warning("alembic.ini not found! Skipping migrations.")
-    # except Exception as e:
-    #     logger.error(f"Migration failed: {e}")
-    #     # Continue startup
+    try:
+        logger.info("Running database migrations...")
+        if os.path.exists("alembic.ini"):
+            alembic_cfg = Config("alembic.ini")
+            # Run upgrade head
+            command.upgrade(alembic_cfg, "head")
+            logger.info("Database migrations completed successfully!")
+        else:
+            logger.warning("alembic.ini not found! Skipping migrations.")
+    except Exception as e:
+        logger.error(f"Migration failed: {e}")
+        # Continue startup
     
     logger.info(f"API_V1_STR: {settings.API_V1_STR}")
     logger.info(f"CORS_ORIGINS: {cors_origins}")
@@ -71,7 +75,17 @@ async def startup_event():
     url_list = [{"path": route.path, "name": route.name} for route in app.routes]
     for route in url_list:
         logger.info(f"  {route['path']} ({route['name']})")
+
+    # Start Scheduler
+    from app.services.scheduler import scheduler_service
+    scheduler_service.start()
+
     logger.info("--- END STARTUP DIAGNOSTICS ---")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    from app.services.scheduler import scheduler_service
+    scheduler_service.shutdown()
 
 # Register routers
 app.include_router(auth.router, prefix=f"{settings.API_V1_STR}")

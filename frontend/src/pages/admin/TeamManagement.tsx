@@ -5,7 +5,7 @@ import api from '../../services/api'
 import { User, UserRole } from '../../types/auth'
 import { Avatar } from '../../components/ui'
 import { toast } from 'react-toastify'
-import ModernLayout from '../../layouts/ModernLayout'
+
 
 import { useAppSelector } from '../../hooks/useRedux'
 
@@ -27,7 +27,6 @@ export default function TeamManagement() {
 
     // Track if we're enforcing TWG selection (for facilitator role)
     const [enforceTwgSelection, setEnforceTwgSelection] = useState(false)
-    const [previousRole, setPreviousRole] = useState<UserRole | null>(null)
 
     // Invite User Modal State
     const [isInviteModalOpen, setIsInviteModalOpen] = useState(false)
@@ -102,8 +101,6 @@ export default function TeamManagement() {
     const handleRoleChange = async (user: User, newRole: UserRole) => {
         // If changing to FACILITATOR or MEMBER, prompt for TWG assignment
         if (newRole === UserRole.FACILITATOR || newRole === UserRole.MEMBER) {
-            // Store the previous role in case they cancel
-            setPreviousRole(user.role)
             // First update the role
             await handleUpdateUser(user.id, { role: newRole })
             // Mark that we're enforcing TWG selection for facilitators
@@ -156,7 +153,6 @@ export default function TeamManagement() {
             toast.success('Teams updated successfully')
             setIsTeamModalOpen(false)
             setEnforceTwgSelection(false)
-            setPreviousRole(null)
             loadUsers()
         } catch (error) {
             console.error('Failed to update teams', error)
@@ -172,7 +168,6 @@ export default function TeamManagement() {
         }
         setIsTeamModalOpen(false)
         setEnforceTwgSelection(false)
-        setPreviousRole(null)
         loadUsers()
     }
 
@@ -218,16 +213,14 @@ export default function TeamManagement() {
 
     if (isLoading) {
         return (
-            <ModernLayout>
-                <div className="flex items-center justify-center h-64">
-                    <div className="w-8 h-8 border-4 border-[#1152d4] border-t-transparent rounded-full animate-spin"></div>
-                </div>
-            </ModernLayout>
+            <div className="flex items-center justify-center h-64">
+                <div className="w-8 h-8 border-4 border-[#1152d4] border-t-transparent rounded-full animate-spin"></div>
+            </div>
         )
     }
 
     return (
-        <ModernLayout>
+        <>
             <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
                 <div>
                     <h1 className="text-3xl font-black text-[#0d121b] dark:text-white tracking-tight">Team Management</h1>
@@ -617,6 +610,6 @@ export default function TeamManagement() {
                     </div>
                 </div>
             )}
-        </ModernLayout >
+        </>
     )
 }
