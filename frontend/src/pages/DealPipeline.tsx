@@ -22,7 +22,7 @@ const DealPipeline: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showAIInsight, setShowAIInsight] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  const [showFilterModal, setShowFilterModal] = useState(false);
+  // const [showFilterModal, setShowFilterModal] = useState(false);
 
   const projects: Project[] = [
     {
@@ -145,7 +145,7 @@ const DealPipeline: React.FC = () => {
   };
 
   const handleFilterClick = () => {
-    setShowFilterModal(true);
+    // setShowFilterModal(true);
     alert('Advanced filters modal coming soon!');
   };
 
@@ -280,8 +280,8 @@ const DealPipeline: React.FC = () => {
           <button
             onClick={() => setActiveTab('all')}
             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap ${activeTab === 'all'
-                ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
           >
             All Projects
@@ -289,8 +289,8 @@ const DealPipeline: React.FC = () => {
           <button
             onClick={() => setActiveTab('infrastructure')}
             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap ${activeTab === 'infrastructure'
-                ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
           >
             Infrastructure
@@ -298,8 +298,8 @@ const DealPipeline: React.FC = () => {
           <button
             onClick={() => setActiveTab('energy')}
             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap ${activeTab === 'energy'
-                ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
           >
             Energy
@@ -307,8 +307,8 @@ const DealPipeline: React.FC = () => {
           <button
             onClick={() => setActiveTab('agriculture')}
             className={`px-4 py-1.5 text-sm font-medium rounded-md transition-all whitespace-nowrap ${activeTab === 'agriculture'
-                ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
-                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              ? 'bg-white dark:bg-slate-600 text-slate-900 dark:text-white shadow-sm'
+              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
           >
             Agriculture

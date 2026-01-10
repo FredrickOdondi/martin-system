@@ -1,7 +1,8 @@
 """
 Email Tools for AI Agents
 
-Provides Gmail integration tools for sending emails, creating drafts, and searching messages.
+Provides email integration tools for sending emails and creating drafts.
+All emails are sent via Resend with approval workflow.
 Tools follow the pattern from database_tools.py and knowledge_tools.py.
 """
 
@@ -14,9 +15,7 @@ from datetime import datetime
 from email.utils import parsedate_to_datetime
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 
-from app.services.gmail_service import get_gmail_service
 from app.services.email_approval_service import get_email_approval_service
-from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
 
@@ -46,84 +45,6 @@ def validate_email_addresses(emails: Union[str, List[str]]) -> bool:
             logger.warning(f"Invalid email address: {email}")
             return False
     return True
-
-
-def parse_email_body(message: Dict[str, Any]) -> Dict[str, Optional[str]]:
-    """
-    Parse email body from Gmail message.
-
-    Args:
-        message: Gmail message object
-
-    Returns:
-        Dictionary with 'plain' and 'html' body parts
-    """
-    result = {'plain': None, 'html': None}
-
-    def get_body_parts(payload):
-        """Recursively extract body parts."""
-        if 'body' in payload and 'data' in payload['body']:
-            data = payload['body']['data']
-            decoded = base64.urlsafe_b64decode(data).decode('utf-8', errors='ignore')
-
-            mime_type = payload.get('mimeType', '')
-            if mime_type == 'text/plain':
-                result['plain'] = decoded
-            elif mime_type == 'text/html':
-                result['html'] = decoded
-
-        if 'parts' in payload:
-            for part in payload['parts']:
-                get_body_parts(part)
-
-    if 'payload' in message:
-        get_body_parts(message['payload'])
-
-    return result
-
-
-def format_email_response(message: Dict[str, Any], include_body: bool = False) -> Dict[str, Any]:
-    """
-    Format Gmail message into standardized response.
-
-    Args:
-        message: Gmail message object
-        include_body: Whether to include full body content
-
-    Returns:
-        Formatted email data dictionary
-    """
-    # Extract headers
-    headers = {h['name']: h['value'] for h in message.get('payload', {}).get('headers', [])}
-
-    formatted = {
-        'id': message.get('id'),
-        'thread_id': message.get('threadId'),
-        'label_ids': message.get('labelIds', []),
-        'snippet': message.get('snippet', ''),
-        'subject': headers.get('Subject', ''),
-        'from': headers.get('From', ''),
-        'to': headers.get('To', ''),
-        'cc': headers.get('Cc'),
-        'date': headers.get('Date', ''),
-        'internal_date': message.get('internalDate')
-    }
-
-    # Parse date
-    if formatted['date']:
-        try:
-            formatted['date_parsed'] = parsedate_to_datetime(formatted['date']).isoformat()
-        except:
-            formatted['date_parsed'] = None
-
-    # Include body if requested
-    if include_body:
-        body_parts = parse_email_body(message)
-        formatted['body_plain'] = body_parts['plain']
-        formatted['body_html'] = body_parts['html']
-
-    return formatted
-
 
 def load_email_template(template_name: str, variables: Dict[str, Any]) -> str:
     """
@@ -165,7 +86,9 @@ async def send_email(
     cc: Optional[Union[str, List[str]]] = None,
     bcc: Optional[Union[str, List[str]]] = None,
     attachments: Optional[List[str]] = None,
-    context: Optional[str] = None
+    context: Optional[str] = None,
+    pillar_name: Optional[str] = None,
+    use_template_wrapper: bool = True
 ) -> Dict[str, Any]:
     """
     Create an email approval request (Human-in-the-Loop).
@@ -182,6 +105,8 @@ async def send_email(
         bcc: Optional BCC recipient(s)
         attachments: Optional list of file paths to attach
         context: Optional context about why this email is being sent
+        pillar_name: Optional TWG pillar name for branding
+        use_template_wrapper: Whether to wrap HTML in beautiful ECOWAS template (default: True)
 
     Returns:
         Dictionary with status, approval_request_id, and preview details
@@ -192,7 +117,8 @@ async def send_email(
             subject="Test Email",
             message="Plain text content",
             html_body="<h1>HTML Content</h1>",
-            context="Monthly report to stakeholder"
+            context="Monthly report to stakeholder",
+            pillar_name="Energy"
         )
     """
     try:
@@ -221,6 +147,31 @@ async def send_email(
         
         # Override with sanitized list
         attachments = attachments_list
+
+        # Wrap content in beautiful template if wrapper is enabled
+        if use_template_wrapper:
+            try:
+                from app.utils.email_templates import wrap_email_content
+                import html
+
+                # Determine content to wrap
+                content_to_wrap = html_body
+                if not content_to_wrap and message:
+                    # Convert plain text to simple HTML
+                    # Escape text to prevent HTML injection, then replace newlines
+                    escaped_msg = html.escape(message)
+                    content_to_wrap = f"<div style='font-family: inherit; white-space: pre-wrap;'>{escaped_msg}</div>"
+                
+                if content_to_wrap:
+                    # Wrap the content in the beautiful ECOWAS template
+                    html_body = wrap_email_content(
+                        content=content_to_wrap,
+                        pillar_name=pillar_name,
+                        ai_generated=True  # Mark as AI-generated
+                    )
+                    logger.info("Wrapped email content in ECOWAS template")
+            except Exception as e:
+                logger.warning(f"Failed to wrap email in template: {e}. Using original content.")
 
         # Get approval service
         approval_service = get_email_approval_service()
@@ -345,319 +296,54 @@ async def create_email_draft(
     to: Union[str, List[str]],
     subject: str,
     message: str,
-    html_body: Optional[str] = None
+    html_body: Optional[str] = None,
+    pillar_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Create an email draft in Gmail without sending.
+    Create an email draft for approval (uses Resend approval workflow).
+    
+    This is now an alias for send_email since all emails go through approval.
 
     Args:
         to: Recipient email address(es)
         subject: Email subject line
         message: Plain text email body
         html_body: Optional HTML formatted email body
+        pillar_name: Optional TWG pillar name for branding
 
     Returns:
-        Dictionary with status, draft_id, and message_id
+        Dictionary with status, draft_id (approval_request_id), and message
 
     Example:
         result = await create_email_draft(
             to="user@example.com",
             subject="Draft Email",
-            message="This is a draft"
+            message="This is a draft",
+            pillar_name="Energy"
         )
     """
-    try:
-        # Validate email addresses
-        if not validate_email_addresses(to):
-            return {"status": "error", "error": "Invalid recipient email address"}
-
-        # Get Gmail service
-        gmail = get_gmail_service()
-
-        # Create draft
-        result = gmail.create_draft(
-            to=to,
-            subject=subject,
-            body=message,
-            html_body=html_body
-        )
-
-        logger.info(f"Draft created successfully for {to}")
-        return {
-            "status": "success",
-            "draft_id": result['draft_id'],
-            "message_id": result['message_id']
-        }
-
-    except FileNotFoundError:
-        logger.error("Gmail credentials file not found")
-        return {
-            "status": "error",
-            "error": "CONFIGURATION ERROR: Gmail credentials file not found. Please contact the administrator. DO NOT RETRY."
-        }
-    except HttpError as error:
-        logger.error(f"Gmail API error: {error}")
-        return {
-            "status": "error",
-            "error": f"Gmail API error: {error.reason if hasattr(error, 'reason') else str(error)}"
-        }
-    except Exception as error:
-        logger.error(f"Error creating draft: {error}")
-        return {"status": "error", "error": str(error)}
+    # Simply call send_email - it creates an approval request (draft)
+    return await send_email(
+        to=to,
+        subject=subject,
+        message=message,
+        html_body=html_body,
+        pillar_name=pillar_name,
+        context="Email draft created by AI agent"
+    )
 
 
 # =============================================================================
-# Email Retrieval Tools
+# Email Retrieval Tools (DISABLED - Gmail dependency removed)
 # =============================================================================
-
-async def search_emails(
-    query: str,
-    max_results: int = 10,
-    include_body: bool = False
-) -> Dict[str, Any]:
-    """
-    Search emails using Gmail query syntax.
-
-    Args:
-        query: Gmail search query (e.g., 'from:user@example.com is:unread')
-        max_results: Maximum number of results to return (default: 10)
-        include_body: Whether to include full email body content (default: False)
-
-    Returns:
-        Dictionary with status and list of matching emails
-
-    Example:
-        result = await search_emails(
-            query="from:boss@company.com is:unread",
-            max_results=20,
-            include_body=True
-        )
-
-    Query Examples:
-        - "from:user@example.com" - emails from specific sender
-        - "subject:meeting" - emails with 'meeting' in subject
-        - "is:unread" - unread emails
-        - "is:starred" - starred emails
-        - "has:attachment" - emails with attachments
-        - "after:2025/12/01" - emails after specific date
-    """
-    try:
-        gmail = get_gmail_service()
-
-        # Search for messages
-        messages = gmail.search_messages(query=query, max_results=max_results)
-
-        if not messages:
-            return {"status": "success", "count": 0, "emails": []}
-
-        # Fetch full details for each message
-        emails = []
-        for msg in messages:
-            try:
-                full_message = gmail.get_message(msg['id'])
-                formatted = format_email_response(full_message, include_body=include_body)
-                emails.append(formatted)
-            except Exception as error:
-                logger.error(f"Error fetching message {msg['id']}: {error}")
-
-        logger.info(f"Found {len(emails)} emails matching query: {query}")
-        return {
-            "status": "success",
-            "count": len(emails),
-            "emails": emails
-        }
-
-    except FileNotFoundError:
-        logger.error("Gmail credentials file not found")
-        return {
-            "status": "error",
-            "error": "CONFIGURATION ERROR: Gmail credentials file not found. Please contact the administrator. DO NOT RETRY."
-        }
-    except HttpError as error:
-        logger.error(f"Gmail API error: {error}")
-        return {
-            "status": "error",
-            "error": f"Gmail API error: {error.reason if hasattr(error, 'reason') else str(error)}"
-        }
-    except Exception as error:
-        logger.error(f"Error searching emails: {error}")
-        return {"status": "error", "error": str(error)}
-
-
-async def get_email(
-    message_id: str,
-    format: str = "full"
-) -> Dict[str, Any]:
-    """
-    Retrieve a specific email by its message ID.
-
-    Args:
-        message_id: Gmail message ID
-        format: Message format - 'minimal', 'full', 'metadata' (default: 'full')
-
-    Returns:
-        Dictionary with status and email details
-
-    Example:
-        result = await get_email(
-            message_id="18c5f2a3b4d5e6f7",
-            format="full"
-        )
-    """
-    try:
-        gmail = get_gmail_service()
-
-        # Get message
-        message = gmail.get_message(message_id, format=format)
-
-        # Format response
-        formatted = format_email_response(message, include_body=(format == 'full'))
-
-        logger.info(f"Retrieved email: {message_id}")
-        return {
-            "status": "success",
-            "email": formatted
-        }
-
-    except FileNotFoundError:
-        logger.error("Gmail credentials file not found")
-        return {
-            "status": "error",
-            "error": "CONFIGURATION ERROR: Gmail credentials file not found. Please contact the administrator. DO NOT RETRY."
-        }
-    except HttpError as error:
-        logger.error(f"Gmail API error: {error}")
-        return {
-            "status": "error",
-            "error": f"Gmail API error: {error.reason if hasattr(error, 'reason') else str(error)}"
-        }
-    except Exception as error:
-        logger.error(f"Error retrieving email: {error}")
-        return {"status": "error", "error": str(error)}
-
-
-async def list_recent_emails(
-    max_results: int = 10,
-    filter: str = "all",
-    include_body: bool = False
-) -> Dict[str, Any]:
-    """
-    List recent emails with optional filters.
-
-    Args:
-        max_results: Maximum number of emails to return (default: 10)
-        filter: Filter type - 'all', 'unread', 'starred' (default: 'all')
-        include_body: Whether to include full email body content (default: False)
-
-    Returns:
-        Dictionary with status and list of recent emails
-
-    Example:
-        result = await list_recent_emails(
-            max_results=50,
-            filter="unread",
-            include_body=False
-        )
-    """
-    try:
-        gmail = get_gmail_service()
-
-        # Map filter to label IDs
-        label_map = {
-            'all': None,
-            'unread': ['UNREAD'],
-            'starred': ['STARRED'],
-            'inbox': ['INBOX']
-        }
-
-        label_ids = label_map.get(filter.lower())
-        if filter.lower() not in label_map:
-            return {"status": "error", "error": f"Invalid filter: {filter}. Use 'all', 'unread', 'starred', or 'inbox'"}
-
-        # List messages
-        messages = gmail.list_messages(max_results=max_results, label_ids=label_ids)
-
-        if not messages:
-            return {"status": "success", "count": 0, "emails": []}
-
-        # Fetch full details for each message
-        emails = []
-        for msg in messages:
-            try:
-                full_message = gmail.get_message(msg['id'])
-                formatted = format_email_response(full_message, include_body=include_body)
-                emails.append(formatted)
-            except Exception as error:
-                logger.error(f"Error fetching message {msg['id']}: {error}")
-
-        logger.info(f"Listed {len(emails)} recent emails with filter: {filter}")
-        return {
-            "status": "success",
-            "count": len(emails),
-            "emails": emails
-        }
-
-    except FileNotFoundError:
-        logger.error("Gmail credentials file not found")
-        return {
-            "status": "error",
-            "error": "CONFIGURATION ERROR: Gmail credentials file not found. Please contact the administrator. DO NOT RETRY."
-        }
-    except HttpError as error:
-        logger.error(f"Gmail API error: {error}")
-        return {
-            "status": "error",
-            "error": f"Gmail API error: {error.reason if hasattr(error, 'reason') else str(error)}"
-        }
-    except Exception as error:
-        logger.error(f"Error listing emails: {error}")
-        return {"status": "error", "error": str(error)}
-
-
-async def get_email_thread(thread_id: str) -> Dict[str, Any]:
-    """
-    Retrieve an entire email conversation thread.
-
-    Args:
-        thread_id: Gmail thread ID
-
-    Returns:
-        Dictionary with status, thread info, and all messages
-
-    Example:
-        result = await get_email_thread(
-            thread_id="18c5f2a3b4d5e6f7"
-        )
-    """
-    try:
-        gmail = get_gmail_service()
-
-        # Get thread
-        thread = gmail.get_thread(thread_id)
-
-        # Format all messages in the thread
-        messages = []
-        for msg in thread.get('messages', []):
-            formatted = format_email_response(msg, include_body=True)
-            messages.append(formatted)
-
-        logger.info(f"Retrieved thread {thread_id} with {len(messages)} messages")
-        return {
-            "status": "success",
-            "thread_id": thread['id'],
-            "message_count": len(messages),
-            "messages": messages
-        }
-
-    except HttpError as error:
-        logger.error(f"Gmail API error: {error}")
-        return {
-            "status": "error",
-            "error": f"Gmail API error: {error.reason if hasattr(error, 'reason') else str(error)}"
-        }
-    except Exception as error:
-        logger.error(f"Error retrieving thread: {error}")
-        return {"status": "error", "error": str(error)}
+# 
+# NOTE: These functions are disabled because they depend on Gmail API.
+# If email search/retrieval is needed, implement using Resend or another service.
+#
+# async def search_emails(...) - DISABLED
+# async def get_email(...) - DISABLED  
+# async def list_recent_emails(...) - DISABLED
+# async def get_email_thread(...) - DISABLED
 
 
 # =============================================================================
@@ -667,15 +353,16 @@ async def get_email_thread(thread_id: str) -> Dict[str, Any]:
 EMAIL_TOOLS = [
     {
         "name": "send_email",
-        "description": "Send an email via Resend (triggers approval workflow). Supports HTML, CC/BCC, and attachments.",
+        "description": "Send a beautifully formatted email via Resend (triggers approval workflow). Emails are automatically wrapped in professional ECOWAS branding with AI badge. Supports HTML, CC/BCC, and attachments.",
         "parameters": {
             "to": "Recipient email address(es) - string or list",
             "subject": "Email subject line",
             "message": "Plain text email body",
-            "html_body": "Optional HTML formatted email body",
+            "html_body": "Optional HTML formatted email body (will be wrapped in ECOWAS template)",
             "cc": "Optional CC recipient(s)",
             "bcc": "Optional BCC recipient(s)",
-            "attachments": "Optional list of file paths to attach"
+            "attachments": "Optional list of file paths to attach",
+            "pillar_name": "Optional TWG pillar name for branding (e.g., 'Energy', 'Agriculture')"
         },
         "coroutine": send_email
     }

@@ -42,6 +42,19 @@
             opacity: 0.9;
         }
 
+        .pillar-tag {
+            display: inline-block;
+            padding: 4px 12px;
+            background-color: #e8f0fe;
+            color: #004a99;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 12px;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
         .content {
             padding: 30px 25px;
         }
@@ -51,8 +64,6 @@
             font-size: 22px;
             margin: 0 0 20px 0;
             font-weight: 600;
-            border-bottom: 2px solid #e9ecef;
-            padding-bottom: 10px;
         }
 
         .content h3 {
@@ -67,37 +78,8 @@
             color: #555;
         }
 
-        .content ul,
-        .content ol {
-            margin: 0 0 20px 0;
-            padding-left: 20px;
-            color: #555;
-        }
-
-        .content li {
-            margin-bottom: 5px;
-        }
-
-        /* Table Styling from meeting_summary logic compatibility */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-        }
-
-        th {
-            background-color: #f8f9fa;
+        .content strong {
             color: #333;
-            font-weight: 600;
-            text-align: left;
-            padding: 12px;
-            border-bottom: 2px solid #dee2e6;
-        }
-
-        td {
-            padding: 12px;
-            border-bottom: 1px solid #dee2e6;
-            color: #555;
         }
 
         .button {
@@ -118,6 +100,18 @@
             border-color: #0056b3;
         }
 
+        .info-box {
+            background-color: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .info-box p {
+            margin: 5px 0;
+        }
+
         .footer {
             background-color: #f8f9fa;
             padding: 20px 25px;
@@ -130,6 +124,26 @@
         .footer p {
             margin: 5px 0;
         }
+
+        .divider {
+            height: 1px;
+            background-color: #e9ecef;
+            margin: 20px 0;
+        }
+
+        /* AI Badge */
+        .ai-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
     </style>
 </head>
 
@@ -138,22 +152,27 @@
         <!-- Header -->
         <div class="header">
             <h1>ECOWAS Summit 2026</h1>
-            <p>{% block header_title %}Technical Working Group Portal{% endblock %}</p>
+            <p>Technical Working Group Portal</p>
         </div>
 
         <!-- Content -->
         <div class="content">
-            {% block content %}
-            <p>Notification Content</p>
-            {% endblock %}
+            {% if pillar_name %}
+            <div class="pillar-tag">{{ pillar_name }} TWG</div>
+            {% endif %}
+
+            {% if ai_generated %}
+            <span class="ai-badge">✨ AI Generated</span>
+            {% endif %}
+
+            <!-- Main content block -->
+            {{ content | safe }}
         </div>
 
         <!-- Footer -->
         <div class="footer">
-            {% block footer %}
             <p>This is an automated message from the ECOWAS Summit Support System.</p>
             <p>&copy; 2026 ECOWAS Summit Secretariat</p>
-            {% endblock %}
         </div>
     </div>
 </body>
