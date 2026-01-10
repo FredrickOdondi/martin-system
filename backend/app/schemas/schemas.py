@@ -241,6 +241,7 @@ class MeetingParticipantUpdate(SchemaBase):
 class MeetingRead(MeetingBase):
     id: uuid.UUID
     video_link: Optional[str] = None
+    twg: Optional["TWGBase"] = None
     participants: List[MeetingParticipantRead] = []
     documents: List["DocumentRead"] = []
 

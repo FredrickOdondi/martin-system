@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { meetings } from '../../services/api'
+import CreateMeetingModal from '../../components/schedule/CreateMeetingModal'
 import {
     format,
     startOfMonth,
@@ -20,6 +21,8 @@ export default function SummitSchedule() {
     const [events, setEvents] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [currentDate, setCurrentDate] = useState(new Date())
+    const [isCreatingMeeting, setIsCreatingMeeting] = useState(false)
+    const [selectedDate, setSelectedDate] = useState<Date | null>(null)
 
     useEffect(() => {
         loadMeetings()
@@ -62,6 +65,11 @@ export default function SummitSchedule() {
     const getEventsForDay = (day: Date) => {
         return events.filter(event => isSameDay(event.scheduled_at, day))
             .sort((a, b) => a.scheduled_at.getTime() - b.scheduled_at.getTime())
+    }
+
+    const handleDayClick = (day: Date) => {
+        setSelectedDate(day)
+        setIsCreatingMeeting(true)
     }
 
     if (loading) {
@@ -121,10 +129,12 @@ export default function SummitSchedule() {
                         return (
                             <div
                                 key={day.toString()}
+                                onClick={() => handleDayClick(day)}
                                 className={`
-                                    border-b border-r border-slate-100 dark:border-slate-800/50 p-2 min-h-[120px] relative group flex flex-col
-                                    ${!isCurrentMonth ? 'bg-slate-50/50 dark:bg-slate-900/50 text-slate-300 dark:text-slate-700' : 'bg-white dark:bg-slate-900'}
+                                    border-b border-r border-slate-100 dark:border-slate-800/50 p-2 min-h-[120px] relative group flex flex-col cursor-pointer
+                                    ${!isCurrentMonth ? 'bg-slate-50/50 dark:bg-slate-900/50 text-slate-300 dark:text-slate-700' : 'bg-white dark:bg-slate-900 hover:bg-blue-50/30 dark:hover:bg-blue-900/5'}
                                     ${isTodayDate ? 'bg-blue-50/50 dark:bg-blue-900/10' : ''}
+                                    transition-colors
                                 `}
                             >
                                 <div className="flex justify-between items-start mb-2 shrink-0">
@@ -144,7 +154,10 @@ export default function SummitSchedule() {
                                     {dayEvents.map(event => (
                                         <div
                                             key={event.id}
-                                            onClick={() => navigate(`/meetings/${event.id}`)}
+                                            onClick={(e) => {
+                                                e.stopPropagation()
+                                                navigate(`/meetings/${event.id}`, { state: { from: 'schedule' } })
+                                            }}
                                             className={`
                                                 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-all border group/event
                                                 ${event.type === 'virtual'
@@ -161,13 +174,29 @@ export default function SummitSchedule() {
                                     ))}
                                 </div>
 
-                                {/* Add Button Placeholder on Hover */}
-                                <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-transparent via-blue-500/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                                {/* Add Meeting Hint on Hover */}
+                                <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none flex items-center justify-center">
+                                    <div className="text-blue-600 dark:text-blue-400 text-xs font-bold flex items-center gap-1">
+                                        <span className="material-symbols-outlined text-[16px]">add_circle</span>
+                                        <span>New Meeting</span>
+                                    </div>
+                                </div>
                             </div>
                         )
                     })}
                 </div>
             </div>
+
+            {/* Create Meeting Modal */}
+            <CreateMeetingModal
+                isOpen={isCreatingMeeting}
+                onClose={() => {
+                    setIsCreatingMeeting(false)
+                    setSelectedDate(null)
+                }}
+                onSuccess={loadMeetings}
+                prefilledDate={selectedDate}
+            />
         </div>
     )
 }

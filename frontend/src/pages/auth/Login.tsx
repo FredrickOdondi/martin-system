@@ -219,18 +219,11 @@ export default function Login() {
                         </div>
                     </form>
 
-                    <div className="text-center">
-                        <p className="text-sm text-slate-400">
-                            Don't have an account?{' '}
-                            <Link to="/register" className="text-blue-400 hover:text-blue-300 font-medium">
-                                Create Account
-                            </Link>
-                        </p>
-                    </div>
+
 
                     <div className="pt-8 border-t border-slate-800 text-center">
                         <p className="text-xs text-slate-500">
-                            ECOWAS Summit © 2024. Authorized Personnel Only.
+                            ECOWAS Summit © 2026. Authorized Personnel Only.
                         </p>
                         <p className="text-xs text-slate-600 mt-1">
                             By logging in, you agree to our Terms of Service and Privacy Policy.

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { meetings, actionItems } from '../../services/api'
 import { Card, Badge } from '../../components/ui'
 import MeetingSidebar from './components/MeetingSidebar'
@@ -16,6 +16,7 @@ type TabType = 'agenda' | 'minutes' | 'participants' | 'documents'
 export default function MeetingDetail() {
     const { id: meetingId } = useParams<{ id: string }>()
     const navigate = useNavigate()
+    const location = useLocation()
     const [meeting, setMeeting] = useState<any>(null)
     const [activeTab, setActiveTab] = useState<TabType>('minutes')
     const [loading, setLoading] = useState(true)
@@ -611,7 +612,65 @@ export default function MeetingDetail() {
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                                     </svg>
                                 </button>
-                                <span className="text-sm text-slate-500">Home / {meeting?.twg?.name || 'TWG'} / Meeting #{meetingId?.slice(0, 6)}</span>
+                                <div className="flex items-center gap-2 text-sm text-slate-500">
+                                    <button
+                                        onClick={() => navigate('/dashboard')}
+                                        className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                                    >
+                                        Home
+                                    </button>
+                                    <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+
+                                    {/* Dynamic breadcrumb based on navigation source */}
+                                    {location.state?.from === 'schedule' || location.pathname.includes('/schedule') ? (
+                                        // Path: Home > Schedule > TWG > Meeting
+                                        <>
+                                            <button
+                                                onClick={() => navigate('/schedule')}
+                                                className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                                            >
+                                                Schedule
+                                            </button>
+                                            <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                                            <button
+                                                onClick={() => navigate('/schedule')}
+                                                className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                                            >
+                                                {loading ? (
+                                                    <span className="inline-block h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded animate-pulse"></span>
+                                                ) : (
+                                                    meeting?.twg?.name || 'Unknown TWG'
+                                                )}
+                                            </button>
+                                        </>
+                                    ) : (
+                                        // Path: Home > TWG Workspace > Meeting History > Meeting
+                                        <>
+                                            <button
+                                                onClick={() => navigate(`/workspace/${meeting?.twg_id}`)}
+                                                className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                                            >
+                                                {loading ? (
+                                                    <span className="inline-block h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded animate-pulse"></span>
+                                                ) : (
+                                                    meeting?.twg?.name || 'Unknown TWG'
+                                                )}
+                                            </button>
+                                            <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                                            <button
+                                                onClick={() => navigate(`/workspace/${meeting?.twg_id}`)}
+                                                className="hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+                                            >
+                                                Meeting History
+                                            </button>
+                                        </>
+                                    )}
+
+                                    <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                                    <span className="text-slate-700 dark:text-slate-300 font-medium">
+                                        Meeting #{meetingId?.slice(0, 6)}
+                                    </span>
+                                </div>
                             </div>
                             <div className="flex items-center gap-4">
                                 <h1 className="text-3xl font-display font-black text-slate-900 dark:text-white">{meeting?.title}</h1>

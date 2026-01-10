@@ -198,19 +198,12 @@ class AuthService:
             user = await self.get_user_by_email(email)
             
             if not user:
-                # Create user if it doesn't exist
-                # Google users won't have a local password. 
-                # We leave hashed_password as None or a random string.
-                user = User(
-                    email=email,
-                    hashed_password="oauth_user_no_password",
-                    full_name=full_name,
-                    role=UserRole.TWG_MEMBER,
-                    is_active=True # Auto-approve Google OAuth users
+                # SECURITY: Only users invited by admin can log in
+                # Do not auto-create users from Google OAuth
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access denied. Your email is not authorized. Please contact the administrator."
                 )
-                self.db.add(user)
-                await self.db.commit()
-                await self.db.refresh(user)
             
             if not user.is_active:
                 raise HTTPException(

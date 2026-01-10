@@ -1,16 +1,34 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card } from '../ui';
-import { meetings } from '../../services/api';
+import { meetings, twgs } from '../../services/api';
+import { useAppSelector } from '../../hooks/useRedux';
 
 interface CreateMeetingModalProps {
     isOpen: boolean;
     onClose: () => void;
-    twgId: string;
+    twgId?: string;
     onSuccess: () => void;
+    prefilledDate?: Date | null;
 }
 
-export default function CreateMeetingModal({ isOpen, onClose, twgId, onSuccess }: CreateMeetingModalProps) {
+export default function CreateMeetingModal({ isOpen, onClose, twgId, onSuccess, prefilledDate }: CreateMeetingModalProps) {
     const [loading, setLoading] = useState(false);
+    const [twgList, setTwgList] = useState<any[]>([]);
+
+    // Get user info from Redux
+    const user = useAppSelector(state => state.auth.user);
+    const isAdmin = user?.role === 'admin';
+    const userTwgIds = user?.twg_ids || [];
+
+    // Auto-select TWG for non-admins
+    const getInitialTwgId = () => {
+        if (twgId) return twgId; // If passed from TWG Workspace, use it
+        if (!isAdmin && userTwgIds.length > 0) return userTwgIds[0]; // Auto-select for facilitators
+        return '';
+    };
+
+    const [selectedTwgId, setSelectedTwgId] = useState(getInitialTwgId());
+
     const [formData, setFormData] = useState({
         title: '',
         date: '',
@@ -20,6 +38,32 @@ export default function CreateMeetingModal({ isOpen, onClose, twgId, onSuccess }
         description: '',
         type: 'virtual' // Default to virtual for Google Meet link generation
     });
+
+    // Update date when prefilledDate changes
+    useEffect(() => {
+        if (prefilledDate) {
+            const year = prefilledDate.getFullYear();
+            const month = String(prefilledDate.getMonth() + 1).padStart(2, '0');
+            const day = String(prefilledDate.getDate()).padStart(2, '0');
+            setFormData(prev => ({ ...prev, date: `${year}-${month}-${day}` }));
+        }
+    }, [prefilledDate]);
+
+    // Load TWGs only if admin and no twgId provided
+    useEffect(() => {
+        if (isAdmin && !twgId && isOpen) {
+            loadTwgs();
+        }
+    }, [isAdmin, twgId, isOpen]);
+
+    const loadTwgs = async () => {
+        try {
+            const response = await twgs.list();
+            setTwgList(response.data);
+        } catch (error) {
+            console.error('Failed to load TWGs', error);
+        }
+    };
 
     if (!isOpen) return null;
 
@@ -33,7 +77,7 @@ export default function CreateMeetingModal({ isOpen, onClose, twgId, onSuccess }
 
             await meetings.create({
                 title: formData.title,
-                twg_id: twgId,
+                twg_id: twgId || selectedTwgId || undefined,
                 scheduled_at: scheduledAt.toISOString(),
                 duration_minutes: parseInt(formData.duration),
                 location: formData.location,
@@ -73,26 +117,56 @@ export default function CreateMeetingModal({ isOpen, onClose, twgId, onSuccess }
                         />
                     </div>
 
+                    {/* Show TWG selector only for admins when no twgId provided */}
+                    {!twgId && isAdmin && (
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Technical Working Group</label>
+                            <select
+                                required
+                                className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:text-white"
+                                value={selectedTwgId}
+                                onChange={e => setSelectedTwgId(e.target.value)}
+                            >
+                                <option value="">Select TWG...</option>
+                                {twgList.map(twg => (
+                                    <option key={twg.id} value={twg.id}>{twg.name}</option>
+                                ))}
+                            </select>
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Date</label>
                             <input
                                 required
                                 type="date"
-                                className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:text-white"
+                                readOnly={!!prefilledDate}
+                                className={`w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:text-white ${prefilledDate
+                                    ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 cursor-not-allowed opacity-75'
+                                    : 'bg-slate-50 dark:bg-slate-800'
+                                    }`}
                                 value={formData.date}
                                 onChange={e => setFormData({ ...formData, date: e.target.value })}
                             />
                         </div>
                         <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Time</label>
-                            <input
-                                required
-                                type="time"
-                                className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:text-white"
-                                value={formData.time}
-                                onChange={e => setFormData({ ...formData, time: e.target.value })}
-                            />
+                            <div
+                                onClick={(e) => {
+                                    const input = e.currentTarget.querySelector('input');
+                                    input?.showPicker?.();
+                                }}
+                                className="cursor-pointer"
+                            >
+                                <input
+                                    required
+                                    type="time"
+                                    className="w-full px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-blue-500 outline-none text-sm dark:text-white cursor-pointer"
+                                    value={formData.time}
+                                    onChange={e => setFormData({ ...formData, time: e.target.value })}
+                                />
+                            </div>
                         </div>
                     </div>
 

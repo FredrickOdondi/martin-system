@@ -222,7 +222,7 @@ export default function ResetPassword() {
 
                     <div className="pt-8 border-t border-slate-800 text-center">
                         <p className="text-xs text-slate-500">
-                            ECOWAS Summit © 2024. Authorized Personnel Only.
+                            ECOWAS Summit © 2026. Authorized Personnel Only.
                         </p>
                     </div>
                 </div>
