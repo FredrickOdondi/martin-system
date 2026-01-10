@@ -12,6 +12,8 @@ import json
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import interrupt, Command
+from langgraph.errors import GraphInterrupt
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
 from app.services.groq_llm_service import get_llm_service
@@ -51,6 +53,9 @@ class AgentConversationState(TypedDict):
 
     # Context (optional)
     context: Optional[Dict]
+    
+    # Flag to indicate an approval is pending (stops agent loop)
+    approval_pending: Optional[bool]
 
 
 # =========================================================================
@@ -147,10 +152,26 @@ class LangGraphBaseAgent:
                     new_props[param_name]["type"] = "boolean"
                 if param_name in ["variables", "exclude_files"]:
                     new_props[param_name]["type"] = "object"
-                if param_name in ["attachments", "to", "cc", "bcc"]:
-                     # These can be lists or strings, schema is complex. 
-                     # Simplifying to string or array of strings
-                     pass # leaving as string or implied
+                if param_name == "attachments":
+                    # Relaxed schema to handle LLM inconsistencies (it often sends "" or null instead of [])
+                    new_props[param_name] = {
+                        "anyOf": [
+                            {"type": "array", "items": {"type": "string"}},
+                            {"type": "string"},
+                            {"type": "null"}
+                        ],
+                        "description": param_desc
+                    }
+                
+                # 'cc', 'bcc', and 'html_body' can also receive null from LLM
+                if param_name in ["cc", "bcc", "html_body"]:
+                    new_props[param_name] = {
+                        "anyOf": [
+                            {"type": "string"},
+                            {"type": "null"}
+                        ],
+                        "description": param_desc
+                    }
             
             tool_def["function"]["parameters"]["properties"] = new_props
             self.tools_def.append(tool_def)
@@ -229,6 +250,11 @@ class LangGraphBaseAgent:
         """
         Determine if we should continue to tool execution or end.
         """
+        # CRITICAL: If an approval is pending, STOP the loop immediately
+        if state.get("approval_pending"):
+            logger.info(f"[{self.agent_id}] Approval pending - ending loop")
+            return "end"
+        
         messages = state["messages"]
         last_message = messages[-1]
         
@@ -283,7 +309,14 @@ class LangGraphBaseAgent:
         query = state["query"]
         messages = state.get("messages", [])
         
-        # Enforce History Limit to prevent 413 errors
+        # Enforce History Limit to prevent 413 errors & Infinite Loops
+        # If we have too many messages in the current state (likely due to a tool loop), cut it off.
+        if len(messages) > 20:
+             logger.warning(f"[{self.agent_id}] Loop detected (20+ messages). Truncating and forcing text response.")
+             messages = messages[-self.max_history:]
+             # Force a stop by returning a final message if we are deep in a loop
+             # But LLM might just continue. We'll rely on the reduced history to break context loop.
+             
         if len(messages) > self.max_history:
              messages = messages[-self.max_history:]
         
@@ -412,6 +445,7 @@ class LangGraphBaseAgent:
             return state
             
         from langchain_core.messages import ToolMessage
+        from langgraph.errors import GraphInterrupt
         import json
         
         new_messages = []
@@ -479,25 +513,56 @@ class LangGraphBaseAgent:
                     result = json.dumps({"error": f"Tool {tool_name} not found"})
                 
                 # Create ToolMessage
-                new_messages.append(ToolMessage(
-                    content=str(result),
-                    tool_call_id=tool_id
-                ))
+                output_str = str(result)
                 
+                # SPECIAL HANDLING FOR APPROVAL REQUESTS - USE LANGGRAPH INTERRUPT
+                # When an approval is required, interrupt() pauses the graph and returns
+                # the approval payload to the caller. The graph can be resumed later.
+                if "approval_request_id" in output_str:
+                    from langgraph.errors import GraphInterrupt
+                    try:
+                        res_json = json.loads(result) if isinstance(result, str) else result
+                        if isinstance(res_json, dict) and "approval_request_id" in res_json:
+                            logger.info(f"[{self.agent_id}] INTERRUPT: Approval required for {res_json['approval_request_id']}")
+                            
+                            # Prepare the interrupt payload with full approval data
+                            approval_payload = {
+                                "type": "email_approval_required",
+                                "request_id": res_json.get("approval_request_id"),
+                                "draft": res_json.get("draft", {}),
+                                "message": res_json.get("message", "Email requires approval before sending.")
+                            }
+                            
+                            # INTERRUPT the graph - this raises GraphInterrupt
+                            # We MUST let this propagate up to pause the graph
+                            human_response = interrupt(approval_payload)
+                            
+                            # When resumed, human_response contains the approval decision
+                            if human_response and human_response.get("approved"):
+                                logger.info(f"[{self.agent_id}] Approval GRANTED - proceeding with send")
+                                output_str = json.dumps({"status": "approved", "message": "Email approved and will be sent."})
+                            else:
+                                logger.info(f"[{self.agent_id}] Approval DENIED - cancelling send")
+                                output_str = json.dumps({"status": "declined", "message": "Email was declined by user."})
+                    except GraphInterrupt:
+                        # RE-RAISE GraphInterrupt so it propagates up and pauses the graph
+                        logger.info(f"[{self.agent_id}] GraphInterrupt raised - pausing graph for approval")
+                        raise
+                    except json.JSONDecodeError:
+                        pass
+                    except Exception as e:
+                        logger.error(f"[{self.agent_id}] Interrupt error: {e}")
+
+                new_messages.append(ToolMessage(tool_call_id=tool_id, content=output_str))
+                
+            except GraphInterrupt:
+                # RE-RAISE GraphInterrupt from inner block
+                raise
             except Exception as e:
-                logger.error(f"Tool execution failed: {e}")
-                new_messages.append(ToolMessage(
-                    content=json.dumps({"error": str(e)}),
-                    tool_call_id=tool_id
-                ))
-                
-        # Append all tool results
-        # NOTE: StateGraph with 'add_messages' reducer handles this Append automatically?
-        # Our state definition uses 'messages': Annotated[Sequence[BaseMessage], add_messages]
-        # But we also modify state["messages"] directly in some nodes. 
-        # Standard LangGraph pattern: return {"messages": new_messages}
-        # But here we are modifying the state dict directly. 
-        # Let's keep consistent with existing pattern: append to list.
+                logger.error(f"[{self.agent_id}] Tool execution failed: {e}")
+                new_messages.append(ToolMessage(tool_call_id=tool_id, content=f"Error: {str(e)}"))
+
+        # Update state with all tool results
         state["messages"].extend(new_messages)
         
         return state
@@ -537,12 +602,25 @@ class LangGraphBaseAgent:
             # Run the graph
             result = self.compiled_graph.invoke(initial_state, config)
 
+            # CHECK FOR INTERRUPTS (LangGraph invoke swallows the exception but stops)
+            snapshot = self.compiled_graph.get_state(config)
+            if snapshot.tasks:
+                for task in snapshot.tasks:
+                    if hasattr(task, 'interrupts') and task.interrupts:
+                        for inter in task.interrupts:
+                            logger.info(f"[{self.agent_id}] Detected interrupt in state: {inter.value}")
+                            # Manually re-raise so API can catch it
+                            raise GraphInterrupt(inter.value)
+
             response = result.get("response", "")
 
             logger.info(f"[{self.agent_id}:{thread_id}] Response: {response[:100]}...")
 
             return response
 
+        except GraphInterrupt:
+            # Re-raise GraphInterrupt
+            raise
         except Exception as e:
             logger.error(f"[{self.agent_id}:{thread_id}] Error: {e}")
             return f"I apologize, but I encountered an error: {str(e)}"

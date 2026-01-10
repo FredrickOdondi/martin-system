@@ -26,6 +26,7 @@ import LiveMeeting from './pages/schedule/LiveMeeting'
 import DocumentLibrary from './pages/documents/DocumentLibrary'
 import NotificationCenter from './pages/notifications/NotificationCenter'
 import TeamManagement from './pages/admin/TeamManagement'
+import ControlTower from './pages/admin/ControlTower'
 import AuditLogs from './pages/admin/AuditLogs'
 import ProtectedRoute from './components/ProtectedRoute'
 
@@ -127,6 +128,11 @@ function App() {
                 <Route path="/admin/team" element={
                     <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
                         <TeamManagement />
+                    </ProtectedRoute>
+                } />
+                <Route path="/admin/control-tower" element={
+                    <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                        <ControlTower />
                     </ProtectedRoute>
                 } />
                 <Route path="/admin/logs" element={
