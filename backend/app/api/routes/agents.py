@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, AsyncGenerator
 import uuid
 import asyncio
@@ -9,6 +10,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from app.api.deps import get_current_active_user
+from app.core.database import get_db
 from app.models.models import User
 from app.schemas.schemas import AgentChatRequest, AgentChatResponse, AgentTaskRequest, AgentStatus
 from app.schemas.chat_messages import (
@@ -23,12 +25,13 @@ from app.schemas.chat_messages import (
 from app.agents.supervisor_api_adapter import SupervisorWithTools
 from app.services.command_parser import CommandParser, MessageParseType
 from app.services.email_approval_service import get_email_approval_service
-from app.services.gmail_service import get_gmail_service
+from app.services.resend_service import get_resend_service
 from app.schemas.email_approval import (
     EmailApprovalRequest,
     EmailApprovalResponse,
     EmailApprovalResult
 )
+from app.services.audit_service import audit_service
 from datetime import datetime
 
 router = APIRouter(prefix="/agents", tags=["Agents"])
@@ -133,6 +136,8 @@ async def chat_with_martin(
 
     Uses the actual LLM-powered supervisor with tool execution capabilities.
     """
+    from langgraph.errors import GraphInterrupt
+    
     conv_id = chat_in.conversation_id or uuid.uuid4()
 
     try:
@@ -149,6 +154,34 @@ async def chat_with_martin(
             "citations": [],  # Citations will be extracted from the response in future
             "agent_id": "supervisor_v1"
         }
+    except GraphInterrupt as gi:
+        # Graph was interrupted for human approval
+        # Extract the interrupt payload - GraphInterrupt stores it in args[0]
+        interrupt_value = gi.args[0] if gi.args else {}
+        
+        logger.info(f"[CHAT] GraphInterrupt caught - gi.args: {gi.args}")
+        logger.info(f"[CHAT] Extracted interrupt_value: {interrupt_value}")
+        
+        # Extract draft details for the response message
+        draft_preview = ""
+        if isinstance(interrupt_value, dict) and "draft" in interrupt_value:
+            draft = interrupt_value["draft"]
+            to_list = draft.get("to", [])
+            subject = draft.get("subject", "No Subject")
+            draft_preview = f"\n\n**To:** {', '.join(to_list)}\n**Subject:** {subject}"
+        
+        response_dict = {
+            "response": "",  # Empty - frontend will handle the message display
+            "conversation_id": conv_id,
+            "citations": [],
+            "agent_id": "supervisor_v1",
+            "interrupted": True,
+            "interrupt_payload": interrupt_value,
+            "thread_id": str(conv_id)  # Used to resume the graph
+        }
+        
+        logger.info(f"[CHAT] Returning interrupt response: {response_dict}")
+        return response_dict
     except Exception as e:
         # Log the error and return a helpful message
         import traceback
@@ -272,8 +305,14 @@ async def stream_chat(
             # Send initial event
             yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
 
-            # Get the supervisor agent
-            supervisor = get_supervisor()
+            # Create a new supervisor instance with isolated session for this conversation
+            # This prevents conversation history accumulation causing context length errors
+            supervisor = SupervisorWithTools()
+            supervisor.supervisor.session_id = conv_id
+
+            # Clear any existing history for this session to start fresh
+            if hasattr(supervisor.supervisor, 'supervisor_agent'):
+                supervisor.supervisor.supervisor_agent.clear_history()
 
             # Parse message for commands and mentions
             parsed = command_parser.parse_message(chat_in.message)
@@ -526,7 +565,8 @@ async def get_email_approval(
 async def approve_email(
     request_id: str,
     approval_response: EmailApprovalResponse,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Approve and send an email.
@@ -560,9 +600,9 @@ async def approve_email(
     draft = approval_response.modifications or approval_request.draft
 
     try:
-        # Send the email using Gmail service
-        gmail_service = get_gmail_service()
-        result = gmail_service.send_message(
+        # Send the email using Resend service
+        resend_service = get_resend_service()
+        result = resend_service.send_message(
             to=draft.to,
             subject=draft.subject,
             body=draft.body,
@@ -577,10 +617,38 @@ async def approve_email(
 
         return EmailApprovalResult(
             success=True,
-            message="Email sent successfully",
+            message="Email sent successfully via Resend",
             email_sent=True,
             message_id=result.get('message_id'),
-            thread_id=result.get('thread_id')
+            thread_id=None # Resend doesn't typically provide thread_id
+        )
+
+        # Audit Log
+        if result.get("status") == "success":
+            await audit_service.log_activity(
+                db=db,
+                user_id=current_user.id,
+                action="send_email",
+                resource_type="email",
+                resource_id=None,  # Could be message_id if we store emails as entities
+                details={
+                    "to": draft.to,
+                    "subject": draft.subject,
+                    "message_id": result.get('message_id'),
+                    "request_id": request_id,
+                    "provider": "resend"
+                },
+                ip_address=None # Could extract from request if available
+            )
+            # Commit the log
+            await db.commit()
+            
+        return EmailApprovalResult(
+            success=True,
+            message="Email sent successfully via Resend",
+            email_sent=True,
+            message_id=result.get('message_id'),
+            thread_id=None # Resend doesn't typically provide thread_id
         )
 
     except Exception as e:
@@ -645,7 +713,8 @@ class SendMemoEmailRequest(BaseModel):
 @router.post("/supervisor/send-email")
 async def send_project_memo_email(
     request: SendMemoEmailRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
 ):
     """
     Send a project investment memo via email using the supervisor agent's email tool.
@@ -705,8 +774,8 @@ async def send_project_memo_email(
 
             if approval_request:
                 # Send the email directly
-                gmail_service = get_gmail_service()
-                send_result = gmail_service.send_message(
+                resend_service = get_resend_service()
+                send_result = resend_service.send_message(
                     to=approval_request.draft.to,
                     subject=approval_request.draft.subject,
                     body=approval_request.draft.body,
@@ -718,12 +787,28 @@ async def send_project_memo_email(
 
                 logger.info(f"Project memo email sent successfully to {request.to_email}")
 
+                # Audit Log
+                await audit_service.log_activity(
+                    db=db,
+                    user_id=current_user.id,
+                    action="send_project_memo_email",
+                    resource_type="email",
+                    resource_id=None,
+                    details={
+                        "to": [request.to_email],
+                        "subject": request.subject,
+                        "project_id": request.project_id,
+                        "project_name": request.project_name
+                    }
+                )
+                await db.commit()
+
                 return {
                     "success": True,
                     "message": f"Investment memo sent successfully to {request.to_email}",
                     "email_sent": True,
                     "message_id": send_result.get('message_id'),
-                    "thread_id": send_result.get('thread_id')
+                    "thread_id": None
                 }
 
         # Fallback response

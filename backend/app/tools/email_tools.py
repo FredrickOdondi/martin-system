@@ -206,10 +206,21 @@ async def send_email(
         if bcc and not validate_email_addresses(bcc):
             return {"status": "error", "error": "Invalid BCC email address"}
 
-        # Convert to lists if single strings
+        # Convert to lists if single strings or None
         to_list = [to] if isinstance(to, str) else to
         cc_list = [cc] if isinstance(cc, str) and cc else (cc or None)
         bcc_list = [bcc] if isinstance(bcc, str) and bcc else (bcc or None)
+
+        # Handle flexible attachments input (string, list, or None)
+        attachments_list = []
+        if attachments:
+            if isinstance(attachments, str):
+                attachments_list = [attachments] if attachments.strip() else []
+            elif isinstance(attachments, list):
+                attachments_list = attachments
+        
+        # Override with sanitized list
+        attachments = attachments_list
 
         # Get approval service
         approval_service = get_email_approval_service()
@@ -235,7 +246,16 @@ async def send_email(
             "draft_id": approval_request.draft.draft_id,
             "to": to_list,
             "subject": subject,
-            "message": "Email draft created. Please review and approve before sending.",
+            "message": f"Email draft created (Request ID: {approval_request.request_id}). Please review and approve before sending.",
+            "draft": {
+                "to": to_list,
+                "cc": cc_list,
+                "bcc": bcc_list,
+                "subject": subject,
+                "body": message,
+                "html_body": html_body,
+                "attachments": attachments
+            },
             "preview": {
                 "to": ", ".join(to_list),
                 "cc": ", ".join(cc_list) if cc_list else None,
@@ -244,6 +264,12 @@ async def send_email(
             }
         }
 
+    except FileNotFoundError:
+        logger.error("Gmail credentials file not found")
+        return {
+            "status": "error",
+            "error": "CONFIGURATION ERROR: Gmail credentials file not found. Please contact the administrator. DO NOT RETRY."
+        }
     except HttpError as error:
         logger.error(f"Gmail API error: {error}")
         return {
@@ -363,6 +389,12 @@ async def create_email_draft(
             "message_id": result['message_id']
         }
 
+    except FileNotFoundError:
+        logger.error("Gmail credentials file not found")
+        return {
+            "status": "error",
+            "error": "CONFIGURATION ERROR: Gmail credentials file not found. Please contact the administrator. DO NOT RETRY."
+        }
     except HttpError as error:
         logger.error(f"Gmail API error: {error}")
         return {
@@ -435,6 +467,12 @@ async def search_emails(
             "emails": emails
         }
 
+    except FileNotFoundError:
+        logger.error("Gmail credentials file not found")
+        return {
+            "status": "error",
+            "error": "CONFIGURATION ERROR: Gmail credentials file not found. Please contact the administrator. DO NOT RETRY."
+        }
     except HttpError as error:
         logger.error(f"Gmail API error: {error}")
         return {
@@ -481,6 +519,12 @@ async def get_email(
             "email": formatted
         }
 
+    except FileNotFoundError:
+        logger.error("Gmail credentials file not found")
+        return {
+            "status": "error",
+            "error": "CONFIGURATION ERROR: Gmail credentials file not found. Please contact the administrator. DO NOT RETRY."
+        }
     except HttpError as error:
         logger.error(f"Gmail API error: {error}")
         return {
@@ -553,6 +597,12 @@ async def list_recent_emails(
             "emails": emails
         }
 
+    except FileNotFoundError:
+        logger.error("Gmail credentials file not found")
+        return {
+            "status": "error",
+            "error": "CONFIGURATION ERROR: Gmail credentials file not found. Please contact the administrator. DO NOT RETRY."
+        }
     except HttpError as error:
         logger.error(f"Gmail API error: {error}")
         return {
@@ -617,7 +667,7 @@ async def get_email_thread(thread_id: str) -> Dict[str, Any]:
 EMAIL_TOOLS = [
     {
         "name": "send_email",
-        "description": "Send an email via Gmail with support for HTML, CC/BCC, and file attachments",
+        "description": "Send an email via Resend (triggers approval workflow). Supports HTML, CC/BCC, and attachments.",
         "parameters": {
             "to": "Recipient email address(es) - string or list",
             "subject": "Email subject line",
@@ -628,66 +678,5 @@ EMAIL_TOOLS = [
             "attachments": "Optional list of file paths to attach"
         },
         "coroutine": send_email
-    },
-    {
-        "name": "send_email_from_template",
-        "description": "Send an email using a predefined HTML template with variable substitution",
-        "parameters": {
-            "template_name": "Name of the template file (without .html extension)",
-            "to": "Recipient email address(es)",
-            "subject": "Email subject line",
-            "variables": "Dictionary of variables to substitute in template",
-            "cc": "Optional CC recipient(s)",
-            "bcc": "Optional BCC recipient(s)"
-        },
-        "coroutine": send_email_from_template
-    },
-    {
-        "name": "create_email_draft",
-        "description": "Create an email draft in Gmail without sending it",
-        "parameters": {
-            "to": "Recipient email address(es)",
-            "subject": "Email subject line",
-            "message": "Plain text email body",
-            "html_body": "Optional HTML formatted email body"
-        },
-        "coroutine": create_email_draft
-    },
-    {
-        "name": "search_emails",
-        "description": "Search emails using Gmail query syntax (e.g., 'from:user@example.com is:unread')",
-        "parameters": {
-            "query": "Gmail search query string",
-            "max_results": "Maximum number of results to return (default: 10)",
-            "include_body": "Whether to include full email body content (default: False)"
-        },
-        "coroutine": search_emails
-    },
-    {
-        "name": "get_email",
-        "description": "Retrieve a specific email by its message ID",
-        "parameters": {
-            "message_id": "Gmail message ID",
-            "format": "Message format - 'minimal', 'full', or 'metadata' (default: 'full')"
-        },
-        "coroutine": get_email
-    },
-    {
-        "name": "list_recent_emails",
-        "description": "List recent emails with optional filters (all/unread/starred/inbox)",
-        "parameters": {
-            "max_results": "Maximum number of emails to return (default: 10)",
-            "filter": "Filter type - 'all', 'unread', 'starred', or 'inbox' (default: 'all')",
-            "include_body": "Whether to include full email body content (default: False)"
-        },
-        "coroutine": list_recent_emails
-    },
-    {
-        "name": "get_email_thread",
-        "description": "Retrieve an entire email conversation thread with all messages",
-        "parameters": {
-            "thread_id": "Gmail thread ID"
-        },
-        "coroutine": get_email_thread
     }
 ]

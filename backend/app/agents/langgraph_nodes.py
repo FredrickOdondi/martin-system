@@ -7,6 +7,7 @@ Each function represents a node in the agent graph.
 from typing import Dict, List
 from loguru import logger
 from langchain_core.messages import HumanMessage, AIMessage
+from langgraph.errors import GraphInterrupt
 
 from app.agents.langgraph_state import AgentState
 from app.agents.langgraph_base_agent import LangGraphBaseAgent
@@ -168,6 +169,9 @@ def create_twg_agent_node(agent_id: str, agent: LangGraphBaseAgent):
             response = _agent.chat(query)
             state["agent_responses"][_agent_id] = response
             logger.info(f"[{_agent_id.upper()}] Response generated")
+        except GraphInterrupt:
+            # Re-raise GraphInterrupt so it bubbles up to Supervisor and API
+            raise
         except Exception as e:
             logger.error(f"[{_agent_id.upper()}] Error: {e}")
             state["agent_responses"][_agent_id] = f"Error: {str(e)}"
@@ -183,7 +187,7 @@ def create_twg_agent_node(agent_id: str, agent: LangGraphBaseAgent):
 
 def synthesis_node(state: AgentState, supervisor_agent: LangGraphBaseAgent) -> AgentState:
     """
-    Synthesize responses from multiple TWG agents into a coherent answer.
+    Synthesize responses from multiple TWG agents into ONE unified professional memo.
     """
     query = state["query"]
     responses = state["agent_responses"]
@@ -192,73 +196,66 @@ def synthesis_node(state: AgentState, supervisor_agent: LangGraphBaseAgent) -> A
         state["final_response"] = "I couldn't get responses from the relevant agents."
         return state
 
-    logger.info(f"[SYNTHESIS] Combining {len(responses)} agent responses")
+    logger.info(f"[SYNTHESIS] Synthesizing {len(responses)} TWG responses into unified memo")
 
-    # Build header showing which agents were consulted
-    agent_list = ", ".join([agent_id.upper() for agent_id in responses.keys()])
-    output = f"[Consulted {len(responses)} TWGs: {agent_list}]\n\n"
-    output += "=" * 70 + "\n"
-
-    # Display each agent's response clearly
-    for i, (agent_id, response) in enumerate(responses.items(), 1):
-        output += f"\n📋 {agent_id.upper()} TWG Response:\n"
-        output += "-" * 70 + "\n"
-        output += response + "\n"
-
-        if i < len(responses):  # Not the last one
-            output += "\n" + "=" * 70 + "\n"
-
-    output += "\n" + "=" * 70 + "\n"
-
-    # Build synthesis prompt for the supervisor
-    synthesis_prompt = f"""Original Question: {query}
-
-I have consulted {len(responses)} TWG agents and received these responses:
-
-"""
+    # Truncate responses AGGRESSIVELY to prevent 413 errors
+    truncated_responses = {}
     for agent_id, response in responses.items():
-        synthesis_prompt += f"\n{agent_id.upper()} TWG:\n{response}\n"
+        # Limit to 300 characters (~75 tokens) - very aggressive
+        if len(response) > 300:
+            truncated_responses[agent_id] = response[:300] + "..."
+        else:
+            truncated_responses[agent_id] = response
 
-    synthesis_prompt += "\n\nAs the Supervisor, provide a brief (2-3 sentence) strategic synthesis that highlights how these TWG perspectives complement each other and what the key takeaways are."
+    # Build synthesis prompt for unified memo - keep it SHORT to avoid token limits
+    agent_list = ", ".join([agent_id.upper() for agent_id in responses.keys()])
 
-    # Get supervisor's synthesis
-    synthesis = supervisor_agent.chat(synthesis_prompt)
+    synthesis_prompt = f"""Question: {query}
 
-    # Add synthesis at the end
-    output += f"\n🎯 SUPERVISOR'S SYNTHESIS:\n"
-    output += "-" * 70 + "\n"
-    output += synthesis + "\n"
+TWG Inputs ({agent_list}):
+"""
+    for agent_id, response in truncated_responses.items():
+        synthesis_prompt += f"\n{agent_id}: {response}\n"
+
+    synthesis_prompt += f"""
+Write ONE professional memo (max 500 words, NO emojis) synthesizing these TWG inputs.
+Format: Executive Summary, Strategic Rationale, Financial Overview, Regional Impact, Recommendation."""
+
+    # Get supervisor's unified memo
+    try:
+        unified_memo = supervisor_agent.chat(synthesis_prompt)
+        output = unified_memo
+    except Exception as e:
+        logger.error(f"[SYNTHESIS] Synthesis generation failed: {e}")
+        output = f"Error generating unified memo: {str(e)}\n\nPlease review the request and try again."
 
     # --- CONFLICT DETECTION LAYER ---
-    # In a production system, this would be a separate node possibly running in parallel
+    # Check for conflicts between TWG responses
     if len(responses) > 1:
         logger.info("[SYNTHESIS] Running Conflict Detection Layer...")
         conflict_prompt = f"""
-        Review the responses above for any direct contradictions, schedule clashes, or resource conflicts.
-        
-        Responses:
-        {chr(10).join([f"{k}: {v}" for k, v in responses.items()])}
-        
+        Review these TWG inputs for any direct contradictions, schedule clashes, or resource conflicts:
+
+        {chr(10).join([f"{k}: {v[:500]}" for k, v in truncated_responses.items()])}
+
         If a significant conflict exists, respond with "CONFLICT DETECTED" and a brief explanation.
         Otherwise, respond "NO CONFLICT".
         """
-        
+
         try:
-            # We use the same agent for detection for now
             conflict_check = supervisor_agent.chat(conflict_prompt)
-            
+
             if "CONFLICT DETECTED" in conflict_check.upper():
-                output += f"\n\n⚠️ CONFLICT PROTOCOL ACTIVATED:\n"
-                output += conflict_check
+                output += f"\n\nCONFLICT ALERT:\n{conflict_check}"
                 logger.warning(f"Conflict Detected: {conflict_check}")
                 # Future: await save_conflict_to_db(...)
         except Exception as e:
             logger.error(f"Conflict detection failed: {e}")
 
-    state["synthesized_response"] = synthesis
+    state["synthesized_response"] = output
     state["final_response"] = output
 
-    logger.info(f"[SYNTHESIS] Complete")
+    logger.info(f"[SYNTHESIS] Complete - Generated unified memo")
 
     return state
 

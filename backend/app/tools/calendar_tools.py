@@ -3,9 +3,9 @@ from datetime import datetime, timedelta
 import json
 from app.services.calendar_service import calendar_service
 
-def get_schedule(days: int = 7) -> str:
+async def get_schedule(days: int = 7) -> str:
     """
-    Fetch the calendar schedule for the next N days.
+    Fetch the calendar schedule for the next N days from the internal database.
     
     Args:
         days: Number of days to look ahead (default: 7)
@@ -13,47 +13,44 @@ def get_schedule(days: int = 7) -> str:
     Returns:
         JSON string of calendar events
     """
+    from app.core.database import AsyncSessionLocal
+    from app.models.models import Meeting
+    from sqlalchemy import select
+    
     try:
         # Calculate time range
         now = datetime.utcnow()
-        time_min = now.isoformat() + 'Z'  # 'Z' indicates UTC time
-        time_max = (now + timedelta(days=days)).isoformat() + 'Z'
+        end_date = now + timedelta(days=days)
         
-        if not calendar_service.service:
-            return json.dumps({"error": "Calendar service not initialized. Please authenticate on the backend."})
-
-        events_result = calendar_service.service.events().list(
-            calendarId='primary', 
-            timeMin=time_min,
-            timeMax=time_max,
-            maxResults=50, 
-            singleEvents=True,
-            orderBy='startTime'
-        ).execute()
-        
-        events = events_result.get('items', [])
-
-        if not events:
-            return json.dumps({"message": "No upcoming events found."})
-
-        formatted_events = []
-        for event in events:
-            start = event['start'].get('dateTime', event['start'].get('date'))
-            end = event['end'].get('dateTime', event['end'].get('date'))
+        async with AsyncSessionLocal() as session:
+            query = select(Meeting).where(
+                Meeting.scheduled_at >= now,
+                Meeting.scheduled_at <= end_date
+            ).order_by(Meeting.scheduled_at)
             
-            formatted_events.append({
-                "summary": event.get('summary', 'No Title'),
-                "start": start,
-                "end": end,
-                "link": event.get('htmlLink'),
-                "meet_link": event.get('hangoutLink'),
-                "description": event.get('description', '')
-            })
-
-        return json.dumps(formatted_events, indent=2)
+            result = await session.execute(query)
+            meetings = result.scalars().all()
+            
+            if not meetings:
+                return json.dumps({"message": "No upcoming meetings found in the database."})
+            
+            formatted_events = []
+            for meeting in meetings:
+                formatted_events.append({
+                    "id": str(meeting.id),
+                    "summary": meeting.title,
+                    "start": meeting.scheduled_at.isoformat(),
+                    "end": (meeting.scheduled_at + timedelta(minutes=meeting.duration_minutes)).isoformat(),
+                    "status": meeting.status.value if hasattr(meeting.status, 'value') else meeting.status,
+                    "meet_link": meeting.video_link,
+                    "location": meeting.location,
+                    "twg_id": str(meeting.twg_id)
+                })
+            
+            return json.dumps(formatted_events, indent=2)
 
     except Exception as e:
-        return json.dumps({"error": f"Failed to fetch schedule: {str(e)}"})
+        return json.dumps({"error": f"Failed to fetch schedule from DB: {str(e)}"})
 
 # Tool definition for LLM
 GET_SCHEDULE_TOOL_DEF = {

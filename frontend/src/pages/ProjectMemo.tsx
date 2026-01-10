@@ -78,24 +78,11 @@ const ProjectMemo: React.FC = () => {
           'Authorization': `Bearer ${localStorage.getItem('token')}`,
         },
         body: JSON.stringify({
-          message: `Generate a comprehensive investment memo for the project: ${projectData.name}.
+          message: `Write a 500-word investment memo for ${projectData.name} (ID: ${projectData.id}, Sector: ${projectData.pillar}, Investment: ${projectData.fundingAsk}, Country: ${projectData.leadCountry}).
 
-Project Details:
-- Project ID: ${projectData.id}
-- Sector: ${projectData.pillar}
-- Funding Required: ${projectData.fundingAsk}
-- Lead Country: ${projectData.leadCountry}
+Include: Executive Summary, Strategic Rationale (3-4 bullets), Financial Overview, Regional Impact (2-3 bullets), Risk Considerations (2-3 risks), Recommendation.
 
-Please include:
-1. Executive Summary
-2. Project Overview
-3. Strategic Rationale
-4. Financial Analysis
-5. Risk Assessment
-6. Implementation Timeline
-7. Recommendation
-
-Format the memo professionally with clear sections and bullet points where appropriate.`,
+Use formal business language, clear headings, bullet points. No emojis.`,
           conversation_id: generateUUID(),
         }),
       });

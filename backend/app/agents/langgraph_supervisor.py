@@ -10,6 +10,7 @@ from loguru import logger
 
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.errors import GraphInterrupt
 from langchain_core.messages import HumanMessage, AIMessage
 
 from app.agents.langgraph_base_agent import LangGraphBaseAgent
@@ -287,6 +288,20 @@ class LangGraphSupervisor:
         try:
             result = self.compiled_graph.invoke(initial_state, config)
 
+            # CHECK FOR INTERRUPTS (same logic as LangGraphBaseAgent)
+            # The Main Graph's invoke() might not re-raise exceptions from nodes
+            snapshot = self.compiled_graph.get_state(config)
+            if snapshot.tasks:
+                for task in snapshot.tasks:
+                    if hasattr(task, 'interrupts') and task.interrupts:
+                        for inter in task.interrupts:
+                            # inter.value contains the actual payload
+                            interrupt_value = inter.value if hasattr(inter, 'value') else inter
+                            logger.info(f"[SUPERVISOR] Detected interrupt in state: {interrupt_value}")
+                            # Import here to avoid scope issues
+                            from langgraph.errors import GraphInterrupt as GI
+                            raise GI(interrupt_value)
+
             final_response = result.get("final_response", "")
 
             logger.info(f"[SUPERVISOR:{thread_id}] Response generated")
@@ -294,6 +309,10 @@ class LangGraphSupervisor:
             return final_response
 
         except Exception as e:
+            # Check for GraphInterrupt by name to avoid import/scope issues
+            if type(e).__name__ == "GraphInterrupt":
+                raise e
+            
             logger.error(f"[SUPERVISOR:{thread_id}] Error: {e}")
             return f"I apologize, but I encountered an error: {str(e)}"
 

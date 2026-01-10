@@ -16,6 +16,7 @@ import TwgAgent from './pages/workspace/TwgAgent'
 import ActionTracker from './pages/actions/ActionTracker'
 import KnowledgeBase from './pages/knowledge/KnowledgeBase'
 import DealPipeline from './pages/DealPipeline'
+import NewProject from './pages/NewProject'
 import ProjectDetails from './pages/ProjectDetails'
 import ProjectMemo from './pages/ProjectMemo'
 import UserProfile from './pages/profile/UserProfile'
@@ -26,6 +27,7 @@ import LiveMeeting from './pages/schedule/LiveMeeting'
 import DocumentLibrary from './pages/documents/DocumentLibrary'
 import NotificationCenter from './pages/notifications/NotificationCenter'
 import TeamManagement from './pages/admin/TeamManagement'
+import ControlTower from './pages/admin/ControlTower'
 import AuditLogs from './pages/admin/AuditLogs'
 import ProtectedRoute from './components/ProtectedRoute'
 
@@ -54,7 +56,10 @@ function App() {
                     dispatch(hydrateUser(userData))
                 } catch (err) {
                     console.error('Failed to hydrate user session', err)
+                    // Clear invalid token
+                    localStorage.removeItem('token')
                     dispatch(setError('Session expired. Please log in again.'))
+                    dispatch(setInitialCheckDone(true))
                 }
             } else {
                 dispatch(setInitialCheckDone(true))
@@ -113,6 +118,7 @@ function App() {
                 <Route path="/meetings/:id/live" element={<LiveMeeting />} />
                 <Route path="/knowledge-base" element={<KnowledgeBase />} />
                 <Route path="/deal-pipeline" element={<DealPipeline />} />
+                <Route path="/deal-pipeline/new" element={<NewProject />} />
                 <Route path="/deal-pipeline/:projectId" element={<ProjectDetails />} />
                 <Route path="/deal-pipeline/:projectId/memo" element={<ProjectMemo />} />
                 <Route path="/actions" element={<ActionTracker />} />
@@ -127,6 +133,11 @@ function App() {
                 <Route path="/admin/team" element={
                     <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
                         <TeamManagement />
+                    </ProtectedRoute>
+                } />
+                <Route path="/admin/control-tower" element={
+                    <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                        <ControlTower />
                     </ProtectedRoute>
                 } />
                 <Route path="/admin/logs" element={
