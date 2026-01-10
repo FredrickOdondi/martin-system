@@ -70,10 +70,13 @@ async def create_meeting(
                      generated_video_link = calendar_event.get('hangoutLink')
                 else:
                      logger.warning(f"CREATE_MEETING: Event created but NO link found")
+                else:
+                     logger.warning(f"CREATE_MEETING: Event created but NO link found")
             except Exception as e:
+                # Log detailed error but DO NOT fail the meeting creation
                 logger.error(f"CREATE_MEETING: Failed to generate Meet link: {e}")
-                import traceback
-                traceback.print_exc()
+                # If it's an HttpError, it might be the 'Invalid conference type value'
+                # causing issues with service accounts. We proceed without video link.
 
         # Create meeting with video_link
         meeting_data = meeting_in.model_dump()
@@ -83,16 +86,22 @@ async def create_meeting(
         await db.commit()
         
         # Eagerly load relationships to avoid MissingGreenlet during serialization
+        # Eagerly load relationships to avoid MissingGreenlet during serialization
         result = await db.execute(
             select(Meeting)
-            .options(selectinload(Meeting.participants))
+            .options(
+                selectinload(Meeting.participants),
+                selectinload(Meeting.documents), # Added to satisfy MeetingRead schema
+                selectinload(Meeting.twg)        # Good practice to include parent
+            )
             .where(Meeting.id == db_meeting.id)
         )
         db_meeting = result.scalar_one()
         return db_meeting
     except Exception as e:
-        with open("debug_error.log", "w") as f:
-            f.write(traceback.format_exc())
+        logger.error(f"CREATE_MEETING FAILED: {str(e)}") # Improved logging
+        import traceback
+        traceback.print_exc()
         raise e
 
 @router.get("/", response_model=List[MeetingRead])
