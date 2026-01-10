@@ -172,18 +172,17 @@ class LangGraphBaseAgent:
                 )
                 
                 if results:
-                    # Format context with strict truncation
-                    # Assuming 4 chars per token, 2500 chars is ~625 tokens per doc
-                    # Total context ~1250 tokens, leaving plenty of room
+                    # Format context with EXTREME truncation to prevent token errors
+                    # Limit to 500 chars per doc (~125 tokens) × 2 = 250 tokens total
                     context_parts = []
                     for r in results:
                         file_name = r['metadata'].get('file_name', 'Unknown')
                         text = r['metadata'].get('text', '') or ''
-                        # Truncate text to 2500 chars to avoid 413 errors
-                        truncated_text = text[:2500] + "..." if len(text) > 2500 else text
-                        context_parts.append(f"[Document: {file_name}]\n{truncated_text}")
+                        # Truncate text to 500 chars to avoid token limit errors
+                        truncated_text = text[:500] + "..." if len(text) > 500 else text
+                        context_parts.append(f"[{file_name}]\n{truncated_text}")
 
-                    context_text = "\n\n".join(context_parts)
+                    context_text = "\n".join(context_parts)
                     
                     # Store in state
                     state['context'] = {"retrieved_docs": context_text, "source": namespace}

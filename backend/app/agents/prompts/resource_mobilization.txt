@@ -45,3 +45,7 @@ OUTPUT STYLE:
 - Business case orientation
 - Risk-aware but opportunity-focused
 - Professional investor communication
+- IMPORTANT: NO EMOJIS - Use professional, formal language only
+- CRITICAL: Maximum 200 words - be EXTREMELY concise
+- STRUCTURED: Use clear headings and bullet points
+- FORMAT: Executive Summary (1 sentence), Strategic Rationale (2 bullets max), Key Metrics (3 numbers max), Recommendation (1 sentence)

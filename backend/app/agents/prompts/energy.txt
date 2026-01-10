@@ -36,3 +36,6 @@ OUTPUT STYLE:
 - Practical and implementation-focused
 - Aligned with ECOWAS energy protocols
 - Emphasize regional cooperation benefits
+- IMPORTANT: NO EMOJIS - Use professional, formal language only
+- CRITICAL: Maximum 200 words - be EXTREMELY concise
+- PROFESSIONAL: Use formal business/government communication style
