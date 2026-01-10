@@ -528,7 +528,6 @@ async def force_reconciliation(
         select(Meeting)
         .options(selectinload(Meeting.participants), selectinload(Meeting.twg))
         .where(Meeting.status == MeetingStatus.SCHEDULED)
-        .where(Meeting.scheduled_at >= datetime.datetime.utcnow())
     )
     meetings = upcoming_meetings.scalars().all()
     
