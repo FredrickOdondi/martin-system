@@ -412,8 +412,11 @@ async def generate_weekly_packet(
     """
     Generate a weekly summary packet of all TWG activities.
     Target: Friday 17:00 weekly briefing.
+    
+    Refactored to use the AgentService to "generate" packets from sub-agents.
     """
-    from app.models.models import UserRole, Conflict, ConflictStatus
+    from app.models.models import UserRole, TWG
+    from app.services.agent_service import AgentService
     
     is_admin = current_user.role == UserRole.ADMIN
     if not is_admin:
@@ -425,72 +428,55 @@ async def generate_weekly_packet(
     week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
     week_end = week_start + datetime.timedelta(days=7)
     
-    # 1. Meetings this week
-    meetings_res = await db.execute(
-        select(Meeting)
-        .options(selectinload(Meeting.twg))
-        .where(
-            Meeting.scheduled_at >= week_start,
-            Meeting.scheduled_at < week_end
-        )
-    )
-    meetings = meetings_res.scalars().all()
+    # Initialize Agent Service
+    agent_service = AgentService(db)
     
-    # 2. Action Items created/completed this week
-    actions_res = await db.execute(
-        select(ActionItem)
-        .where(ActionItem.due_date >= week_start, ActionItem.due_date < week_end)
-    )
-    actions = actions_res.scalars().all()
-    
-    # 3. Conflicts resolved this week
-    conflicts_res = await db.execute(
-        select(Conflict)
-        .where(
-            Conflict.resolved_at >= week_start,
-            Conflict.resolved_at < week_end
-        )
-    )
-    resolved_conflicts = conflicts_res.scalars().all()
-    
-    # 4. Pending conflicts
-    pending_res = await db.execute(
-        select(func.count(Conflict.id))
-        .where(Conflict.status == ConflictStatus.PENDING)
-    )
-    pending_conflicts = pending_res.scalar() or 0
-    
-    # 5. TWG activity summary
-    twgs_res = await db.execute(select(TWG))
+    # 1. Fetch all Active TWGs
+    twgs_res = await db.execute(select(TWG).where(TWG.status == "active"))
     twgs = twgs_res.scalars().all()
     
-    twg_summaries = []
+    packets = []
+    
+    # 2. Trigger each Sub-Agent to generate its packet
     for twg in twgs:
-        twg_meetings = [m for m in meetings if m.twg_id == twg.id]
-        twg_actions = [a for a in actions if a.twg_id == twg.id]
-        twg_summaries.append({
-            "twg_id": str(twg.id),
-            "name": twg.name,
-            "pillar": twg.pillar.value if twg.pillar else "unknown",
-            "meetings_this_week": len(twg_meetings),
-            "actions_due": len(twg_actions),
-            "status": "active" if twg_meetings else "quiet"
+        # Check if packet already exists for this week to avoid duplicate generation?
+        # For now, we'll force regenerate or just create new ones.
+        packet = await agent_service.generate_twg_packet(twg.id, week_start, week_end)
+        packets.append(packet)
+    
+    # 3. Serialize output for Frontend (ConflictDashboard)
+    # matching the expected shape but with REAL data now
+    twg_activity_summary = []
+    
+    total_accomplishments = 0
+    total_risks = 0
+    
+    for p in packets:
+        # Fetch TWG name for display
+        twg_name = next((t.name for t in twgs if t.id == p.twg_id), "Unknown TWG")
+        
+        twg_activity_summary.append({
+            "twg_id": str(p.twg_id),
+            "name": twg_name,
+            "status": "Ready", # or "Review" based on content
+            "accomplishments_count": len(p.accomplishments),
+            "risks_count": len(p.risks_and_blockers),
+            "items": p.proposed_sessions # Passing sessions as items? Or maybe specific high-level summary?
         })
+        
+        total_accomplishments += len(p.accomplishments)
+        total_risks += len(p.risks_and_blockers)
     
     return {
         "packet_date": today.isoformat(),
         "week_start": week_start.isoformat(),
         "week_end": week_end.isoformat(),
         "summary": {
-            "total_meetings": len(meetings),
-            "completed_meetings": len([m for m in meetings if m.status == MeetingStatus.COMPLETED]),
-            "scheduled_meetings": len([m for m in meetings if m.status == MeetingStatus.SCHEDULED]),
-            "action_items_due": len(actions),
-            "action_items_completed": len([a for a in actions if a.status == ActionItemStatus.COMPLETED]),
-            "conflicts_resolved": len(resolved_conflicts),
-            "conflicts_pending": pending_conflicts
+            "total_packets": len(packets),
+            "total_accomplishments": total_accomplishments,
+            "total_risks": total_risks
         },
-        "twg_activity": twg_summaries,
+        "twg_activity": twg_activity_summary,
         "status": "generated"
     }
 

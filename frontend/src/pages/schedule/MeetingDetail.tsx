@@ -611,7 +611,7 @@ export default function MeetingDetail() {
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                                     </svg>
                                 </button>
-                                <span className="text-sm text-slate-500">Home / Infrastructure TWG / Meeting #{meetingId?.slice(0, 6)}</span>
+                                <span className="text-sm text-slate-500">Home / {meeting?.twg?.name || 'TWG'} / Meeting #{meetingId?.slice(0, 6)}</span>
                             </div>
                             <div className="flex items-center gap-4">
                                 <h1 className="text-3xl font-display font-black text-slate-900 dark:text-white">{meeting?.title}</h1>
