@@ -70,6 +70,7 @@ class Settings(BaseSettings):
 
     # Groq
     GROQ_API_KEY: Optional[str] = None
+    GROQ_MODEL: str = "llama-3.3-70b-versatile"
 
     # OpenAI
     OPENAI_API_KEY: Optional[str] = None

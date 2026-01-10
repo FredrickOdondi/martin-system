@@ -139,8 +139,9 @@ async def chat_with_martin(
         # Get the supervisor agent
         supervisor = get_supervisor()
 
-        # Chat with the supervisor using tools
-        response_text = await supervisor.chat_with_tools(chat_in.message)
+        # Chat with the supervisor using tools (Pass TWG Context for strict RBAC)
+        twg_context = str(chat_in.twg_id) if chat_in.twg_id else None
+        response_text = await supervisor.chat_with_tools(chat_in.message, twg_id=twg_context)
 
         return {
             "response": response_text,

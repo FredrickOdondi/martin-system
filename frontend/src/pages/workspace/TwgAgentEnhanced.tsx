@@ -55,11 +55,9 @@ export default function TwgAgentEnhanced() {
     const [pendingEmailApproval, setPendingEmailApproval] = useState<EmailApprovalRequest | null>(null);
     const [showApprovalModal, setShowApprovalModal] = useState(false);
 
-    // Sidebar state
-    const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-
     // Settings modal state
     const [showSettingsModal, setShowSettingsModal] = useState(false);
+
 
     // Context panel state
     const [showContextPanel, setShowContextPanel] = useState(true);
@@ -448,75 +446,11 @@ export default function TwgAgentEnhanced() {
 
             {/* Main Content */}
             <main className="flex-1 flex overflow-hidden">
-                {/* Sidebar - Agent List */}
-                <aside className={`${isSidebarCollapsed ? 'w-0' : 'w-80'} bg-white dark:bg-[#1a202c] border-r border-[#e7ebf3] dark:border-[#2d3748] flex flex-col transition-all duration-300 overflow-hidden hidden lg:flex`}>
-                    <div className="p-6 border-b border-[#e7ebf3] dark:border-[#2d3748]">
-                        <div className="flex items-center justify-between mb-2">
-                            <div className="text-xs font-bold text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider">Active Workspace</div>
-                            <button
-                                onClick={() => setIsSidebarCollapsed(true)}
-                                className="p-1 hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded transition-colors"
-                                title="Collapse sidebar"
-                            >
-                                <span className="material-symbols-outlined text-[18px] text-[#6b7280]">chevron_left</span>
-                            </button>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <div className="size-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-[#1152d4] flex items-center justify-center">
-                                <span className="material-symbols-outlined">bolt</span>
-                            </div>
-                            <div>
-                                <h3 className="font-bold text-[#0d121b] dark:text-white leading-tight">Energy TWG</h3>
-                                <p className="text-xs text-[#4c669a] dark:text-[#a0aec0]">Member States: 15</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="flex-1 overflow-y-auto p-4 space-y-6">
-                        <div>
-                            <h4 className="px-2 text-xs font-bold text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider mb-3">AI Agents</h4>
-                            <div className="space-y-1">
-                                <button className="w-full flex items-center gap-3 px-3 py-2.5 bg-[#1152d4]/10 text-[#1152d4] dark:text-blue-400 rounded-lg transition-colors">
-                                    <div className="relative">
-                                        <span className="material-symbols-outlined">smart_toy</span>
-                                        <span className="absolute -bottom-0.5 -right-0.5 size-2.5 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
-                                    </div>
-                                    <div className="text-left flex-1">
-                                        <div className="font-bold text-sm">Secretariat Assistant</div>
-                                        <div className="text-[11px] opacity-80">Main Coordinator</div>
-                                    </div>
-                                </button>
-
-                                {/* TWG Agents - shortened for brevity */}
-                                <button className="w-full flex items-center gap-3 px-3 py-2.5 text-[#4c669a] dark:text-[#a0aec0] hover:bg-gray-50 dark:hover:bg-[#2d3748] rounded-lg transition-colors">
-                                    <div className="relative size-8 rounded-full bg-gradient-to-br from-yellow-500 to-orange-600 flex items-center justify-center flex-shrink-0">
-                                        <span className="material-symbols-outlined text-white text-[16px]">bolt</span>
-                                        <span className="absolute -bottom-0.5 -right-0.5 size-2.5 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
-                                    </div>
-                                    <div className="text-left flex-1">
-                                        <div className="font-medium text-sm text-[#0d121b] dark:text-white">Energy Agent</div>
-                                        <div className="text-[11px] opacity-70">@EnergyAgent</div>
-                                    </div>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </aside>
-
                 {/* Chat Area */}
                 <div className="flex-1 flex flex-col bg-[#f6f6f8] dark:bg-[#0d121b]">
                     {/* Agent Header */}
                     <div className="bg-white dark:bg-[#1a202c] border-b border-[#e7ebf3] dark:border-[#2d3748] px-6 py-4 flex items-center justify-between">
                         <div className="flex items-center gap-3">
-                            {isSidebarCollapsed && (
-                                <button
-                                    onClick={() => setIsSidebarCollapsed(false)}
-                                    className="p-2 hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded-lg transition-colors"
-                                    title="Expand sidebar"
-                                >
-                                    <span className="material-symbols-outlined text-[#6b7280]">menu</span>
-                                </button>
-                            )}
                             <div className="relative">
                                 <div className="size-10 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white">
                                     <span className="material-symbols-outlined">smart_toy</span>
@@ -534,11 +468,10 @@ export default function TwgAgentEnhanced() {
                         <div className="flex items-center gap-2">
                             <button
                                 onClick={() => setShowContextPanel(!showContextPanel)}
-                                className={`p-2 rounded-lg transition-colors ${
-                                    showContextPanel
-                                        ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                        : 'text-[#4c669a] hover:bg-gray-100 dark:hover:bg-[#2d3748]'
-                                }`}
+                                className={`p-2 rounded-lg transition-colors ${showContextPanel
+                                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                    : 'text-[#4c669a] hover:bg-gray-100 dark:hover:bg-[#2d3748]'
+                                    }`}
                                 title="Toggle workspace context"
                             >
                                 <span className="material-symbols-outlined">view_sidebar</span>
@@ -580,21 +513,61 @@ export default function TwgAgentEnhanced() {
                     {/* Messages */}
                     <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-gradient-to-b from-gray-50/50 to-transparent dark:from-[#0d121b]/30 dark:to-transparent">
                         {messages.length === 0 ? (
-                            <div className="h-full flex items-center justify-center px-4">
-                                <div className="max-w-4xl w-full text-center">
-                                    <div className="size-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-500/10 flex items-center justify-center backdrop-blur-sm">
-                                        <span className="material-symbols-outlined text-blue-600 dark:text-blue-400" style={{ fontSize: '48px' }}>chat_bubble</span>
+                            <div className="h-full flex flex-col items-center justify-center px-4">
+                                <div className="max-w-3xl w-full text-center mb-8">
+                                    <div className="size-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-900/20">
+                                        <span className="material-symbols-outlined text-white" style={{ fontSize: '32px' }}>smart_toy</span>
                                     </div>
-                                    <h3 className="text-2xl font-semibold text-[#0d121b] dark:text-white mb-3">Welcome to ECOWAS Summit Assistant</h3>
-                                    <p className="text-base text-[#6b7280] dark:text-[#9ca3af] max-w-xl mx-auto leading-relaxed mb-6">
-                                        I'm here to help with TWG coordination, document drafting, and summit preparation. What can I assist you with today?
-                                    </p>
-                                    {showContextPanel && (
-                                        <div className="inline-flex items-center gap-2 px-4 py-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm text-blue-700 dark:text-blue-300">
-                                            <span className="material-symbols-outlined text-[18px]">lightbulb</span>
-                                            <span>Tip: Use the context panel on the right to reference meetings, actions, and documents</span>
-                                        </div>
-                                    )}
+                                    <h3 className="text-3xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-purple-600 dark:from-blue-400 dark:to-purple-400 mb-3">
+                                        Hello, Dr. Sow
+                                    </h3>
+                                    <h4 className="text-xl text-slate-600 dark:text-slate-400 font-medium mb-8">
+                                        How can I assist with the TWG today?
+                                    </h4>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-left">
+                                        <button
+                                            onClick={() => {
+                                                setInputMessage("Draft minutes for the last meeting");
+                                                inputRef.current?.focus();
+                                            }}
+                                            className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
+                                        >
+                                            <div className="size-10 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                                                <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">description</span>
+                                            </div>
+                                            <h5 className="font-bold text-slate-900 dark:text-white mb-1">Draft Minutes</h5>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Generate formal minutes from the latest meeting transcript.</p>
+                                        </button>
+
+                                        <button
+                                            onClick={() => {
+                                                setInputMessage("Summarize the last session's key outcomes");
+                                                inputRef.current?.focus();
+                                            }}
+                                            className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
+                                        >
+                                            <div className="size-10 rounded-full bg-purple-50 dark:bg-purple-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                                                <span className="material-symbols-outlined text-purple-600 dark:text-purple-400">summarize</span>
+                                            </div>
+                                            <h5 className="font-bold text-slate-900 dark:text-white mb-1">Summarize Session</h5>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Get a quick overview of decisions and action items.</p>
+                                        </button>
+
+                                        <button
+                                            onClick={() => {
+                                                setInputMessage("Check availability for the next board meeting");
+                                                inputRef.current?.focus();
+                                            }}
+                                            className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-green-400 dark:hover:border-green-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
+                                        >
+                                            <div className="size-10 rounded-full bg-green-50 dark:bg-green-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                                                <span className="material-symbols-outlined text-green-600 dark:text-green-400">calendar_month</span>
+                                            </div>
+                                            <h5 className="font-bold text-slate-900 dark:text-white mb-1">Check Availability</h5>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Find optimal times for cross-functional meetings.</p>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         ) : (
@@ -618,15 +591,33 @@ export default function TwgAgentEnhanced() {
                     {/* Input Area */}
                     <div className="bg-white dark:bg-[#1a202c] border-t border-[#e7ebf3] dark:border-[#2d3748] p-4">
                         <div className="flex gap-2 mb-3 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
-                            <button className="shrink-0 text-xs font-medium px-4 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-700 dark:text-blue-300 transition-all flex items-center gap-1.5 border border-blue-200 dark:border-blue-800 hover:shadow-sm">
+                            <button
+                                onClick={() => {
+                                    setInputMessage("Draft minutes for the last meeting");
+                                    inputRef.current?.focus();
+                                }}
+                                className="shrink-0 text-xs font-medium px-4 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-700 dark:text-blue-300 transition-all flex items-center gap-1.5 border border-blue-200 dark:border-blue-800 hover:shadow-sm"
+                            >
                                 <span className="material-symbols-outlined text-[16px]">description</span>
                                 Draft Minutes
                             </button>
-                            <button className="shrink-0 text-xs font-medium px-4 py-2 rounded-lg bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 text-purple-700 dark:text-purple-300 transition-all flex items-center gap-1.5 border border-purple-200 dark:border-purple-800 hover:shadow-sm">
+                            <button
+                                onClick={() => {
+                                    setInputMessage("Summarize the last session");
+                                    inputRef.current?.focus();
+                                }}
+                                className="shrink-0 text-xs font-medium px-4 py-2 rounded-lg bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 text-purple-700 dark:text-purple-300 transition-all flex items-center gap-1.5 border border-purple-200 dark:border-purple-800 hover:shadow-sm"
+                            >
                                 <span className="material-symbols-outlined text-[16px]">summarize</span>
                                 Summarize Last Session
                             </button>
-                            <button className="shrink-0 text-xs font-medium px-4 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 text-green-700 dark:text-green-300 transition-all flex items-center gap-1.5 border border-green-200 dark:border-green-800 hover:shadow-sm">
+                            <button
+                                onClick={() => {
+                                    setInputMessage("Check availability for the next meeting");
+                                    inputRef.current?.focus();
+                                }}
+                                className="shrink-0 text-xs font-medium px-4 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 text-green-700 dark:text-green-300 transition-all flex items-center gap-1.5 border border-green-200 dark:border-green-800 hover:shadow-sm"
+                            >
                                 <span className="material-symbols-outlined text-[16px]">calendar_month</span>
                                 Check Availability
                             </button>

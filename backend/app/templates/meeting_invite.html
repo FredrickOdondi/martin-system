@@ -82,6 +82,12 @@
             <p><strong>Time:</strong> {{ meeting_time }}</p>
             <p><strong>Location/Link:</strong> {{ location }}</p>
 
+            {% if video_link %}
+            <p style="margin-top: 10px;">
+                <a href="{{ video_link }}"><strong>📹 Join Google Meet / Video Call</strong></a>
+            </p>
+            {% endif %}
+
             <p>Please find the agenda and relevant materials attached or available on the summit portal.</p>
 
             <a href="{{ portal_url }}" class="button" style="color: #ffffff !important;">View in Portal</a>
