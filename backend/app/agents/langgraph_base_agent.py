@@ -288,14 +288,23 @@ class LangGraphBaseAgent:
                 
                 # Format context
                 if results:
-                    docs_text = "\n\n".join([
-                        f"Document (Score: {r['score']:.2f}):\n{r['metadata'].get('text', '')[:2000]}" # LIMIT: 2000 chars per doc
-                        for r in results
-                    ])
-                    state["context"]["retrieved_docs"] = docs_text
-                    logger.info(f"[{self.agent_id}] Retrieved {len(results)} documents")
+                    # Format context with EXTREME truncation to prevent token errors
+                    # Limit to 500 chars per doc (~125 tokens) × 2 = 250 tokens total
+                    context_parts = []
+                    for r in results:
+                        file_name = r['metadata'].get('file_name', 'Unknown')
+                        text = r['metadata'].get('text', '') or ''
+                        # Truncate text to 500 chars to avoid token limit errors
+                        truncated_text = text[:500] + "..." if len(text) > 500 else text
+                        context_parts.append(f"[{file_name}]\n{truncated_text}")
+
+                    context_text = "\n".join(context_parts)
+
+                    # Store in state
+                    state['context'] = {"retrieved_docs": context_text, "source": namespace}
+                    logger.info(f"[{self.agent_id}] Retrieved {len(results)} docs from {namespace}")
                 else:
-                    state["context"]["retrieved_docs"] = "No relevant documents found."
+                    logger.info(f"[{self.agent_id}] No relevant docs found in {namespace}")
                     
             except Exception as e:
                 logger.error(f"[{self.agent_id}] RAG Error: {e}")
@@ -633,6 +642,10 @@ class LangGraphBaseAgent:
         """
         thread_id = thread_id or self.session_id
         logger.info(f"[{self.agent_id}:{thread_id}] History cleared (use new thread_id for fresh conversation)")
+
+    def clear_history(self, thread_id: Optional[str] = None):
+        """Alias for reset_history for backward compatibility."""
+        self.reset_history(thread_id)
 
     def get_agent_info(self) -> Dict:
         """Get agent information."""

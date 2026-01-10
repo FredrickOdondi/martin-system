@@ -352,79 +352,235 @@ RECOMMENDATION: [your recommendation here]`,
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pb-12">
         {/* Left Column (Primary Content) */}
         <div className="lg:col-span-2 flex flex-col gap-6">
-          {/* Executive Summary */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Executive Summary</h3>
-            <div className="prose prose-slate dark:prose-invert max-w-none text-slate-600 dark:text-slate-300">
-              <p className="mb-4">{projectData.executiveSummary}</p>
-              <p>{projectData.description}</p>
-            </div>
-          </div>
 
-          {/* Strategic Rationale */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
-            <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">
-              Strategic Rationale & Business Case
-            </h3>
-            <ul className="space-y-4">
-              <li className="flex gap-4 items-start">
-                <div className="size-8 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0 text-primary">
-                  <span className="material-symbols-outlined text-sm">hub</span>
+          {/* Overview Tab Content */}
+          {activeTab === 'overview' && (
+            <>
+              {/* Executive Summary */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Executive Summary</h3>
+                <div className="prose prose-slate dark:prose-invert max-w-none text-slate-600 dark:text-slate-300">
+                  <p className="mb-4">{projectData.executiveSummary}</p>
+                  <p>{projectData.description}</p>
                 </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">Regional Connectivity</h4>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                    Directly supports ECOWAS Vision 2050 Goal 3: "Integrated Infrastructure". Expected to reduce
-                    transit times by 40%.
-                  </p>
-                </div>
-              </li>
-              <li className="flex gap-4 items-start">
-                <div className="size-8 rounded-full bg-green-50 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0 text-green-600 dark:text-green-400">
-                  <span className="material-symbols-outlined text-sm">eco</span>
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">Economic & Environmental Impact</h4>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                    Projected IRR of 14% over 25 years. Shifts 20% of road freight to rail, reducing regional carbon
-                    emissions by 150k tons annually.
-                  </p>
-                </div>
-              </li>
-              <li className="flex gap-4 items-start">
-                <div className="size-8 rounded-full bg-purple-50 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0 text-purple-600 dark:text-purple-400">
-                  <span className="material-symbols-outlined text-sm">handshake</span>
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">Trade Facilitation</h4>
-                  <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
-                    Will streamline customs procedures at the border through integrated rail terminals, boosting
-                    intra-regional trade volume.
-                  </p>
-                </div>
-              </li>
-            </ul>
-          </div>
+              </div>
 
-          {/* Map Visual Placeholder */}
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm h-64 relative group">
-            <div className="absolute inset-0 bg-gradient-to-br from-blue-100 to-indigo-200 dark:from-blue-900/50 dark:to-indigo-900/50"></div>
-            <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="material-symbols-outlined text-6xl text-white/50">map</span>
+              {/* Strategic Rationale */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">
+                  Strategic Rationale & Business Case
+                </h3>
+                <ul className="space-y-4">
+                  <li className="flex gap-4 items-start">
+                    <div className="size-8 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center flex-shrink-0 text-primary">
+                      <span className="material-symbols-outlined text-sm">hub</span>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">Regional Connectivity</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                        Directly supports ECOWAS Vision 2050 Goal 3: "Integrated Infrastructure". Expected to reduce
+                        transit times by 40%.
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex gap-4 items-start">
+                    <div className="size-8 rounded-full bg-green-50 dark:bg-green-900/30 flex items-center justify-center flex-shrink-0 text-green-600 dark:text-green-400">
+                      <span className="material-symbols-outlined text-sm">eco</span>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">Economic & Environmental Impact</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                        Projected IRR of 14% over 25 years. Shifts 20% of road freight to rail, reducing regional carbon
+                        emissions by 150k tons annually.
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex gap-4 items-start">
+                    <div className="size-8 rounded-full bg-purple-50 dark:bg-purple-900/30 flex items-center justify-center flex-shrink-0 text-purple-600 dark:text-purple-400">
+                      <span className="material-symbols-outlined text-sm">handshake</span>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-900 dark:text-white">Trade Facilitation</h4>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                        Will streamline customs procedures at the border through integrated rail terminals, boosting
+                        intra-regional trade volume.
+                      </p>
+                    </div>
+                  </li>
+                </ul>
+              </div>
+
+              {/* Map Visual Placeholder */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm h-64 relative group">
+                <div className="absolute inset-0 bg-gradient-to-br from-blue-100 to-indigo-200 dark:from-blue-900/50 dark:to-indigo-900/50"></div>
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="material-symbols-outlined text-6xl text-white/50">map</span>
+                </div>
+                <div className="absolute bottom-4 left-4 text-white">
+                  <p className="font-bold text-lg">Proposed Route</p>
+                  <p className="text-sm opacity-80">
+                    Lagos Terminus A
+                    <span className="material-symbols-outlined text-xs align-middle mx-1">arrow_forward</span>
+                    Cotonou Port
+                  </p>
+                </div>
+                <button className="absolute top-4 right-4 bg-white/90 dark:bg-black/50 backdrop-blur text-slate-900 dark:text-white p-2 rounded-lg hover:bg-white transition-colors">
+                  <span className="material-symbols-outlined">fullscreen</span>
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Financials Tab Content */}
+          {activeTab === 'financials' && (
+            <>
+              {/* Funding Structure */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Funding Structure</h3>
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center p-4 bg-slate-50 dark:bg-slate-700 rounded-lg">
+                    <div>
+                      <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Total Project Cost</p>
+                      <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{projectData.fundingAsk}</p>
+                    </div>
+                    <span className="material-symbols-outlined text-4xl text-slate-300 dark:text-slate-600">payments</span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                      <p className="text-xs font-medium text-green-600 dark:text-green-400 mb-1">Secured Funding</p>
+                      <p className="text-xl font-bold text-green-700 dark:text-green-300">$450M</p>
+                      <p className="text-xs text-green-600 dark:text-green-400 mt-1">37.5%</p>
+                    </div>
+                    <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                      <p className="text-xs font-medium text-amber-600 dark:text-amber-400 mb-1">Funding Gap</p>
+                      <p className="text-xl font-bold text-amber-700 dark:text-amber-300">$750M</p>
+                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">62.5%</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Financial Projections */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Financial Projections</h3>
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center py-3 border-b border-slate-200 dark:border-slate-700">
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Internal Rate of Return (IRR)</span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">14%</span>
+                  </div>
+                  <div className="flex justify-between items-center py-3 border-b border-slate-200 dark:border-slate-700">
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Payback Period</span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">12 years</span>
+                  </div>
+                  <div className="flex justify-between items-center py-3 border-b border-slate-200 dark:border-slate-700">
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Net Present Value (NPV)</span>
+                    <span className="text-sm font-bold text-green-600 dark:text-green-400">$280M</span>
+                  </div>
+                  <div className="flex justify-between items-center py-3">
+                    <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Project Lifespan</span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white">25 years</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Funding Sources */}
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Funding Sources</h3>
+                <div className="space-y-3">
+                  {[
+                    { name: 'African Development Bank', amount: '$250M', percent: 20.8, color: 'blue' },
+                    { name: 'World Bank', amount: '$150M', percent: 12.5, color: 'green' },
+                    { name: 'Private Equity', amount: '$50M', percent: 4.2, color: 'purple' },
+                    { name: 'To Be Secured', amount: '$750M', percent: 62.5, color: 'slate' },
+                  ].map((source, index) => (
+                    <div key={index} className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{source.name}</span>
+                          <span className="text-sm font-bold text-slate-900 dark:text-white">{source.amount}</span>
+                        </div>
+                        <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
+                          <div
+                            className={`bg-${source.color}-500 h-2 rounded-full`}
+                            style={{ width: `${source.percent}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Documents Tab Content */}
+          {activeTab === 'documents' && (
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Project Documents</h3>
+              <div className="space-y-3">
+                {[
+                  { name: 'Feasibility Study Report', type: 'PDF', size: '2.4 MB', date: 'Dec 15, 2024', icon: 'description' },
+                  { name: 'Environmental Impact Assessment', type: 'PDF', size: '1.8 MB', date: 'Dec 10, 2024', icon: 'description' },
+                  { name: 'Financial Model', type: 'XLSX', size: '856 KB', date: 'Dec 8, 2024', icon: 'table_chart' },
+                  { name: 'Technical Specifications', type: 'PDF', size: '3.2 MB', date: 'Dec 5, 2024', icon: 'description' },
+                ].map((doc, index) => (
+                  <div key={index} className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors cursor-pointer">
+                    <div className="flex items-center gap-3">
+                      <span className="material-symbols-outlined text-primary">{doc.icon}</span>
+                      <div>
+                        <p className="text-sm font-medium text-slate-900 dark:text-white">{doc.name}</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">{doc.type} • {doc.size} • {doc.date}</p>
+                      </div>
+                    </div>
+                    <button className="p-2 hover:bg-slate-200 dark:hover:bg-slate-500 rounded-lg transition-colors">
+                      <span className="material-symbols-outlined text-[20px]">download</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Upload New Document Button */}
+              <button className="mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-400 hover:border-primary hover:text-primary transition-colors">
+                <span className="material-symbols-outlined">upload</span>
+                <span className="text-sm font-medium">Upload New Document</span>
+              </button>
             </div>
-            <div className="absolute bottom-4 left-4 text-white">
-              <p className="font-bold text-lg">Proposed Route</p>
-              <p className="text-sm opacity-80">
-                Lagos Terminus A
-                <span className="material-symbols-outlined text-xs align-middle mx-1">arrow_forward</span>
-                Cotonou Port
-              </p>
+          )}
+
+          {/* History Tab Content */}
+          {activeTab === 'history' && (
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">Project Timeline</h3>
+              <div className="space-y-4">
+                {[
+                  { date: '2 hours ago', action: 'Readiness score updated', user: 'AI Agent Alpha', icon: 'auto_awesome', color: 'blue' },
+                  { date: '1 day ago', action: 'Document uploaded: Financial Model v2.1', user: 'John Mensah', icon: 'upload_file', color: 'green' },
+                  { date: '3 days ago', action: 'Status changed to In Review', user: 'TWG Infrastructure Lead', icon: 'change_circle', color: 'amber' },
+                  { date: '5 days ago', action: 'Feasibility study completed', user: 'RailCo Ltd.', icon: 'check_circle', color: 'green' },
+                  { date: '1 week ago', action: 'Project created', user: 'System', icon: 'add_circle', color: 'slate' },
+                ].map((event, index) => (
+                  <div key={index} className="flex gap-4">
+                    <div className="flex flex-col items-center">
+                      <div className={`w-10 h-10 rounded-full bg-${event.color}-100 dark:bg-${event.color}-900/30 flex items-center justify-center`}>
+                        <span className={`material-symbols-outlined text-${event.color}-600 dark:text-${event.color}-400 text-[20px]`}>
+                          {event.icon}
+                        </span>
+                      </div>
+                      {index < 4 && <div className="w-0.5 h-full bg-slate-200 dark:bg-slate-700 mt-2"></div>}
+                    </div>
+                    <div className="flex-1 pb-6">
+                      <p className="text-sm font-medium text-slate-900 dark:text-white">{event.action}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                        by {event.user} • {event.date}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-            <button className="absolute top-4 right-4 bg-white/90 dark:bg-black/50 backdrop-blur text-slate-900 dark:text-white p-2 rounded-lg hover:bg-white transition-colors">
-              <span className="material-symbols-outlined">fullscreen</span>
-            </button>
-          </div>
+          )}
         </div>
 
         {/* Right Column (Sidebar) */}
