@@ -139,6 +139,8 @@ export default function TeamManagement() {
         }
     }
 
+    const [isSavingTeams, setIsSavingTeams] = useState(false)
+
     const handleSaveTeams = async () => {
         if (!editingUser) return
 
@@ -148,6 +150,7 @@ export default function TeamManagement() {
             return
         }
 
+        setIsSavingTeams(true)
         try {
             await userService.updateUser(editingUser.id, { twg_ids: selectedTwgs })
             toast.success('Teams updated successfully')
@@ -157,6 +160,8 @@ export default function TeamManagement() {
         } catch (error) {
             console.error('Failed to update teams', error)
             toast.error('Failed to update teams')
+        } finally {
+            setIsSavingTeams(false)
         }
     }
 
@@ -485,9 +490,10 @@ export default function TeamManagement() {
                             </button>
                             <button
                                 onClick={handleSaveTeams}
-                                disabled={enforceTwgSelection && selectedTwgs.length === 0}
-                                className="px-4 py-2 bg-[#1152d4] hover:bg-[#0e44b1] text-white text-sm font-bold rounded-lg shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled={(enforceTwgSelection && selectedTwgs.length === 0) || isSavingTeams}
+                                className="px-4 py-2 bg-[#1152d4] hover:bg-[#0e44b1] text-white text-sm font-bold rounded-lg shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                             >
+                                {isSavingTeams && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>}
                                 {enforceTwgSelection && selectedTwgs.length === 0 ? 'Select at least 1 TWG' : 'Save Changes'}
                             </button>
                         </div>

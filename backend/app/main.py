@@ -28,6 +28,10 @@ if "http://127.0.0.1:5173" not in cors_origins:
 if "http://localhost:5173" not in cors_origins:
     cors_origins.append("http://localhost:5173")
 
+# Trust X-Forwarded-Proto headers from Railway/Load Balancers
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins if cors_origins else ["http://localhost:5173", "http://localhost:3000"],

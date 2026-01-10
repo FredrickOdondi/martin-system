@@ -16,17 +16,17 @@ export const userService = {
     },
 
     async getUser(userId: string) {
-        const response = await api.get<User>(`/users/${userId}/`);
+        const response = await api.get<User>(`/users/${userId}`);
         return response.data;
     },
 
     async updateUser(userId: string, data: UserUpdateData) {
-        const response = await api.patch<User>(`/users/${userId}/`, data);
+        const response = await api.patch<User>(`/users/${userId}`, data);
         return response.data;
     },
 
     async deleteUser(userId: string) {
-        const response = await api.delete(`/users/${userId}/`);
+        const response = await api.delete(`/users/${userId}`);
         return response.data;
     }
 };
