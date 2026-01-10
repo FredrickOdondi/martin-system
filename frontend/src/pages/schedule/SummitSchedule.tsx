@@ -113,7 +113,7 @@ export default function SummitSchedule() {
 
                 {/* Days Grid */}
                 <div className="grid grid-cols-7 flex-1 auto-rows-[1fr]">
-                    {calendarDays.map((day, idx) => {
+                    {calendarDays.map((day) => {
                         const dayEvents = getEventsForDay(day)
                         const isCurrentMonth = isSameMonth(day, monthStart)
                         const isTodayDate = isToday(day)
