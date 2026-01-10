@@ -69,20 +69,12 @@ export default function ConflictDashboard() {
     // Current active conflict
     const activeConflict = conflicts[currentIndex];
 
+    const [weeklyPacketData, setWeeklyPacketData] = useState<any>(null);
+
     // Calculate Weekly Packet progress from pipeline stats
     const totalDeals = stats?.pipeline?.total || 1;
     const completedDeals = (stats?.pipeline?.final_review || 0) + (stats?.pipeline?.signed || 0);
     const packetCompletion = Math.round((completedDeals / totalDeals) * 100) || 0;
-
-    const weeklyPacket = {
-        completion: packetCompletion,
-        // Keep items static for now as they represent specific highlighted documents not yet in generic stats
-        items: [
-            { name: 'Session Prop: Green Hydrogen', status: 'Ready' },
-            { name: 'Policy Note: Tariff Harmonization', status: 'Review' },
-            { name: 'Budget Request: Q3', status: 'Pending Data' }
-        ]
-    };
 
     return (
         <>
@@ -99,10 +91,13 @@ export default function ConflictDashboard() {
                         <button
                             onClick={async () => {
                                 try {
+                                    setLoading(true);
                                     const result = await generateWeeklyPacket();
-                                    setReconciliationResult(result);
+                                    setWeeklyPacketData(result);
                                 } catch (error) {
                                     console.error('Failed to generate weekly packet', error);
+                                } finally {
+                                    setLoading(false);
                                 }
                             }}
                             className="px-4 py-2 bg-slate-900 dark:bg-white text-white dark:text-slate-900 rounded-xl text-xs font-bold hover:shadow-lg transition-all active:scale-95"
@@ -144,22 +139,40 @@ export default function ConflictDashboard() {
                                     <p className="text-[10px] text-slate-500 uppercase tracking-widest">Target: Friday 17:00</p>
                                 </div>
                                 <div className="text-right">
-                                    <span className="text-2xl font-bold text-blue-600">{weeklyPacket.completion}%</span>
+                                    <span className="text-2xl font-bold text-blue-600">{packetCompletion}%</span>
                                 </div>
                             </div>
                             <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden mb-4">
-                                <div className="h-full bg-blue-500 rounded-full" style={{ width: `${weeklyPacket.completion}%` }}></div>
+                                <div className="h-full bg-blue-500 rounded-full" style={{ width: `${packetCompletion}%` }}></div>
                             </div>
                             <div className="space-y-2">
-                                {weeklyPacket.items.map((item, i) => (
-                                    <div key={i} className="flex items-center justify-between text-xs">
-                                        <span className="text-slate-600 dark:text-slate-300 font-medium">{item.name}</span>
-                                        <span className={`font-bold ${item.status === 'Ready' ? 'text-emerald-500' :
-                                            item.status === 'Review' ? 'text-amber-500' :
-                                                'text-slate-400'
-                                            }`}>{item.status}</span>
+                                {weeklyPacketData ? (
+                                    weeklyPacketData.twg_activity.length > 0 ? (
+                                        weeklyPacketData.twg_activity.slice(0, 5).map((item: any, i: number) => (
+                                            <div key={i} className="flex items-center justify-between text-xs border-b border-slate-50 dark:border-slate-800 pb-2 last:border-0 last:pb-0">
+                                                <div className="flex flex-col">
+                                                    <span className="text-slate-600 dark:text-slate-300 font-bold">{item.name}</span>
+                                                    <span className="text-[9px] text-slate-400">{item.accomplishments_count} wins, {item.risks_count} risks</span>
+                                                </div>
+                                                <Badge variant={item.status === 'Ready' ? 'success' : 'warning'} className="text-[10px]">
+                                                    {item.status}
+                                                </Badge>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-center text-xs text-slate-400 italic py-2">No active TWG packets generated yet.</div>
+                                    )
+                                ) : (
+                                    <div className="text-center py-4">
+                                        <p className="text-xs text-slate-400 mb-2">Detailed packets not generated</p>
+                                        <button
+                                            onClick={() => document.querySelector<HTMLElement>('button[class*="bg-slate-900"]')?.click()}
+                                            className="text-[10px] text-blue-500 hover:text-blue-600 font-bold uppercase tracking-wider"
+                                        >
+                                            Generate Now
+                                        </button>
                                     </div>
-                                ))}
+                                )}
                             </div>
                         </Card>
 

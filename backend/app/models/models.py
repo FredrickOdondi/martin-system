@@ -347,3 +347,25 @@ class Conflict(Base):
     
     detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+class WeeklyPacket(Base):
+    __tablename__ = "weekly_packets"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
+    week_start_date: Mapped[datetime] = mapped_column(DateTime)
+    
+    # Structured Data (stored as JSON)
+    proposed_sessions: Mapped[List[dict]] = mapped_column(JSON) # List of proposed meetings
+    dependencies: Mapped[List[dict]] = mapped_column(JSON) # Identified cross-TWG dependencies
+    accomplishments: Mapped[List[str]] = mapped_column(JSON) # Bullet points of achievements
+    risks_and_blockers: Mapped[List[dict]] = mapped_column(JSON) # Identified risks
+    
+    status: Mapped[str] = mapped_column(String(50), default="draft") # draft, submitted, ingested
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    twg: Mapped["TWG"] = relationship("TWG")

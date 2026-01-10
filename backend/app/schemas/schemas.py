@@ -413,5 +413,25 @@ class ConflictRead(ConflictBase):
     detected_at: datetime
     resolved_at: Optional[datetime] = None
 
+# --- Weekly Packet Schemas ---
+
+class WeeklyPacketBase(SchemaBase):
+    twg_id: uuid.UUID
+    week_start_date: datetime
+    proposed_sessions: List[dict] = []
+    dependencies: List[dict] = []
+    accomplishments: List[str] = []
+    risks_and_blockers: List[dict] = []
+    status: str = "draft"
+
+class WeeklyPacketCreate(WeeklyPacketBase):
+    pass
+
+class WeeklyPacketRead(WeeklyPacketBase):
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+    twg: Optional["TWGBase"] = None
+
 # Resolve forward references
 TWGRead.model_rebuild()
