@@ -153,6 +153,23 @@ class OpenAILLMService(LLMService):
             logger.error(f"OpenAI History error: {e}")
             raise Exception(f"OpenAI Error: {str(e)}")
 
+    def transcribe_audio(self, file_path: str, model: str = "whisper-1", **kwargs) -> str:
+        """
+        Transcribe audio file using OpenAI's Whisper API.
+        """
+        try:
+            with open(file_path, "rb") as file:
+                transcription = self.client.audio.transcriptions.create(
+                    file=file,
+                    model=model,
+                    response_format="text",
+                    temperature=0.0
+                )
+            return transcription
+        except Exception as e:
+            logger.error(f"OpenAI Transcription error: {e}")
+            raise Exception(f"OpenAI Transcription Error: {str(e)}")
+
 
 class GroqLLMService(LLMService):
     """Service for interacting with Groq API"""
