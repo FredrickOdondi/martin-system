@@ -32,6 +32,14 @@ const api = axios.create({
 // Request interceptor for adding the auth token
 api.interceptors.request.use(
     (config) => {
+        // Debug: Log the full URL being requested
+        try {
+            const fullUrl = (config.baseURL || '') + (config.url || '');
+            console.log(`[API Request] Method: ${config.method?.toUpperCase()} URL: ${fullUrl}`);
+        } catch (e) {
+            // ignore
+        }
+
         // Try to get token from Redux store first, then fall back to localStorage
         let token = store.getState().auth.token;
         if (!token) {

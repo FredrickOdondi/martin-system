@@ -33,6 +33,13 @@ export class AudioStreamer {
             // 2. Connect WebSocket
             // Handle relative API_URL or absolute
             const baseUrl = API_URL.replace(/^http/, 'ws');
+            // If the URL is just 'https://...', replace with 'wss://...'
+            // The regex /^http/ matches both 'http' and 'https' prefix start? No.
+            // 'https'.match(/^http/); -> matches.
+            // So 'https://foo'.replace(/^http/, 'ws') -> 'wss://foo'.
+            // 'http://foo'.replace(/^http/, 'ws') -> 'ws://foo'.
+            // This logic is actually correct if API_URL starts with http/https.
+
             const wsUrl = `${baseUrl}/meetings/${this.config.meetingId}/live?token=${this.token}`;
 
             this.socket = new WebSocket(wsUrl);
