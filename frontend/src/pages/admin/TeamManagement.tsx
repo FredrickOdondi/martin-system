@@ -245,7 +245,10 @@ export default function TeamManagement() {
                         Refresh
                     </button>
                     <button
-                        onClick={() => setIsInviteModalOpen(true)}
+                        onClick={() => {
+                            if (twgs.length === 0) loadTwgs();
+                            setIsInviteModalOpen(true);
+                        }}
                         className="px-4 py-2 bg-[#1152d4] hover:bg-[#0e44b1] text-white rounded-lg text-sm font-bold transition-all shadow-md shadow-blue-500/20 flex items-center gap-2"
                     >
                         <span className="material-symbols-outlined text-sm">mail</span>
