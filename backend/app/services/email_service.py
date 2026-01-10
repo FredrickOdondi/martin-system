@@ -245,6 +245,44 @@ class EmailService:
                 html_content=html_content
             )
 
+    async def send_user_invite(
+        self,
+        to_email: str,
+        full_name: str,
+        password: str,
+        role: str,
+        login_url: str
+    ):
+        """
+        Sends a user invitation email with temporary credentials.
+        """
+        template = self.jinja_env.get_template("user_invite.html")
+        context = {
+            "full_name": full_name,
+            "password": password,
+            "role": role.replace("_", " ").title(),
+            "login_url": login_url
+        }
+        html_content = template.render(**context)
+        subject = "Welcome to ECOWAS Summit TWG Support System"
+
+        if not settings.EMAILS_ENABLED:
+            print(f"[EmailService] Emails disabled. Would send invite to: {to_email}")
+            return True
+
+        if self.use_resend:
+            return await self._send_via_resend(
+                to_emails=[to_email],
+                subject=subject,
+                html_content=html_content
+            )
+        else:
+            return await self._send_via_smtp(
+                to_emails=[to_email],
+                subject=subject,
+                html_content=html_content
+            )
+
 
 
     async def send_minutes_published_email(

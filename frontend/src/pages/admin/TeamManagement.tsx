@@ -184,11 +184,14 @@ export default function TeamManagement() {
         )
     }
 
+    const [isInviting, setIsInviting] = useState(false)
+
     const handleInviteUser = async () => {
+        setIsInviting(true)
         try {
             const response = await api.post('/users/invite', {
                 ...inviteForm,
-                send_email: false // Email not implemented yet
+                send_email: true
             })
             setTempPassword(response.data.temporary_password)
             toast.success(`User invited! Temporary password: ${response.data.temporary_password}`)
@@ -196,6 +199,8 @@ export default function TeamManagement() {
         } catch (error: any) {
             const message = error.response?.data?.detail || 'Failed to invite user'
             toast.error(message)
+        } finally {
+            setIsInviting(false)
         }
     }
 
@@ -605,9 +610,10 @@ export default function TeamManagement() {
                                     </button>
                                     <button
                                         onClick={handleInviteUser}
-                                        disabled={!inviteForm.email || !inviteForm.full_name}
-                                        className="px-4 py-2 bg-[#1152d4] hover:bg-[#0e44b1] text-white text-sm font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                                        disabled={!inviteForm.email || !inviteForm.full_name || isInviting}
+                                        className="px-4 py-2 bg-[#1152d4] hover:bg-[#0e44b1] text-white text-sm font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                                     >
+                                        {isInviting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>}
                                         Create & Invite
                                     </button>
                                 </div>

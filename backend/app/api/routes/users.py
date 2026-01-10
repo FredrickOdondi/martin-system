@@ -213,11 +213,32 @@ async def invite_user(
     
     # TODO: Send invitation email with temporary password
     # For now, just return the password (admin must communicate it)
+    # Send invitation email
     invite_sent = False
     if invite_data.send_email:
-        # Email sending logic would go here
-        # invite_sent = await send_invite_email(user.email, temp_password)
-        pass
+        try:
+            from app.services.email_service import email_service
+            # Construct login URL (assuming frontend is on the same domain or configured)
+            # We can use a setting for FRONTEND_URL if available, otherwise guess
+            # For now, we'll try to infer it or use a placeholder if not set
+            login_url = "https://frontend-production-1abb.up.railway.app/" # Default to prod URL for now or use settings
+            
+            # Use settings if available
+            # login_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else login_url
+
+            await email_service.send_user_invite(
+                to_email=user.email,
+                full_name=user.full_name,
+                password=temp_password,
+                role=user.role.value,
+                login_url=login_url
+            )
+            invite_sent = True
+        except Exception as e:
+            # Log error but don't fail the request
+            print(f"Failed to send invite email: {e}")
+            # We could raise a warning here or just return invite_sent=False
+            pass
     
     return UserInviteResponse(
         user_id=user.id,
