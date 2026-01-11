@@ -207,6 +207,7 @@ class LangGraphSupervisor:
             from app.core.database import get_sync_db_session
             from app.models.models import Meeting
             from datetime import timedelta
+            from sqlalchemy import text
             
             try:
                 start_time = datetime.fromisoformat(start_time_iso)
@@ -493,10 +494,10 @@ class LangGraphSupervisor:
         workflow.add_node("route_query", route_query_node)
 
         # 2. Supervisor node - handles general queries
-        workflow.add_node(
-            "supervisor",
-            lambda state: supervisor_node(state, self.supervisor_agent)
-        )
+        async def call_supervisor_node(state: AgentState) -> AgentState:
+            return await supervisor_node(state, self.supervisor_agent)
+            
+        workflow.add_node("supervisor", call_supervisor_node)
 
         # 3. TWG agent nodes - one for each registered agent
         for agent_id, agent in self._twg_agents.items():
@@ -506,10 +507,10 @@ class LangGraphSupervisor:
             )
 
         # 4. Synthesis node - combines multiple agent responses
-        workflow.add_node(
-            "synthesis",
-            lambda state: synthesis_node(state, self.supervisor_agent)
-        )
+        async def call_synthesis_node(state: AgentState) -> AgentState:
+            return await synthesis_node(state, self.supervisor_agent)
+            
+        workflow.add_node("synthesis", call_synthesis_node)
 
         # 5. Single agent response node - formats single agent response
         workflow.add_node("single_agent_response", single_agent_response_node)
@@ -522,11 +523,9 @@ class LangGraphSupervisor:
         workflow.set_entry_point("route_query")
 
         # Add dispatch_multiple node for handling multiple agents
-        def dispatch_multiple_node(state: AgentState) -> AgentState:
+        async def dispatch_multiple_node(state: AgentState) -> AgentState:
             """
-            Dispatch query to multiple TWG agents sequentially.
-
-            TODO: This could be parallelized using LangGraph's parallel execution
+            Dispatch query to multiple TWG agents sequentially (Async).
             """
             relevant_agents = state["relevant_agents"]
             query = state["query"]
@@ -538,15 +537,13 @@ class LangGraphSupervisor:
                     logger.info(f"[DISPATCH] Querying {agent_id}...")
                     try:
                         agent = self._twg_agents[agent_id]
-                        response = agent.chat(query)
+                        # Await the async chat method
+                        response = await agent.chat(query)
                         state["agent_responses"][agent_id] = response
                     except GraphInterrupt:
-                        # Re-raise explicit interrupts (like Approval Required)
-                        # The supervisor must pause if a child pauses
                         logger.info(f"[DISPATCH] Interrupt from {agent_id} detected in supervisor")
                         raise
                     except Exception as e:
-                        # Check for re-raised GraphInterrupt trapped in generic Exception
                         if type(e).__name__ == "GraphInterrupt":
                             logger.info(f"[DISPATCH] GraphInterrupt caught as Exception from {agent_id}")
                             raise e
@@ -714,28 +711,23 @@ class LangGraphSupervisor:
             config = {"configurable": {"thread_id": thread_id}}
             snapshot = agent.compiled_graph.get_state(config)
             
+                
             # Check if this agent is interrupted
             if snapshot.tasks:
                 for task in snapshot.tasks:
                     if hasattr(task, 'interrupts') and task.interrupts:
                         logger.info(f"[SUPERVISOR] Found interrupt in agent '{agent_id}'. Resuming...")
-                        # Resume this agent
-                        # Note: agent.resume_chat is sync, so we wrap if needed, 
-                        # but we can call it directly since we are in async method
-                        # handled by thread or direct call.
-                        # Since agent.resume_chat uses compiled_graph.invoke (sync), 
-                        # and we are in async def, this blocks the loop. 
-                        # Ideally we run in executor, but for now direct call is functionally correct.
-                        return agent.resume_chat(thread_id, resume_value)
+                        # Resume this agent (Async)
+                        return await agent.resume_chat(thread_id, resume_value)
         
         # 2. Check supervisor agent (the general one)
         config = {"configurable": {"thread_id": thread_id}}
-        snapshot = self.supervisor_agent.compiled_graph.get_state(config)
+        snapshot = await self.supervisor_agent.compiled_graph.aget_state(config)
         if snapshot.tasks:
              for task in snapshot.tasks:
                     if hasattr(task, 'interrupts') and task.interrupts:
                         logger.info(f"[SUPERVISOR] Found interrupt in supervisor agent. Resuming...")
-                        return self.supervisor_agent.resume_chat(thread_id, resume_value)
+                        return await self.supervisor_agent.resume_chat(thread_id, resume_value)
 
         logger.warning(f"[SUPERVISOR:{thread_id}] No interrupted agent found to resume.")
         return "No active interruption found to resume."

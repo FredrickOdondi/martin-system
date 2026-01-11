@@ -186,7 +186,7 @@ async def route_query_node(state: AgentState) -> AgentState:
 # SUPERVISOR NODE - Handles general queries without specific TWG
 # =========================================================================
 
-def supervisor_node(state: AgentState, supervisor_agent: LangGraphBaseAgent) -> AgentState:
+async def supervisor_node(state: AgentState, supervisor_agent: LangGraphBaseAgent) -> AgentState:
     """
     Handle queries that don't require specific TWG expertise.
     Uses the supervisor's general knowledge.
@@ -194,7 +194,7 @@ def supervisor_node(state: AgentState, supervisor_agent: LangGraphBaseAgent) -> 
     query = state["query"]
     logger.info(f"[SUPERVISOR] Handling query with general knowledge")
 
-    response = supervisor_agent.chat(query)
+    response = await supervisor_agent.chat(query)
 
     state["final_response"] = response
     state["agent_responses"]["supervisor"] = response
@@ -213,7 +213,7 @@ def create_twg_agent_node(agent_id: str, agent: LangGraphBaseAgent):
     Returns a function that can be used as a LangGraph node.
     """
     # Use default args to capture values at definition time, not call time
-    def twg_node(state: AgentState, _agent_id: str = agent_id, _agent: LangGraphBaseAgent = agent) -> AgentState:
+    async def twg_node(state: AgentState, _agent_id: str = agent_id, _agent: LangGraphBaseAgent = agent) -> AgentState:
         """
         Delegate query to a specific TWG agent.
         """
@@ -221,7 +221,7 @@ def create_twg_agent_node(agent_id: str, agent: LangGraphBaseAgent):
         logger.info(f"[{_agent_id.upper()}] Processing query")
 
         try:
-            response = _agent.chat(query)
+            response = await _agent.chat(query)
             state["agent_responses"][_agent_id] = response
             logger.info(f"[{_agent_id.upper()}] Response generated")
         except GraphInterrupt:
@@ -240,7 +240,7 @@ def create_twg_agent_node(agent_id: str, agent: LangGraphBaseAgent):
 # SYNTHESIS NODE - Combine responses from multiple agents
 # =========================================================================
 
-def synthesis_node(state: AgentState, supervisor_agent: LangGraphBaseAgent) -> AgentState:
+async def synthesis_node(state: AgentState, supervisor_agent: LangGraphBaseAgent) -> AgentState:
     """
     Synthesize responses from multiple TWG agents into ONE unified professional memo.
     """
@@ -278,7 +278,7 @@ Format: Executive Summary, Strategic Rationale, Financial Overview, Regional Imp
 
     # Get supervisor's unified memo
     try:
-        unified_memo = supervisor_agent.chat(synthesis_prompt)
+        unified_memo = await supervisor_agent.chat(synthesis_prompt)
         output = unified_memo
     except Exception as e:
         logger.error(f"[SYNTHESIS] Synthesis generation failed: {e}")
@@ -298,7 +298,7 @@ Format: Executive Summary, Strategic Rationale, Financial Overview, Regional Imp
         """
 
         try:
-            conflict_check = supervisor_agent.chat(conflict_prompt)
+            conflict_check = await supervisor_agent.chat(conflict_prompt)
 
             if "CONFLICT DETECTED" in conflict_check.upper():
                 output += f"\n\nCONFLICT ALERT:\n{conflict_check}"
