@@ -17,7 +17,7 @@ from langgraph.types import interrupt, Command
 from langgraph.errors import GraphInterrupt, GraphRecursionError
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
-from app.services.groq_llm_service import get_llm_service
+from app.services.llm_service import get_llm_service
 from app.agents.prompts import get_prompt
 from app.core.knowledge_base import get_knowledge_base
 from app.agents.utils import get_twg_id_by_agent_id
@@ -432,11 +432,51 @@ class LangGraphBaseAgent:
                         "content": msg.content
                     })
 
+            # SANITIZATION: Ensure strict OpenAI compliance
+            # Rule: Assistant with tool_calls MUST be followed by Tool messages
+            sanitized_history = []
+            skip_indices = set()
+            
+            for i in range(len(history)):
+                msg = history[i]
+                
+                # Check for dangling tool calls
+                if msg.get("role") == "assistant" and "tool_calls" in msg:
+                    # Look ahead for matching tool outputs
+                    tool_call_ids = {tc["id"] for tc in msg["tool_calls"]}
+                    found_responses = set()
+                    
+                    # Scan subsequent messages for tool responses
+                    # In a valid conversation, immediate next messages should be tools
+                    j = i + 1
+                    while j < len(history) and history[j].get("role") == "tool":
+                        if history[j].get("tool_call_id") in tool_call_ids:
+                             found_responses.add(history[j].get("tool_call_id"))
+                        j += 1
+                        
+                    # If any tool call is missing a response, we consider this turn 'broken'/interrupted
+                    # To satisfy OpenAI, we must either:
+                    # 1. Provide fake responses (hard to guess)
+                    # 2. Strip the tool_calls from the assistant message
+                    if len(found_responses) < len(tool_call_ids):
+                         logger.warning(f"[{self.agent_id}] Sanitizing history: Msg {i} has dangling tool calls. Stripping tools.")
+                         del msg["tool_calls"]
+                         if not msg.get("content"):
+                             msg["content"] = "[System: Previous tool call interrupted]"
+                
+                sanitized_history.append(msg)
+            
+            history = sanitized_history
+
             # RAG Context injection (simplified)
-            sys_prompt = self.system_prompt
+            from datetime import datetime
+            current_time_str = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
+            
+            sys_prompt = f"{self.system_prompt}\n\nCurrent Date & Time: {current_time_str}"
+            
             context = state.get("context")
             if context and "retrieved_docs" in context:
-                sys_prompt = f"{self.system_prompt}\n\nRelevant Context:\n{context['retrieved_docs']}"
+                sys_prompt = f"{sys_prompt}\n\nRelevant Context:\n{context['retrieved_docs']}"
 
             # Call LLM with tools
             # If self.llm.chat_with_history is SYNC, we wrap it.

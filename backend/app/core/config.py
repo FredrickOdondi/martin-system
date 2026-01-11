@@ -76,6 +76,14 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
     OPENAI_MODEL: str = "gpt-4-turbo-preview"
 
+    # Gemini
+    GEMINI_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+
+    # GitHub Models
+    GITHUB_TOKEN: Optional[str] = None
+    GITHUB_MODEL: str = "openai/gpt-4o-mini"
+    
     # Message Bus Settings
     MESSAGE_BUS_ENABLED: bool = Field(
         default=True,

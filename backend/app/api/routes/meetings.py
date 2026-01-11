@@ -1364,7 +1364,7 @@ Discussion topics relevant to the {pillar_name} pillar:
 - Summary
 - Adjournment"""
 
-    generated_content = agent.chat(prompt)
+    generated_content = await agent.chat(prompt)
     
     return {"generated_agenda": generated_content}
 

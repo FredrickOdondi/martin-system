@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from typing import List, Dict, Any
@@ -23,7 +23,7 @@ class AgentService:
         # 1. Fetch Proposed Sessions (Meetings rescheduled or planned for next week)
         # For simplicity, we look at meetings scheduled for the *upcoming* week (assuming week_end is the end of 'this' week)
         next_week_start = week_end
-        next_week_end = next_week_start + datetime.timedelta(days=7)
+        next_week_end = next_week_start + timedelta(days=7)
         
         upcoming_meetings_res = await self.db.execute(
             select(Meeting).where(
