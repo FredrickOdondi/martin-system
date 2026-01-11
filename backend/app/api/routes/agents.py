@@ -161,6 +161,33 @@ async def chat_with_martin(
         
         logger.info(f"[CHAT] GraphInterrupt caught - gi.args: {gi.args}")
         logger.info(f"[CHAT] Extracted interrupt_value: {interrupt_value}")
+
+        # SPECIAL HANDLING: If interrupt is just a string (e.g. "Duplicate detected"), 
+        # return it as a final response to the user and Halt.
+        if isinstance(interrupt_value, str):
+            # Humanize the error message using LLM
+            try:
+                from app.services.groq_llm_service import GroqLLMService
+                llm = GroqLLMService()
+                humanized_msg = llm.chat(
+                    system_prompt="You are a helpful assistant. The user's request was stopped by the system with the following error. "
+                                "Rewrite this error message to be polite, concise, and helpful to the user. "
+                                "Explain clearly why the action was blocked. Do not mention 'system error' or 'tools'.",
+                    prompt=f"System Error: {interrupt_value}"
+                )
+                response_content = f"🛑 {humanized_msg}"
+            except Exception as e:
+                logger.error(f"Failed to humanize interrupt message: {e}")
+                response_content = f"🛑 {interrupt_value}"
+
+            return {
+                "response": response_content, 
+                "conversation_id": conv_id,
+                "citations": [],
+                "agent_id": "supervisor_v1",
+                # We do NOT set interrupted=True here because we don't need UI approval.
+                # We just want to halt and show the message.
+            }
         
         # Extract draft details for the response message
         draft_preview = ""

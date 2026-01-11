@@ -110,8 +110,8 @@ class ContinuousMonitor:
                             severity = "low"
                             
                             # Same Venue?
-                            if m1.venue and m2.venue and m1.venue == m2.venue:
-                                reason = f"Venue conflict at {m1.venue}"
+                            if m1.location and m2.location and m1.location == m2.location:
+                                reason = f"Venue conflict at {m1.location}"
                                 severity = "high"
                             
                             # Same TWG? (Shouldn't happen usually but possible)

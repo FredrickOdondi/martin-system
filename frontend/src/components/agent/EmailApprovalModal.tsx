@@ -38,12 +38,18 @@ export default function EmailApprovalModal({
     const [editedDraft, setEditedDraft] = useState<EmailDraft>(approvalRequest.draft);
     const [declineReason, setDeclineReason] = useState('');
     const [showDeclineInput, setShowDeclineInput] = useState(false);
+    const [isApproving, setIsApproving] = useState(false);
 
-    const handleApprove = () => {
-        if (isEditing) {
-            onApprove(approvalRequest.request_id, editedDraft);
-        } else {
-            onApprove(approvalRequest.request_id);
+    const handleApprove = async () => {
+        setIsApproving(true);
+        try {
+            if (isEditing) {
+                await onApprove(approvalRequest.request_id, editedDraft);
+            } else {
+                await onApprove(approvalRequest.request_id);
+            }
+        } finally {
+            setIsApproving(false);
         }
     };
 
@@ -178,7 +184,7 @@ export default function EmailApprovalModal({
                             </div>
                         ) : (
                             <div
-                                className="px-4 py-3 bg-gray-50 dark:bg-[#0d121b] border border-[#e7ebf3] dark:border-[#2d3748] rounded-lg text-sm text-[#0d121b] dark:text-white max-h-64 overflow-y-auto prose dark:prose-invert max-w-none"
+                                className="px-4 py-3 bg-gray-50 dark:bg-[#0d121b] border border-[#e7ebf3] dark:border-[#2d3748] rounded-lg text-sm text-gray-900 dark:text-gray-100 max-h-64 overflow-y-auto prose dark:prose-invert max-w-none [&_.email-wrapper]:text-black [&_.email-wrapper]:!bg-white"
                                 dangerouslySetInnerHTML={{ __html: approvalRequest.draft.html_body || approvalRequest.draft.body.replace(/\n/g, '<br/>') }}
                             />
                         )}
@@ -242,10 +248,15 @@ export default function EmailApprovalModal({
                                 </button>
                                 <button
                                     onClick={handleApprove}
-                                    className="flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 rounded-lg shadow-md hover:shadow-lg transition-all"
+                                    disabled={isApproving}
+                                    className={`flex items-center gap-2 px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 rounded-lg shadow-md hover:shadow-lg transition-all ${isApproving ? 'opacity-75 cursor-not-allowed' : ''}`}
                                 >
-                                    <span className="material-symbols-outlined text-[18px]">send</span>
-                                    {isEditing ? 'Approve & Send (Modified)' : 'Approve & Send'}
+                                    {isApproving ? (
+                                        <span className="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                                    ) : (
+                                        <span className="material-symbols-outlined text-[18px]">send</span>
+                                    )}
+                                    {isApproving ? 'Sending...' : (isEditing ? 'Approve & Send (Modified)' : 'Approve & Send')}
                                 </button>
                             </>
                         ) : (
