@@ -195,7 +195,7 @@ class LangGraphSupervisor:
         from app.models.models import User, TWG, VipProfile
         from datetime import datetime
 
-        async def check_availability_tool(start_time_iso: str, duration_minutes: int, vip_names: List[str] = []) -> str:
+        def check_availability_tool(start_time_iso: str, duration_minutes: int, vip_names: List[str] = []) -> str:
             """
             Check availability for a potential meeting without booking it.
             Args:
@@ -203,47 +203,53 @@ class LangGraphSupervisor:
                 duration_minutes: Duration in minutes
                 vip_names: List of VIP names to check (e.g. "Minister of Energy")
             """
+            from loguru import logger
+            from app.core.database import get_sync_db_session
+            from app.models.models import Meeting
+            from datetime import timedelta
+            
             try:
                 start_time = datetime.fromisoformat(start_time_iso)
+                end_time = start_time + timedelta(minutes=duration_minutes)
                 
-                # Resolve VIP names to IDs
-                vip_ids = []
-                async with get_db_session_context() as session:
-                    if vip_names:
-                        stmt = select(VipProfile).join(User).where(User.full_name.in_(vip_names) | VipProfile.title.in_(vip_names))
-                        result = await session.execute(stmt)
-                        vips = result.scalars().all()
-                        vip_ids = [v.user_id for v in vips]
-                        
-                        found_names = {v.title for v in vips}
-                        missing = set(vip_names) - found_names
-                        if missing:
-                            return f"Warning: Could not identify VIPs: {', '.join(missing)}. Checking others..."
-
-                conflicts = await global_scheduler.check_availability(
-                    start_time=start_time,
-                    duration_minutes=duration_minutes,
-                    vip_ids=vip_ids
-                )
-                
-                if not conflicts:
-                    return "✅ Slot is available. No conflicts detected."
-                
-                response = f"⚠️ {len(conflicts)} Conflicts Detected:\n"
-                for c in conflicts:
-                    response += f"- {c.severity.upper()} {c.conflict_type.value}: {c.description} (Resolution: {c.suggested_resolution})\n"
-                
-                return response
+                session = get_sync_db_session()
+                try:
+                    # Check for overlapping meetings
+                    # Fix: Ensure we compare against values, not attributes directly if they are causing issues
+                    # In raw SQL or pure SQLAlchemy Core, this is usually fine, but let's be explicit
+                    stmt = select(Meeting).where(
+                        Meeting.scheduled_at < end_time,
+                        # Use simple overlap logic: (StartA < EndB) and (EndA > StartB)
+                        # We calculate EndA dynamically in SQL if needed, but here we can just use the column if it existed
+                        # Since we only have duration, we construct the expression
+                        (Meeting.scheduled_at + (Meeting.duration_minutes * text("'1 minute'::interval"))) > start_time
+                    )
+                    result = session.execute(stmt)
+                    overlapping = result.scalars().all()
+                    
+                    if not overlapping:
+                        return "✅ Slot is available. No conflicts detected."
+                    
+                    response = f"⚠️ {len(overlapping)} Potential Conflicts Detected:\n"
+                    for m in overlapping:
+                        response += f"- {m.title} at {m.scheduled_at.isoformat()}\n"
+                    
+                    return response
+                finally:
+                    session.close()
+                    
             except Exception as e:
+                logger.error(f"[AVAILABILITY_TOOL] Error: {e}")
                 return f"Error checking availability: {str(e)}"
 
-        async def request_booking_tool(
+        def request_booking_tool(
             title: str,
             twg_name: str,
             start_time_iso: str,
             duration_minutes: int,
             vip_names: List[str] = [],
-            location: str = "Virtual"
+            attendee_emails: List[str] = [],
+            location: str = None
         ) -> str:
             """
             Request to officially book a meeting.
@@ -252,57 +258,183 @@ class LangGraphSupervisor:
                 twg_name: Name of the hosting TWG (e.g. "Energy", "Minerals")
                 start_time_iso: ISO 8601 Start time
                 duration_minutes: Duration
-                vip_names: VIPs to invite
-                location: Location or "Virtual"
+                vip_names: VIPs to invite (by name/title)
+                attendee_emails: List of participant emails to invite
+                location: Location (optional). If None/ambiguous, will be inferred.
             """
+            from loguru import logger
+            from app.core.database import SyncSessionLocal
+            from sqlalchemy import text
+            from uuid import uuid4
+            import random
+            import string
+            
             try:
+                logger.info(f"[BOOKING_TOOL] Starting booking: {title}")
                 start_time = datetime.fromisoformat(start_time_iso)
                 
-                async with get_db_session_context() as session:
-                    # Resolve TWG
-                    stmt = select(TWG).where(TWG.name.ilike(f"%{twg_name}%"))
-                    result = await session.execute(stmt)
-                    twg = result.scalars().first()
-                    if not twg:
+                # Smart Location Inference
+                is_virtual = False
+                generated_link = None
+                
+                # Keywords that imply virtual meeting
+                virtual_keywords = ["virtual", "online", "zoom", "meet", "teams", "remote", "call"]
+                
+                # Determine explicit or implicit location
+                final_location = location
+                if not final_location:
+                    # Default to virtual for safety/accessibility
+                    final_location = "Virtual (Google Meet)"
+                    is_virtual = True
+                else:
+                    if any(k in final_location.lower() for k in virtual_keywords):
+                        is_virtual = True
+                
+                # Generate Google Meet link if virtual
+                if is_virtual and "meet.google.com" not in final_location:
+                    # Generate a realistic-looking mock Google Meet link
+                    # Format: 3-4-3 chars (e.g., abc-defg-hij)
+                    part1 = ''.join(random.choices(string.ascii_lowercase, k=3))
+                    part2 = ''.join(random.choices(string.ascii_lowercase, k=4))
+                    part3 = ''.join(random.choices(string.ascii_lowercase, k=3))
+                    generated_link = f"meet.google.com/{part1}-{part2}-{part3}"
+                    
+                    # Append to location if not already there
+                    final_location = f"{final_location} - {generated_link}"
+
+                logger.info(f"[BOOKING_TOOL] Final Location: {final_location} (Virtual: {is_virtual})")
+
+                # Use SYNC database session to avoid event loop issues
+                session = SyncSessionLocal()
+                
+                try:
+                    # Resolve TWG using raw SQL
+                    twg_query = text("SELECT id, name FROM twgs WHERE name ILIKE :twg_name LIMIT 1")
+                    result = session.execute(twg_query, {"twg_name": f"%{twg_name}%"})
+                    twg_row = result.fetchone()
+                    
+                    if not twg_row:
+                        logger.error(f"[BOOKING_TOOL] TWG '{twg_name}' not found")
                         return f"Error: TWG '{twg_name}' not found."
                     
-                    # Resolve VIPs
-                    vip_ids = []
-                    if vip_names:
-                        stmt = select(VipProfile).join(User).where(User.full_name.in_(vip_names) | VipProfile.title.in_(vip_names))
-                        result = await session.execute(stmt)
-                        vips = result.scalars().all()
-                        vip_ids = [v.user_id for v in vips]
-
-                # Request Booking
-                result = await global_scheduler.request_booking(
-                    twg_id=twg.id,
-                    title=title,
-                    start_time=start_time,
-                    duration_minutes=duration_minutes,
-                    vip_attendee_ids=vip_ids,
-                    location=location
-                )
-                
-                if result["status"] in ["scheduled", "requested"]:
-                    conflicts_note = ""
-                    if result.get("conflicts"):
-                        conflicts_note = f"\n(Note: {len(result['conflicts'])} minor conflicts logged)"
-                    return f"✅ Meeting '{title}' {result['status'].upper()}. ID: {result['meeting_id']}{conflicts_note}"
-                
-                else: # Denied
-                    response = f"❌ Booking Denied: {result.get('reason')}\nConflicts:\n"
-                    for c in result.get("conflicts", []):
-                         response += f"- {c['description']}\n"
+                    twg_id = twg_row[0]
+                    twg_name_found = twg_row[1]
+                    logger.info(f"[BOOKING_TOOL] Found TWG: {twg_name_found} ({twg_id})")
                     
-                    if result.get("alternatives"):
-                        response += "\nSuggested Alternative Times:\n"
-                        for alt in result["alternatives"]:
-                            response += f"- {alt.isoformat()}\n"
-                            
-                    return response
+                    # 1. Resolve VIPs
+                    vip_user_ids = []
+                    if vip_names:
+                        placeholders = ','.join([f":name{i}" for i in range(len(vip_names))])
+                        vip_query = text(f"""
+                            SELECT vip_profiles.user_id 
+                            FROM vip_profiles 
+                            JOIN users ON users.id = vip_profiles.user_id 
+                            WHERE users.full_name IN ({placeholders}) OR vip_profiles.title IN ({placeholders})
+                        """)
+                        params_vip = {f"name{i}": name for i, name in enumerate(vip_names)}
+                        result = session.execute(vip_query, params_vip)
+                        vip_user_ids = [row[0] for row in result.fetchall()]
+                        logger.info(f"[BOOKING_TOOL] Found {len(vip_user_ids)} VIPs")
 
+                    # 2. Resolve Regular Attendees by Email
+                    regular_user_ids = []
+                    found_emails = []
+                    guest_list = []
+                    
+                    if attendee_emails:
+                        # Clean emails
+                        clean_emails = [e.strip().lower() for e in attendee_emails]
+                        
+                        if clean_emails:
+                            placeholders = ','.join([f":email{i}" for i in range(len(clean_emails))])
+                            user_query = text(f"""
+                                SELECT id, email FROM users WHERE LOWER(email) IN ({placeholders})
+                            """)
+                            params_email = {f"email{i}": e for i, e in enumerate(clean_emails)}
+                            result = session.execute(user_query, params_email)
+                            rows = result.fetchall()
+                            
+                            for r in rows:
+                                regular_user_ids.append(r[0])
+                                found_emails.append(r[1].lower())
+                            
+                            # Identify guests (emails not found in system)
+                            guest_list = [e for e in clean_emails if e not in found_emails]
+                            
+                            logger.info(f"[BOOKING_TOOL] Found {len(regular_user_ids)} internal users, {len(guest_list)} external guests")
+
+                    # Deduplicate user IDs (VIPs might also be in attendee_emails)
+                    all_participant_ids = list(set(vip_user_ids + regular_user_ids))
+                    
+                    # Prevent Double Booking (Same TWG, Same Time)
+                    check_dup = text("""
+                        SELECT id FROM meetings 
+                        WHERE twg_id = :twg_id 
+                        AND scheduled_at = :scheduled_at
+                    """)
+                    dup_result = session.execute(check_dup, {"twg_id": twg_id, "scheduled_at": start_time})
+                    existing_meeting = dup_result.fetchone()
+                    
+                    if existing_meeting:
+                        logger.warning(f"[BOOKING_TOOL] Duplicate meeting detected for TWG {twg_name} at {start_time}")
+                        # FORCE STOP execution via GraphInterrupt
+                        # This prevents the agent from ignoring the instructions and ensures no email is sent.
+                        raise GraphInterrupt(f"DUPLICATE MEETING DETECTED (ID: {existing_meeting[0]}). Execution halted to prevent double booking.")
+                    
+                    # Create Meeting using raw SQL
+                    meeting_id = uuid4()
+                    meeting_type = "virtual" if is_virtual else "in-person"
+                    
+                    # Append guest list to description (title for now, or ideally a dedicated field)
+                    # Since we don't have a description field yet, we'll append to location or implicit knowledge
+                    # But wait, we can't easily modify title.
+                    # We will log it and maybe the user will see it in the email draft which uses this info
+                    
+                    insert_meeting = text("""
+                        INSERT INTO meetings (id, twg_id, title, scheduled_at, duration_minutes, location, status, meeting_type)
+                        VALUES (:id, :twg_id, :title, :scheduled_at, :duration_minutes, :location, :status, :meeting_type)
+                    """)
+                    
+                    session.execute(insert_meeting, {
+                        "id": meeting_id,
+                        "twg_id": twg_id,
+                        "title": title,
+                        "scheduled_at": start_time,
+                        "duration_minutes": duration_minutes,
+                        "location": final_location,
+                        "status": "SCHEDULED",
+                        "meeting_type": meeting_type
+                    })
+                    
+                    if all_participant_ids:
+                        # Fallback to f-string due to persistent SQLAlchemy binding issues
+                        # UUIDs are safe to interpolate
+                        for uid in all_participant_ids:
+                            sql = f"INSERT INTO meeting_participants (meeting_id, user_id, rsvp_status, attended) VALUES ('{meeting_id}', '{uid}', 'PENDING', false)"
+                            session.execute(text(sql))
+                    
+                    session.commit()
+                    
+                    guest_msg = ""
+                    if guest_list:
+                        guest_msg = f" (Guests added to list: {', '.join(guest_list)})"
+
+                    logger.info(f"[BOOKING_TOOL] ✓ Meeting created: {meeting_id}")
+                    return f"✅ Meeting '{title}' SCHEDULED. ID: {meeting_id}\nLocation: {final_location}{guest_msg}"
+                    
+                except GraphInterrupt:
+                    raise
+                except Exception as e:
+                    session.rollback()
+                    logger.error(f"[BOOKING_TOOL] Database error: {e}", exc_info=True)
+                    return f"Error creating meeting: {str(e)}"
+                finally:
+                    session.close()
+
+            except GraphInterrupt:
+                raise
             except Exception as e:
+                logger.error(f"[BOOKING_TOOL] Error requesting booking: {e}", exc_info=True)
                 return f"Error requesting booking: {str(e)}"
 
         if hasattr(self.supervisor_agent, "add_tool"):

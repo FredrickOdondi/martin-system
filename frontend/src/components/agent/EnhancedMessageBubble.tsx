@@ -238,8 +238,14 @@ export default function EnhancedMessageBubble({ message, onReact, onCopy, onRepl
                                 <div className="flex gap-2">
                                     {onApprove && (
                                         <button
-                                            onClick={() => onApprove(message.approvalRequest!.request_id)}
-                                            className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-xs font-semibold py-2 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-1.5"
+                                            onClick={async () => {
+                                                const btn = document.activeElement as HTMLButtonElement;
+                                                btn.disabled = true;
+                                                btn.innerHTML = '<span class="size-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block mr-2"></span>Sending...';
+                                                await onApprove(message.approvalRequest!.request_id);
+                                                // No need to reset as message will update/disappear
+                                            }}
+                                            className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-xs font-semibold py-2 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
                                         >
                                             <span className="material-symbols-outlined text-[16px]">check_circle</span>
                                             Approve & Send

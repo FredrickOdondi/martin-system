@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import create_engine
+from sqlalchemy.orm import DeclarativeBase, sessionmaker, Session
 
 try:
     from app.core.config import settings
@@ -36,6 +37,33 @@ AsyncSessionLocal = async_sessionmaker(
 
 class Base(DeclarativeBase):
     pass
+
+# ============== SYNC DATABASE ENGINE ==============
+# For LangGraph tools that run in separate event loops
+# These cannot use async database connections
+SYNC_DATABASE_URL = settings.DATABASE_URL
+# PostgreSQL: use psycopg2 driver for sync (replace asyncpg if present)
+if "postgresql" in SYNC_DATABASE_URL:
+    # Replace any async driver with psycopg2
+    SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
+    SYNC_DATABASE_URL = SYNC_DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://")
+
+sync_engine_kwargs = {"echo": False, "future": True}
+if SYNC_DATABASE_URL.startswith("sqlite"):
+    sync_engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+sync_engine = create_engine(SYNC_DATABASE_URL, **sync_engine_kwargs)
+
+SyncSessionLocal = sessionmaker(
+    bind=sync_engine,
+    class_=Session,
+    expire_on_commit=False,
+    autoflush=False
+)
+
+def get_sync_db_session():
+    """Get a synchronous database session for use in LangGraph tools."""
+    return SyncSessionLocal()
 
 async def get_db():
     async with AsyncSessionLocal() as session:

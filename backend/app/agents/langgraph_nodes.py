@@ -157,6 +157,16 @@ async def route_query_node(state: AgentState) -> AgentState:
         else:
             logger.info(f"[ROUTE] No specific TWG identified, will use supervisor")
 
+    # --- 3. SCHEDULING OVERRIDE ---
+    # If this is a scheduling request, ALWAYS route to supervisor (it has the scheduling tools)
+    scheduling_keywords = ["schedule", "book", "meeting", "calendar", "appointment"]
+    is_scheduling_request = any(keyword in query_lower for keyword in scheduling_keywords)
+    
+    if is_scheduling_request and relevant:
+        logger.info(f"[ROUTE] Scheduling request detected - overriding to supervisor_only (has scheduling tools)")
+        # Clear TWG routing and force supervisor
+        relevant = []
+
     # Determine delegation type
     if not relevant:
         delegation_type = "supervisor_only"

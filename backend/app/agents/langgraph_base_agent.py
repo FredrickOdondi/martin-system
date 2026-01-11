@@ -691,9 +691,11 @@ class LangGraphBaseAgent:
                 for task in snapshot.tasks:
                     if hasattr(task, 'interrupts') and task.interrupts:
                         for inter in task.interrupts:
-                            logger.info(f"[{self.agent_id}] Detected interrupt in state: {inter.value}")
+                            # Handle both object (with .value) and direct value interrupts
+                            interrupt_value = inter.value if hasattr(inter, 'value') else inter
+                            logger.info(f"[{self.agent_id}] Detected interrupt in state: {interrupt_value}")
                             # Manually re-raise so API can catch it
-                            raise GraphInterrupt(inter.value)
+                            raise GraphInterrupt(interrupt_value)
 
             response = result.get("response", "")
 
