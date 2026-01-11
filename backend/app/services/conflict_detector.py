@@ -488,3 +488,62 @@ If no conflicts, respond with: NO CONFLICT
             ]
 
         return conflicts
+
+    async def check_new_document(self, new_doc: Document) -> List[ConflictAlert]:
+        """
+        Real-time semantic check when document is created/updated.
+        Compares against ALL other TWGs' recent policy documents.
+        """
+        logger.info(f"Checking for conflicts with new document: {new_doc.file_name} ({new_doc.twg_id})")
+        conflicts = []
+        
+        async with get_db_session_context() as db:
+            try:
+                # Get other TWGs' recent policy docs (last 30 days)
+                # We need to filter by document type if available, but for now we look at all
+                # excluding the current TWG
+                stmt = select(Document).where(
+                    and_(
+                        Document.twg_id != new_doc.twg_id,
+                        Document.created_at >= datetime.now(UTC) - timedelta(days=30)
+                    )
+                ).order_by(Document.created_at.desc())
+                
+                result = await db.execute(stmt)
+                other_docs = result.scalars().all()
+                
+                logger.debug(f"Comparing against {len(other_docs)} other documents")
+                
+                for other_doc in other_docs:
+                    # Construct text content proxy
+                    # Ideally we fetch content from file storage or vector DB
+                    # Here we use file_name + metadata as available
+                    new_content = new_doc.file_name
+                    if new_doc.metadata_json:
+                        new_content += f" {str(new_doc.metadata_json)}"
+                        
+                    other_content = other_doc.file_name
+                    if other_doc.metadata_json:
+                         other_content += f" {str(other_doc.metadata_json)}"
+                         
+                    # Check for conflicts using existing logic
+                    # We pass TWG IDs (or names if resolved)
+                    # For now using IDs as keys
+                    twg_outputs = {
+                        str(new_doc.twg_id): new_content,
+                        str(other_doc.twg_id): other_content
+                    }
+                    
+                    found_conflicts = self.detect_conflicts(twg_outputs)
+                    
+                    if found_conflicts:
+                        conflicts.extend(found_conflicts)
+                        
+            except Exception as e:
+                logger.error(f"Error in check_new_document: {e}")
+                
+        # Store results
+        if conflicts:
+            self._conflict_history.extend(conflicts)
+            
+        return conflicts

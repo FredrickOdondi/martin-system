@@ -28,6 +28,7 @@ class TWGPillar(str, enum.Enum):
     resource_mobilization = "resource_mobilization"
 
 class MeetingStatus(str, enum.Enum):
+    REQUESTED = "requested"  # New: Pending Supervisor approval
     SCHEDULED = "scheduled"
     CANCELLED = "cancelled"
     COMPLETED = "completed"
@@ -76,6 +77,7 @@ class ConflictType(str, enum.Enum):
     RESOURCE_CONSTRAINT = "resource_constraint"
     POLICY_MISALIGNMENT = "policy_misalignment"
     DEPENDENCY_BLOCKER = "dependency_blocker"
+    VIP_AVAILABILITY = "vip_availability" # New
 
 class ConflictSeverity(str, enum.Enum):
     LOW = "low"
@@ -89,6 +91,11 @@ class ConflictStatus(str, enum.Enum):
     ESCALATED = "escalated"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
+
+class DependencyStatus(str, enum.Enum):
+    PENDING = "pending"
+    SATISFIED = "satisfied"
+    BLOCKED = "blocked"
 
 # --- Association Tables ---
 
@@ -144,6 +151,7 @@ class User(Base):
     @property
     def twg_ids(self) -> List[uuid.UUID]:
         return [twg.id for twg in self.twgs]
+    
     owned_action_items: Mapped[List["ActionItem"]] = relationship(back_populates="owner")
     meeting_participations: Mapped[List["MeetingParticipant"]] = relationship(back_populates="user")
     notifications: Mapped[List["Notification"]] = relationship(
@@ -151,6 +159,30 @@ class User(Base):
     )
     refresh_tokens: Mapped[List["RefreshToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     audit_logs: Mapped[List["AuditLog"]] = relationship(back_populates="user")
+    
+    # VIP Profile (One-to-One)
+    vip_profile: Mapped[Optional["VipProfile"]] = relationship(back_populates="user", uselist=False, cascade="all, delete-orphan")
+
+class VipProfile(Base):
+    """
+    Profile for Very Important Persons (Ministers, Heads of State, etc.)
+    Tracks their priority level and availability constraints.
+    """
+    __tablename__ = "vip_profiles"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+    
+    title: Mapped[str] = mapped_column(String(100)) # e.g. "Minister of Energy"
+    priority_level: Mapped[int] = mapped_column(Integer, default=1) # 1=Standard, 5=Head of State
+    companies: Mapped[Optional[str]] = mapped_column(String(255), nullable=True) # Companies/Orgs they represent
+    
+    preferences: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True) # e.g. "No morning meetings"
+    calendar_sync_token: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    
+    # Relationships
+    user: Mapped["User"] = relationship(back_populates="vip_profile")
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
@@ -191,6 +223,40 @@ class TWG(Base):
     projects: Mapped[List["Project"]] = relationship(back_populates="twg")
     action_items: Mapped[List["ActionItem"]] = relationship(back_populates="twg")
     documents: Mapped[List["Document"]] = relationship(back_populates="twg")
+    
+    # Dependencies
+    dependencies_as_source: Mapped[List["Dependency"]] = relationship("Dependency", foreign_keys="[Dependency.source_twg_id]", back_populates="source_twg")
+    dependencies_as_target: Mapped[List["Dependency"]] = relationship("Dependency", foreign_keys="[Dependency.target_twg_id]", back_populates="target_twg")
+
+class Dependency(Base):
+    """
+    Tracks cross-TWG dependencies.
+    Example: Minerals TWG (source) must decide on 'smelting_policy' 
+    before Energy TWG (target) can schedule 'power_planning'
+    """
+    __tablename__ = "dependencies"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    
+    source_twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
+    target_twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
+    
+    description: Mapped[str] = mapped_column(Text)
+    status: Mapped[DependencyStatus] = mapped_column(Enum(DependencyStatus), default=DependencyStatus.PENDING)
+    
+    # Optional links to blocking artifacts
+    blocking_meeting_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("meetings.id"), nullable=True)
+    blocking_document_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("documents.id"), nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # Relationships
+    source_twg: Mapped["TWG"] = relationship("TWG", foreign_keys=[source_twg_id], back_populates="dependencies_as_source")
+    target_twg: Mapped["TWG"] = relationship("TWG", foreign_keys=[target_twg_id], back_populates="dependencies_as_target")
+    blocking_meeting: Mapped[Optional["Meeting"]] = relationship("Meeting")
+    blocking_document: Mapped[Optional["Document"]] = relationship("Document")
 
 class Meeting(Base):
     __tablename__ = "meetings"

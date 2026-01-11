@@ -711,6 +711,51 @@ class LangGraphBaseAgent:
             logger.error(f"[{self.agent_id}:{thread_id}] Error: {e}")
             return f"I apologize, but I encountered an error: {str(e)}"
 
+    def resume_chat(self, thread_id: str, resume_value: Dict) -> str:
+        """
+        Resume a paused agent conversation (e.g., after human approval).
+        
+        Args:
+            thread_id: Thread ID to resume
+            resume_value: Value to pass back to the interrupted node (e.g. approval result)
+            
+        Returns:
+            Agent response
+        """
+        if not self.compiled_graph:
+            raise ValueError(f"[{self.agent_id}] Graph not compiled")
+            
+        logger.info(f"[{self.agent_id}:{thread_id}] Resuming with value: {resume_value}")
+        
+        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
+        
+        try:
+            # Resume execution by passing Command(resume=value)
+            # This satisfies the interrupt and continues execution
+            result = self.compiled_graph.invoke(
+                Command(resume=resume_value),
+                config
+            )
+            
+            # Use same check logic as chat()
+            snapshot = self.compiled_graph.get_state(config)
+            if snapshot.tasks:
+                for task in snapshot.tasks:
+                    if hasattr(task, 'interrupts') and task.interrupts:
+                        for inter in task.interrupts:
+                            logger.info(f"[{self.agent_id}] Detected interrupt in state: {inter.value}")
+                            raise GraphInterrupt(inter.value)
+                            
+            response = result.get("response", "")
+            logger.info(f"[{self.agent_id}:{thread_id}] Response (Resumed): {response[:100]}...")
+            return response
+            
+        except GraphInterrupt:
+            raise
+        except Exception as e:
+            logger.error(f"[{self.agent_id}:{thread_id}] Resume Error: {e}")
+            return f"I apologize, but I entered an error resuming the conversation: {str(e)}"
+
     def reset_history(self, thread_id: Optional[str] = None):
         """
         Clear conversation history for a thread.

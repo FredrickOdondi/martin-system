@@ -238,76 +238,73 @@ export default function Dashboard() {
                         </div>
                     </div>
 
-                    {/* TWG Status Grid */}
-                    <div>
-                        <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-xl font-bold text-[#0d121b] dark:text-white">Technical Working Groups Status</h3>
-                            <div className="flex gap-2">
-                                <button className="p-2 text-[#0d121b] dark:text-[#a0aec0] hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded-lg transition-colors">
-                                    <span className="material-symbols-outlined">filter_list</span>
-                                </button>
-                                <button className="p-2 text-[#0d121b] dark:text-[#a0aec0] hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded-lg transition-colors">
-                                    <span className="material-symbols-outlined">grid_view</span>
-                                </button>
-                            </div>
+                    <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-xl font-bold text-[#0d121b] dark:text-white">Technical Working Groups Status</h3>
+                        <div className="flex gap-2">
+                            <button className="p-2 text-[#0d121b] dark:text-[#a0aec0] hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded-lg transition-colors">
+                                <span className="material-symbols-outlined">filter_list</span>
+                            </button>
+                            <button className="p-2 text-[#0d121b] dark:text-[#a0aec0] hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded-lg transition-colors">
+                                <span className="material-symbols-outlined">grid_view</span>
+                            </button>
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {stats?.twg_health.map((twg) => (
-                                <div key={twg.id} className="bg-white dark:bg-[#1a202c] rounded-xl border border-[#e7ebf3] dark:border-[#2d3748] p-5 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
-                                    <div className="absolute top-0 right-0 p-4">
-                                        <div className={`text-xs font-bold px-2 py-1 rounded ${twg.status === 'active'
-                                            ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
-                                            : 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
-                                            }`}>
-                                            {twg.status.toUpperCase()}
-                                        </div>
-                                    </div>
-                                    <div className="flex items-start gap-4 mb-4">
-                                        <div className="size-12 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-primary shrink-0">
-                                            <span className="material-symbols-outlined">{
-                                                twg.pillar.toLowerCase() === 'minerals' ? 'diamond' :
-                                                    twg.pillar.toLowerCase() === 'energy' ? 'bolt' :
-                                                        twg.pillar.toLowerCase() === 'agribusiness' ? 'agriculture' :
-                                                            twg.pillar.toLowerCase() === 'digital' ? 'terminal' :
-                                                                'groups'
-                                            }</span>
-                                        </div>
-                                        <div>
-                                            <h4 className="font-bold text-[#0d121b] dark:text-white text-lg">{twg.name}</h4>
-                                            <p className="text-sm text-[#4c669a] dark:text-[#a0aec0]">Lead: {twg.lead}</p>
-                                        </div>
-                                    </div>
-                                    <div className="space-y-4">
-                                        <div>
-                                            <div className="flex justify-between text-sm mb-1">
-                                                <span className="text-[#4c669a] dark:text-[#a0aec0]">Pillar Performance</span>
-                                                <span className="font-bold text-[#0d121b] dark:text-white">{twg.completion}%</span>
-                                            </div>
-                                            <div className="h-2 w-full bg-[#f0f2f5] dark:bg-[#2d3748] rounded-full overflow-hidden">
-                                                <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${twg.completion}%` }}></div>
-                                            </div>
-                                        </div>
-                                        <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-lg p-3 flex items-start gap-2 border border-indigo-100 dark:border-indigo-800/30">
-                                            <span className="material-symbols-outlined text-indigo-500 text-sm mt-0.5">auto_awesome</span>
-                                            <div>
-                                                <p className="text-xs text-[#0d121b] dark:text-white font-medium">System Status</p>
-                                                <p className="text-xs text-[#4c669a] dark:text-[#a0aec0]">
-                                                    {twg.status === 'active' ? 'TWG is operating within parameters.' : 'Activity requested – potential blocker identified.'}
-                                                </p>
-                                            </div>
-                                        </div>
-                                        <div className="flex justify-end pt-2 border-t border-[#f0f2f5] dark:border-[#2d3748]">
-                                            <button
-                                                onClick={() => navigate(`/workspace/${twg.id}`)}
-                                                className="text-sm text-primary font-medium hover:text-blue-700 flex items-center gap-1"
-                                            >
-                                                View TWG Details <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-                                            </button>
-                                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {stats?.twg_health.map((twg) => (
+                            <div key={twg.id} className="bg-white dark:bg-[#1a202c] rounded-xl border border-[#e7ebf3] dark:border-[#2d3748] p-5 shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
+                                <div className="absolute top-0 right-0 p-4">
+                                    <div className={`text-xs font-bold px-2 py-1 rounded ${twg.status === 'active'
+                                        ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400'
+                                        : 'bg-amber-50 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400'
+                                        }`}>
+                                        {twg.status.toUpperCase()}
                                     </div>
                                 </div>
-                            ))}
-                        </div>
+                                <div className="flex items-start gap-4 mb-4">
+                                    <div className="size-12 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center text-primary shrink-0">
+                                        <span className="material-symbols-outlined">{
+                                            twg.pillar.toLowerCase() === 'minerals' ? 'diamond' :
+                                                twg.pillar.toLowerCase() === 'energy' ? 'bolt' :
+                                                    twg.pillar.toLowerCase() === 'agribusiness' ? 'agriculture' :
+                                                        twg.pillar.toLowerCase() === 'digital' ? 'terminal' :
+                                                            'groups'
+                                        }</span>
+                                    </div>
+                                    <div>
+                                        <h4 className="font-bold text-[#0d121b] dark:text-white text-lg">{twg.name}</h4>
+                                        <p className="text-sm text-[#4c669a] dark:text-[#a0aec0]">Lead: {twg.lead}</p>
+                                    </div>
+                                </div>
+                                <div className="space-y-4">
+                                    <div>
+                                        <div className="flex justify-between text-sm mb-1">
+                                            <span className="text-[#4c669a] dark:text-[#a0aec0]">Pillar Performance</span>
+                                            <span className="font-bold text-[#0d121b] dark:text-white">{twg.completion}%</span>
+                                        </div>
+                                        <div className="h-2 w-full bg-[#f0f2f5] dark:bg-[#2d3748] rounded-full overflow-hidden">
+                                            <div className="h-full bg-emerald-500 rounded-full transition-all duration-500" style={{ width: `${twg.completion}%` }}></div>
+                                        </div>
+                                    </div>
+                                    <div className="bg-indigo-50 dark:bg-indigo-900/20 rounded-lg p-3 flex items-start gap-2 border border-indigo-100 dark:border-indigo-800/30">
+                                        <span className="material-symbols-outlined text-indigo-500 text-sm mt-0.5">auto_awesome</span>
+                                        <div>
+                                            <p className="text-xs text-[#0d121b] dark:text-white font-medium">System Status</p>
+                                            <p className="text-xs text-[#4c669a] dark:text-[#a0aec0]">
+                                                {twg.status === 'active' ? 'TWG is operating within parameters.' : 'Activity requested – potential blocker identified.'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="flex justify-end pt-2 border-t border-[#f0f2f5] dark:border-[#2d3748]">
+                                        <button
+                                            onClick={() => navigate(`/workspace/${twg.id}`)}
+                                            className="text-sm text-primary font-medium hover:text-blue-700 flex items-center gap-1"
+                                        >
+                                            View TWG Details <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 </div>
 

@@ -32,7 +32,8 @@ class EmailApprovalService:
         cc: Optional[list] = None,
         bcc: Optional[list] = None,
         attachments: Optional[list] = None,
-        context: Optional[str] = None
+        context: Optional[str] = None,
+        thread_id: Optional[str] = None
     ) -> EmailApprovalRequest:
         """
         Create a new email approval request.
@@ -46,6 +47,7 @@ class EmailApprovalService:
             bcc: Optional BCC recipients
             attachments: Optional file attachments
             context: Optional context about why this email is being sent
+            thread_id: LangGraph thread ID for resuming execution
 
         Returns:
             EmailApprovalRequest object
@@ -68,7 +70,8 @@ class EmailApprovalService:
         approval_request = EmailApprovalRequest(
             request_id=request_id,
             draft=draft,
-            message="Please review and approve this email before sending"
+            message="Please review and approve this email before sending",
+            thread_id=thread_id
         )
 
         # Store the pending approval
@@ -102,6 +105,22 @@ class EmailApprovalService:
         if request_id in self.pending_approvals:
             del self.pending_approvals[request_id]
             logger.info(f"Removed approval request {request_id}")
+            return True
+        return False
+
+    def update_approval_request_thread(self, request_id: str, thread_id: str) -> bool:
+        """
+        Update an existing approval request with the LangGraph thread ID.
+        
+        Args:
+            request_id: The request ID
+            thread_id: The thread ID to associate
+            
+        Returns:
+            True if updated, False if not found
+        """
+        if request_id in self.pending_approvals:
+            self.pending_approvals[request_id].thread_id = thread_id
             return True
         return False
 

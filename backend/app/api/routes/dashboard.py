@@ -42,6 +42,47 @@ async def get_conflicts(
     conflicts = result.scalars().all()
     return conflicts
 
+@router.get("/conflicts/autonomous-log")
+async def get_autonomous_conflict_log(
+    days: int = 7,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Show conflicts detected and resolved by background monitor.
+    Restricted to Admins for now.
+    """
+    from app.models.models import Conflict, ConflictStatus, UserRole
+    
+    # Check admin
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Not authorized")
+        
+    cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
+    
+    query = select(Conflict).where(
+        Conflict.detected_at >= cutoff
+    ).order_by(desc(Conflict.detected_at))
+    
+    result = await db.execute(query)
+    conflicts = result.scalars().all()
+    
+    # Calculate Stats
+    total = len(conflicts)
+    auto_resolved = len([c for c in conflicts if c.status == ConflictStatus.RESOLVED and "auto_resolved" in str(c.resolution_log)])
+    escalated = len([c for c in conflicts if c.status == ConflictStatus.ESCALATED])
+    resolution_rate = (auto_resolved / total) if total > 0 else 0
+    
+    return {
+        "stats": {
+            "total_detected": total,
+            "auto_resolved": auto_resolved,
+            "escalated": escalated,
+            "resolution_rate": resolution_rate
+        },
+        "conflicts": conflicts
+    }
+
 @router.get("/stats", response_model=Dict[str, Any])
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),

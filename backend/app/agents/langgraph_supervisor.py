@@ -184,6 +184,131 @@ class LangGraphSupervisor:
             # Or we simply wrap these in the system prompt context injection
             pass # TODO: Verify tool registration mechanism
 
+        # Add Scheduler Tools
+        self._add_scheduler_tools()
+
+    def _add_scheduler_tools(self):
+        """Add tools for proactive scheduling interaction."""
+        from app.services.global_scheduler import global_scheduler
+        from app.core.database import get_db_session_context
+        from sqlalchemy import select
+        from app.models.models import User, TWG, VipProfile
+        from datetime import datetime
+
+        async def check_availability_tool(start_time_iso: str, duration_minutes: int, vip_names: List[str] = []) -> str:
+            """
+            Check availability for a potential meeting without booking it.
+            Args:
+                start_time_iso: Start time (ISO 8601 string, e.g. "2026-03-15T14:00:00")
+                duration_minutes: Duration in minutes
+                vip_names: List of VIP names to check (e.g. "Minister of Energy")
+            """
+            try:
+                start_time = datetime.fromisoformat(start_time_iso)
+                
+                # Resolve VIP names to IDs
+                vip_ids = []
+                async with get_db_session_context() as session:
+                    if vip_names:
+                        stmt = select(VipProfile).join(User).where(User.full_name.in_(vip_names) | VipProfile.title.in_(vip_names))
+                        result = await session.execute(stmt)
+                        vips = result.scalars().all()
+                        vip_ids = [v.user_id for v in vips]
+                        
+                        found_names = {v.title for v in vips}
+                        missing = set(vip_names) - found_names
+                        if missing:
+                            return f"Warning: Could not identify VIPs: {', '.join(missing)}. Checking others..."
+
+                conflicts = await global_scheduler.check_availability(
+                    start_time=start_time,
+                    duration_minutes=duration_minutes,
+                    vip_ids=vip_ids
+                )
+                
+                if not conflicts:
+                    return "✅ Slot is available. No conflicts detected."
+                
+                response = f"⚠️ {len(conflicts)} Conflicts Detected:\n"
+                for c in conflicts:
+                    response += f"- {c.severity.upper()} {c.conflict_type.value}: {c.description} (Resolution: {c.suggested_resolution})\n"
+                
+                return response
+            except Exception as e:
+                return f"Error checking availability: {str(e)}"
+
+        async def request_booking_tool(
+            title: str,
+            twg_name: str,
+            start_time_iso: str,
+            duration_minutes: int,
+            vip_names: List[str] = [],
+            location: str = "Virtual"
+        ) -> str:
+            """
+            Request to officially book a meeting.
+            Args:
+                title: Meeting title
+                twg_name: Name of the hosting TWG (e.g. "Energy", "Minerals")
+                start_time_iso: ISO 8601 Start time
+                duration_minutes: Duration
+                vip_names: VIPs to invite
+                location: Location or "Virtual"
+            """
+            try:
+                start_time = datetime.fromisoformat(start_time_iso)
+                
+                async with get_db_session_context() as session:
+                    # Resolve TWG
+                    stmt = select(TWG).where(TWG.name.ilike(f"%{twg_name}%"))
+                    result = await session.execute(stmt)
+                    twg = result.scalars().first()
+                    if not twg:
+                        return f"Error: TWG '{twg_name}' not found."
+                    
+                    # Resolve VIPs
+                    vip_ids = []
+                    if vip_names:
+                        stmt = select(VipProfile).join(User).where(User.full_name.in_(vip_names) | VipProfile.title.in_(vip_names))
+                        result = await session.execute(stmt)
+                        vips = result.scalars().all()
+                        vip_ids = [v.user_id for v in vips]
+
+                # Request Booking
+                result = await global_scheduler.request_booking(
+                    twg_id=twg.id,
+                    title=title,
+                    start_time=start_time,
+                    duration_minutes=duration_minutes,
+                    vip_attendee_ids=vip_ids,
+                    location=location
+                )
+                
+                if result["status"] in ["scheduled", "requested"]:
+                    conflicts_note = ""
+                    if result.get("conflicts"):
+                        conflicts_note = f"\n(Note: {len(result['conflicts'])} minor conflicts logged)"
+                    return f"✅ Meeting '{title}' {result['status'].upper()}. ID: {result['meeting_id']}{conflicts_note}"
+                
+                else: # Denied
+                    response = f"❌ Booking Denied: {result.get('reason')}\nConflicts:\n"
+                    for c in result.get("conflicts", []):
+                         response += f"- {c['description']}\n"
+                    
+                    if result.get("alternatives"):
+                        response += "\nSuggested Alternative Times:\n"
+                        for alt in result["alternatives"]:
+                            response += f"- {alt.isoformat()}\n"
+                            
+                    return response
+
+            except Exception as e:
+                return f"Error requesting booking: {str(e)}"
+
+        if hasattr(self.supervisor_agent, "add_tool"):
+            self.supervisor_agent.add_tool(check_availability_tool)
+            self.supervisor_agent.add_tool(request_booking_tool)
+
 
     def register_agent(self, agent_id: str, agent: LangGraphBaseAgent) -> None:
         """Register a TWG agent."""
@@ -438,6 +563,50 @@ class LangGraphSupervisor:
             
             logger.error(f"[SUPERVISOR:{thread_id}] Error: {e}")
             return f"I apologize, but I encountered an error: {str(e)}"
+
+    async def resume_chat(self, thread_id: str, resume_value: Dict) -> str:
+        """
+        Resume a paused conversation by checking which agent is interrupted.
+        
+        Args:
+            thread_id: The thread ID
+            resume_value: The value to provide to the interrupted node
+        """
+        logger.info(f"[SUPERVISOR:{thread_id}] Attempting to resume chat...")
+        
+        # 1. Check child agents
+        for agent_id, agent in self._twg_agents.items():
+            if not agent.compiled_graph:
+                continue
+                
+            config = {"configurable": {"thread_id": thread_id}}
+            snapshot = agent.compiled_graph.get_state(config)
+            
+            # Check if this agent is interrupted
+            if snapshot.tasks:
+                for task in snapshot.tasks:
+                    if hasattr(task, 'interrupts') and task.interrupts:
+                        logger.info(f"[SUPERVISOR] Found interrupt in agent '{agent_id}'. Resuming...")
+                        # Resume this agent
+                        # Note: agent.resume_chat is sync, so we wrap if needed, 
+                        # but we can call it directly since we are in async method
+                        # handled by thread or direct call.
+                        # Since agent.resume_chat uses compiled_graph.invoke (sync), 
+                        # and we are in async def, this blocks the loop. 
+                        # Ideally we run in executor, but for now direct call is functionally correct.
+                        return agent.resume_chat(thread_id, resume_value)
+        
+        # 2. Check supervisor agent (the general one)
+        config = {"configurable": {"thread_id": thread_id}}
+        snapshot = self.supervisor_agent.compiled_graph.get_state(config)
+        if snapshot.tasks:
+             for task in snapshot.tasks:
+                    if hasattr(task, 'interrupts') and task.interrupts:
+                        logger.info(f"[SUPERVISOR] Found interrupt in supervisor agent. Resuming...")
+                        return self.supervisor_agent.resume_chat(thread_id, resume_value)
+
+        logger.warning(f"[SUPERVISOR:{thread_id}] No interrupted agent found to resume.")
+        return "No active interruption found to resume."
 
     def get_graph_visualization(self) -> str:
         """

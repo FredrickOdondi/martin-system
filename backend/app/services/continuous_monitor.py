@@ -87,8 +87,9 @@ class ContinuousMonitor:
         async with get_db_session_context() as db:
             try:
                 # 1. Fetch upcoming meetings
+                # Fix: Use naive UTC to match DB TIMESTAMP WITHOUT TIME ZONE
                 result = await db.execute(
-                    select(Meeting).where(Meeting.scheduled_at > datetime.now(UTC))
+                    select(Meeting).where(Meeting.scheduled_at > datetime.utcnow())
                 )
                 meetings = result.scalars().all()
                 
