@@ -1,4 +1,6 @@
 import ConflictDashboard from '../../components/admin/ConflictDashboard';
+import GlobalStateDashboard from '../../components/admin/GlobalStateDashboard';
+import SupervisorActionsCard from '../../components/admin/SupervisorActionsCard';
 
 /**
  * Admin Control Tower Page
@@ -22,6 +24,12 @@ export default function ControlTower() {
                     <p className="text-sm text-slate-500 dark:text-slate-400">Synthesis & Conflict Resolution Center</p>
                 </div>
             </div>
+
+            {/* Global State Dashboard */}
+            <GlobalStateDashboard />
+
+            {/* Supervisor Autonomous Actions */}
+            <SupervisorActionsCard />
 
             {/* Conflict Dashboard Component */}
             <ConflictDashboard />

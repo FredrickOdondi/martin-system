@@ -222,6 +222,54 @@ class LangGraphBaseAgent:
 
         logger.info(f"[{agent_id}] LangGraph agent initialized")
 
+        logger.info(f"[{agent_id}] LangGraph agent initialized")
+
+    def add_tool(self, tool_func):
+        """
+        Add a python function as a tool to the agent.
+        Autogenerates the schema from the function signature and docstring.
+        """
+        import inspect
+        
+        func_name = tool_func.__name__
+        doc = tool_func.__doc__ or "No description provided."
+        
+        # Simple schema generation
+        sig = inspect.signature(tool_func)
+        parameters = {}
+        required = []
+        
+        for name, param in sig.parameters.items():
+            param_type = "string"
+            if param.annotation == int:
+                param_type = "integer"
+            elif param.annotation == bool:
+                param_type = "boolean"
+                
+            parameters[name] = {
+                "type": param_type,
+                "description": f"Parameter {name}" 
+            }
+            if param.default == inspect.Parameter.empty:
+                required.append(name)
+        
+        tool_def = {
+            "type": "function",
+            "function": {
+                "name": func_name,
+                "description": doc.strip(),
+                "parameters": {
+                    "type": "object",
+                    "properties": parameters,
+                    "required": required
+                }
+            }
+        }
+        
+        self.tools_def.append(tool_def)
+        self.tool_map[func_name] = tool_func
+        logger.info(f"[{self.agent_id}] Added tool: {func_name}")
+
     def _build_graph(self) -> None:
         """
         Build the LangGraph StateGraph for this agent.
@@ -293,11 +341,23 @@ class LangGraphBaseAgent:
             try:
                 # Search KB restricted to TWG namespace
                 namespace = f"twg-{self.twg_id}"
-                results = self.kb.search(
+                twg_results = self.kb.search(
                     query=query,
                     namespace=namespace,
-                    top_k=2  # LIMIT: Only top 2 docs
+                    top_k=3
                 )
+                
+                # Search Global Broadcast namespace
+                global_results = self.kb.search(
+                    query=query,
+                    namespace="global",
+                    top_k=2
+                )
+                
+                # Merge and Sort by Score
+                results = twg_results + global_results
+                results.sort(key=lambda x: x['score'], reverse=True)
+                results = results[:3] # Keep top 3 most relevant context pieces
                 
                 # Format context
                 if results:
@@ -650,6 +710,51 @@ class LangGraphBaseAgent:
         except Exception as e:
             logger.error(f"[{self.agent_id}:{thread_id}] Error: {e}")
             return f"I apologize, but I encountered an error: {str(e)}"
+
+    def resume_chat(self, thread_id: str, resume_value: Dict) -> str:
+        """
+        Resume a paused agent conversation (e.g., after human approval).
+        
+        Args:
+            thread_id: Thread ID to resume
+            resume_value: Value to pass back to the interrupted node (e.g. approval result)
+            
+        Returns:
+            Agent response
+        """
+        if not self.compiled_graph:
+            raise ValueError(f"[{self.agent_id}] Graph not compiled")
+            
+        logger.info(f"[{self.agent_id}:{thread_id}] Resuming with value: {resume_value}")
+        
+        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
+        
+        try:
+            # Resume execution by passing Command(resume=value)
+            # This satisfies the interrupt and continues execution
+            result = self.compiled_graph.invoke(
+                Command(resume=resume_value),
+                config
+            )
+            
+            # Use same check logic as chat()
+            snapshot = self.compiled_graph.get_state(config)
+            if snapshot.tasks:
+                for task in snapshot.tasks:
+                    if hasattr(task, 'interrupts') and task.interrupts:
+                        for inter in task.interrupts:
+                            logger.info(f"[{self.agent_id}] Detected interrupt in state: {inter.value}")
+                            raise GraphInterrupt(inter.value)
+                            
+            response = result.get("response", "")
+            logger.info(f"[{self.agent_id}:{thread_id}] Response (Resumed): {response[:100]}...")
+            return response
+            
+        except GraphInterrupt:
+            raise
+        except Exception as e:
+            logger.error(f"[{self.agent_id}:{thread_id}] Resume Error: {e}")
+            return f"I apologize, but I entered an error resuming the conversation: {str(e)}"
 
     def reset_history(self, thread_id: Optional[str] = None):
         """

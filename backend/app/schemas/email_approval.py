@@ -28,6 +28,7 @@ class EmailApprovalRequest(BaseModel):
     request_id: str = Field(..., description="Unique request identifier")
     draft: EmailDraft = Field(..., description="Email draft awaiting approval")
     message: str = Field(default="Please review and approve this email before sending", description="Request message to user")
+    thread_id: Optional[str] = Field(None, description="LangGraph thread ID for resuming execution")
 
 
 class EmailApprovalResponse(BaseModel):

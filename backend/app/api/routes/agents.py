@@ -169,6 +169,13 @@ async def chat_with_martin(
             to_list = draft.get("to", [])
             subject = draft.get("subject", "No Subject")
             draft_preview = f"\n\n**To:** {', '.join(to_list)}\n**Subject:** {subject}"
+            
+            # Link this thread context to the approval request so we can resume later
+            if "request_id" in interrupt_value:
+                req_id = interrupt_value["request_id"]
+                approval_service = get_email_approval_service()
+                if approval_service.update_approval_request_thread(req_id, str(conv_id)):
+                    logger.info(f"[CHAT] Linked thread {conv_id} to approval request {req_id}")
         
         response_dict = {
             "response": "",  # Empty - frontend will handle the message display
@@ -615,12 +622,31 @@ async def approve_email(
         # Remove the approval request
         approval_service.remove_approval_request(request_id)
 
+        # RESUME AGENT EXECUTION
+        thread_id = approval_request.thread_id
+        if thread_id:
+            logger.info(f"Resuming agent execution for thread {thread_id}")
+            # Prepare resumption value for the agent
+            resume_value = {
+                "approved": True, 
+                "message_id": result.get('message_id'), 
+                "status": "sent"
+            }
+            try:
+                supervisor = get_supervisor()
+                agent_response = await supervisor.resume_chat(thread_id, resume_value)
+                logger.info(f"Agent resumed successfully. Response: {agent_response}")
+            except Exception as e:
+                logger.error(f"Failed to resume agent: {e}")
+        else:
+             logger.warning(f"No thread_id linked to approval request {request_id} - cannot resume agent")
+
         return EmailApprovalResult(
             success=True,
-            message="Email sent successfully via Resend",
+            message="Email sent successfully via Resend" + (" (Agent resumed)" if thread_id else ""),
             email_sent=True,
             message_id=result.get('message_id'),
-            thread_id=None # Resend doesn't typically provide thread_id
+            thread_id=thread_id
         )
 
         # Audit Log

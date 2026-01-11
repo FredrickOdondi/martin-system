@@ -17,11 +17,11 @@ from app.agents.langgraph_base_agent import LangGraphBaseAgent
 # ROUTING NODE - Determines which agents should handle the query
 # =========================================================================
 
-def route_query_node(state: AgentState) -> AgentState:
+async def route_query_node(state: AgentState) -> AgentState:
     """
     Analyze the query and determine which TWG agents are relevant.
-
-    This is the routing logic that was previously in SupervisorAgent.identify_relevant_agents()
+    
+    Uses LLM-based Intent Parser first, falls back to keyword matching.
     """
     query = state["query"]
     query_lower = query.lower()
@@ -47,70 +47,115 @@ def route_query_node(state: AgentState) -> AgentState:
             state["delegation_type"] = "rbac_failure" 
             return state
     
-    # Keyword-based routing (Standard)
-    agent_domains = {
-        "energy": {
-            "primary": ["energy", "infrastructure", "power", "electricity", "renewable", "solar", "wind", "wapp"],
-            "secondary": ["grid", "transmission", "hydroelectric", "fuel", "petroleum"]
-        },
-        "agriculture": {
-            "primary": ["agriculture", "food system", "food security", "farming", "crop", "livestock", "agribusiness"],
-            "secondary": ["fertilizer", "irrigation", "harvest", "rural", "farmer", "food production"]
-        },
-        "minerals": {
-            "primary": ["mining", "mineral", "critical minerals", "industrialization", "cobalt", "lithium", "gold", "bauxite", "extraction"],
-            "secondary": ["value chain", "ore", "quarry", "geology"]
-        },
-        "digital": {
-            "primary": ["digital", "technology", "internet", "broadband", "fintech", "e-commerce", "e-government", "transformation"],
-            "secondary": ["cybersecurity", "ai", "software", "tech", "online", "platform"]
-        },
-        "protocol": {
-            "primary": ["meeting", "schedule", "logistics", "protocol", "venue", "registration", "invitation"],
-            "secondary": ["deadline", "agenda", "ceremony", "security", "vip"]
-        },
-        "resource_mobilization": {
-            "primary": ["investment", "financing", "deal room", "funding", "investor", "bankable", "resource mobilization"],
-            "secondary": ["finance", "capital", "donor", "partner", "budget"]
+    relevant = []
+    
+    # --- 1. LLM INTENT PARSING ---
+    from app.agents.intent_parser import get_intent_parser
+    
+    try:
+        parser = get_intent_parser()
+        # Parse intent
+        intent = await parser.parse_directive(query, context)
+        
+        # Store intent in state
+        if intent:
+            state["directive_intent"] = intent.dict()
+            logger.info(f"[ROUTE] Intent Parsed: {intent.primary_action}, Targets: {intent.target_twgs}")
+            
+            # Use parsed targets if available and valid
+            if intent.target_twgs:
+                # Normalize TWG names (handle "ALL" or specific list)
+                if "ALL" in [t.upper() for t in intent.target_twgs]:
+                    # All agents
+                    agent_domains = ["energy", "agriculture", "minerals", "digital", "protocol", "resource_mobilization"]
+                    relevant = agent_domains
+                    logger.info("[ROUTE] Routing to ALL agents based on intent")
+                else:
+                    # Filter valid agents
+                    valid_agents = ["energy", "agriculture", "minerals", "digital", "protocol", "resource_mobilization"]
+                    for target in intent.target_twgs:
+                        target_clean = target.lower().strip()
+                        if target_clean in valid_agents:
+                            relevant.append(target_clean)
+                        # Handle mapping (e.g. 'finance' -> 'resource_mobilization') if needed, 
+                        # but keyword fallback catches most.
+                        
+                if relevant:
+                    logger.info(f"[ROUTE] Using LLM-routed agents: {relevant}")
+    
+    except Exception as e:
+        logger.error(f"[ROUTE] Intent parsing failed: {e}")
+        # Continue to fallback
+        
+    # --- 2. KEYWORD FALLBACK (if LLM didn't find specific targets) ---
+    if not relevant:
+        logger.info("[ROUTE] Fallback to Keyword Routing")
+        
+        agent_domains = {
+            "energy": {
+                "primary": ["energy", "infrastructure", "power", "electricity", "renewable", "solar", "wind", "wapp"],
+                "secondary": ["grid", "transmission", "hydroelectric", "fuel", "petroleum"]
+            },
+            "agriculture": {
+                "primary": ["agriculture", "food system", "food security", "farming", "crop", "livestock", "agribusiness"],
+                "secondary": ["fertilizer", "irrigation", "harvest", "rural", "farmer", "food production"]
+            },
+            "minerals": {
+                "primary": ["mining", "mineral", "critical minerals", "industrialization", "cobalt", "lithium", "gold", "bauxite", "extraction"],
+                "secondary": ["value chain", "ore", "quarry", "geology"]
+            },
+            "digital": {
+                "primary": ["digital", "technology", "internet", "broadband", "fintech", "e-commerce", "e-government", "transformation"],
+                "secondary": ["cybersecurity", "ai", "software", "tech", "online", "platform"]
+            },
+            "protocol": {
+                "primary": ["meeting", "schedule", "logistics", "protocol", "venue", "registration", "invitation"],
+                "secondary": ["deadline", "agenda", "ceremony", "security", "vip"]
+            },
+            "resource_mobilization": {
+                "primary": ["investment", "financing", "deal room", "funding", "investor", "bankable", "resource mobilization"],
+                "secondary": ["finance", "capital", "donor", "partner", "budget"]
+            }
         }
-    }
 
-    agent_scores = {}
+        agent_scores = {}
 
-    # Score each agent based on keyword matches
-    for agent_id, keywords in agent_domains.items():
-        score = 0
+        # Score each agent based on keyword matches
+        for agent_id, keywords in agent_domains.items():
+            score = 0
 
-        # Check primary keywords (10 points each)
-        for keyword in keywords.get("primary", []):
-            if keyword in query_lower:
-                score += 10
-                logger.debug(f"Primary match '{keyword}' for {agent_id} (+10)")
+            # Check primary keywords (10 points each)
+            for keyword in keywords.get("primary", []):
+                if keyword in query_lower:
+                    score += 10
+                    logger.debug(f"Primary match '{keyword}' for {agent_id} (+10)")
 
-        # Check secondary keywords (3 points each)
-        for keyword in keywords.get("secondary", []):
-            if keyword in query_lower:
-                score += 3
-                logger.debug(f"Secondary match '{keyword}' for {agent_id} (+3)")
+            # Check secondary keywords (3 points each)
+            for keyword in keywords.get("secondary", []):
+                if keyword in query_lower:
+                    score += 3
+                    logger.debug(f"Secondary match '{keyword}' for {agent_id} (+3)")
 
-        if score > 0:
-            agent_scores[agent_id] = score
+            if score > 0:
+                agent_scores[agent_id] = score
 
-    # Filter agents that meet threshold (5 points minimum)
-    relevant_threshold = 5
-    relevant = [
-        agent_id for agent_id, score in agent_scores.items()
-        if score >= relevant_threshold
-    ]
+        # Filter agents that meet threshold (5 points minimum)
+        relevant_threshold = 5
+        relevant_keyword = [
+            agent_id for agent_id, score in agent_scores.items()
+            if score >= relevant_threshold
+        ]
 
-    # Sort by score (highest first)
-    relevant.sort(key=lambda x: agent_scores[x], reverse=True)
+        # Sort by score (highest first)
+        relevant_keyword.sort(key=lambda x: agent_scores[x], reverse=True)
+        
+        relevant = relevant_keyword
 
-    if relevant:
-        scores_str = ", ".join([f"{a}({agent_scores[a]})" for a in relevant])
-        logger.info(f"[ROUTE] Relevant agents identified: {scores_str}")
-    else:
-        logger.info(f"[ROUTE] No specific TWG identified, will use supervisor")
+        if relevant:
+            scores_str = ", ".join([f"{a}({agent_scores[a]})" for a in relevant])
+            logger.info(f"[ROUTE] Relevant agents identified via keywords: {scores_str}")
+        else:
+            logger.info(f"[ROUTE] No specific TWG identified, will use supervisor")
 
     # Determine delegation type
     if not relevant:

@@ -128,36 +128,43 @@ Respond with your constraints in JSON format."""
         constraints: Dict[str, Dict[str, Any]]
     ) -> Dict[str, Any]:
         """
-        Secretariat Martin (Supervisor) proposes a resolution based on collected constraints.
+        Secretariat Martin (Supervisor) proposes 3 resolutions based on collected constraints.
         """
         system_prompt = """You are Secretariat Martin, the AI Chief of Staff for the ECOWAS Summit.
-
-You need to propose a resolution to a scheduling conflict. You have received constraints from each involved TWG.
-
-Propose a resolution in JSON format:
-{
-    "resolution_type": "shift_time" | "change_venue" | "combine_sessions" | "escalate_to_human",
-    "affected_meeting": "name of meeting to change",
-    "action": "specific action to take",
-    "shift_minutes": <number if shifting time, else 0>,
-    "rationale": "brief explanation",
-    "confidence": <0.0-1.0>
-}
-
-Prefer shifting lower-priority meetings. Only escalate if absolutely necessary."""
+    
+    You need to propose a resolution to a scheduling or policy conflict. You have received constraints from each involved TWG.
+    
+    Generate 3 compromise proposals that respect both TWGs' constraints:
+    1. [Most ambitious / Ideal]
+    2. [Balanced compromise]
+    3. [Most conservative / Least disruption]
+    
+    Respond in JSON format:
+    {
+        "options": [
+            {
+                "id": 1,
+                "resolution_type": "shift_time" | "change_venue" | "policy_compromise",
+                "action": "specific action to take",
+                "rationale": "brief explanation",
+                "confidence": <0.0-1.0>
+            },
+            ...
+        ]
+    }
+    """
 
         constraints_text = "\n".join([
-            f"- {twg}: Priority {c['priority']}/10, Can shift: {c['can_shift']}, "
-            f"Flexibility: {c['shift_flexibility_minutes']}min, Notes: {c['notes']}"
+            f"- {twg}: Priority {c.get('priority', 5)}/10, Notes: {c.get('notes', '')}"
             for twg, c in constraints.items()
         ])
 
         user_prompt = f"""Conflict: {conflict.description}
-
-Constraints from involved TWGs:
-{constraints_text}
-
-Propose a resolution that minimizes disruption while resolving the conflict."""
+    
+    Constraints from involved TWGs:
+    {constraints_text}
+    
+    Propose 3 distinct options."""
 
         response = await self._call_llm(system_prompt, user_prompt)
         
@@ -169,46 +176,49 @@ Propose a resolution that minimizes disruption while resolving the conflict."""
         except json.JSONDecodeError:
             pass
         
-        # Default fallback - find lowest priority TWG and shift it
-        lowest_priority_twg = min(constraints.keys(), key=lambda k: constraints[k]["priority"])
+        # Default fallback
         return {
-            "resolution_type": "shift_time",
-            "affected_meeting": lowest_priority_twg,
-            "action": f"Shift {lowest_priority_twg} meeting by 60 minutes",
-            "shift_minutes": 60,
-            "rationale": f"{lowest_priority_twg} has lowest priority and most flexibility",
-            "confidence": 0.7
+            "options": [
+                {
+                    "id": 1,
+                    "resolution_type": "escalate_to_human",
+                    "action": "Escalate to human review",
+                    "rationale": "Automatic proposal generation failed",
+                    "confidence": 0.0
+                }
+            ]
         }
     
     async def agents_evaluate_proposal(
         self, 
         conflict: Conflict,
         constraints: Dict[str, Dict[str, Any]],
-        proposal: Dict[str, Any]
-    ) -> Dict[str, bool]:
+        proposal_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
-        Each TWG agent evaluates the proposed resolution.
-        Returns dict of {twg_name: approved (True/False)}
+        Each TWG agent evaluates the 3 options and votes.
+        Returns dict of {twg_name: {choice: id, reason: str}}
         """
-        approvals = {}
+        votes = {}
+        options = proposal_data.get("options", [])
         
         for twg_name, constraint in constraints.items():
             system_prompt = f"""You are {twg_name} Martin, an AI agent for the {twg_name} TWG.
-
-You are evaluating a proposed resolution to a conflict. Based on your constraints, 
-determine if this resolution is acceptable.
-
-Respond with JSON:
-{{
-    "approved": true/false,
-    "reason": "brief explanation"
-}}"""
+    
+    You are evaluating 3 proposed resolutions to a conflict. Based on your constraints, 
+    vote for the best option (1, 2, or 3).
+    
+    Respond with JSON:
+    {{
+        "choice": <1, 2, or 3>,
+        "reason": "brief explanation"
+    }}"""
 
             user_prompt = f"""Your constraints: {json.dumps(constraint)}
-
-Proposed resolution: {json.dumps(proposal)}
-
-Do you approve this resolution?"""
+    
+    Proposed Options: {json.dumps(options)}
+    
+    Which option do you prefer?"""
 
             response = await self._call_llm(system_prompt, user_prompt)
             
@@ -217,16 +227,15 @@ Do you approve this resolution?"""
                 end = response.rfind('}') + 1
                 if start >= 0 and end > start:
                     result = json.loads(response[start:end])
-                    approvals[twg_name] = result.get("approved", True)
+                    votes[twg_name] = result
                     continue
             except json.JSONDecodeError:
                 pass
             
-            # Default: approve if not the affected meeting or if can shift
-            is_affected = twg_name.lower() in proposal.get("affected_meeting", "").lower()
-            approvals[twg_name] = not is_affected or constraint.get("can_shift", True)
+            # Default vote (Option 1)
+            votes[twg_name] = {"choice": 1, "reason": "Default vote due to parsing error"}
         
-        return approvals
+        return votes
     
     async def apply_meeting_resolution(
         self, 
@@ -293,57 +302,78 @@ Do you approve this resolution?"""
                 "response": constraint
             })
         
-        # Step 3: Supervisor proposes resolution
-        proposal = await self.supervisor_propose_resolution(conflict, constraints)
+        # Step 3: Supervisor proposes 3 resolutions
+        proposal_data = await self.supervisor_propose_resolution(conflict, constraints)
         negotiation_log.append({
             "step": "supervisor_proposal",
-            "proposal": proposal
+            "proposal_data": proposal_data
         })
         
         # Step 4: Agents evaluate and vote
-        approvals = await self.agents_evaluate_proposal(conflict, constraints, proposal)
+        votes = await self.agents_evaluate_proposal(conflict, constraints, proposal_data)
         negotiation_log.append({
             "step": "agent_votes",
-            "approvals": approvals
+            "votes": votes
         })
         
-        # Step 5: Check if all approved
-        all_approved = all(approvals.values())
+        # Step 5: Tally votes
+        vote_counts = {}
+        for agent_vote in votes.values():
+            choice = agent_vote.get("choice")
+            vote_counts[choice] = vote_counts.get(choice, 0) + 1
+            
+        # Check for consensus (simple majority or unanimity)
+        # For now, require unanimity or majority if > 2 agents
+        num_agents = len(votes)
+        winning_choice = None
         
-        if all_approved:
-            # Apply the resolution
-            result = await self.apply_meeting_resolution(conflict, proposal)
-            negotiation_log.append({
-                "step": "resolution_applied",
-                "result": result
-            })
+        for choice, count in vote_counts.items():
+            if count == num_agents: # Unanimous
+                winning_choice = choice
+                break
+                
+        if winning_choice:
+            # Find the winning option object
+            winning_proposal = next(
+                (opt for opt in proposal_data.get("options", []) if opt.get("id") == winning_choice), 
+                None
+            )
             
-            return {
-                "negotiation_result": "auto_resolved",
-                "all_approved": True,
-                "proposal": proposal,
-                "approvals": approvals,
-                "negotiation_log": negotiation_log
-            }
-        else:
-            # Escalate to human
-            conflict.status = ConflictStatus.ESCALATED
-            conflict.human_action_required = True
-            conflict.resolution_log = (conflict.resolution_log or []) + [{
-                "action": "escalated",
-                "reason": "Agents did not reach consensus",
-                "approvals": approvals,
-                "timestamp": datetime.datetime.utcnow().isoformat()
-            }]
-            await self.db.commit()
-            
-            return {
-                "negotiation_result": "escalated_to_human",
-                "all_approved": False,
-                "proposal": proposal,
-                "approvals": approvals,
-                "negotiation_log": negotiation_log
-            }
+            if winning_proposal:
+                # Apply the resolution
+                result = await self.apply_meeting_resolution(conflict, winning_proposal)
+                negotiation_log.append({
+                    "step": "resolution_applied",
+                    "result": result,
+                    "winning_choice": winning_choice
+                })
+                
+                return {
+                    "negotiation_result": "auto_resolved",
+                    "consensus_reached": True,
+                    "winning_proposal": winning_proposal,
+                    "votes": votes,
+                    "negotiation_log": negotiation_log
+                }
+        
+        # If no consensus or winning proposal not found
+        conflict.status = ConflictStatus.ESCALATED
+        conflict.human_action_required = True
+        conflict.resolution_log = (conflict.resolution_log or []) + [{
+            "action": "escalated",
+            "reason": "Agents did not reach consensus",
+            "votes": votes,
+            "timestamp": datetime.datetime.utcnow().isoformat()
+        }]
+        await self.db.commit()
+        
+        return {
+            "negotiation_result": "escalated_to_human",
+            "consensus_reached": False,
+            "proposals_considered": proposal_data.get("options", []),
+            "votes": votes,
+            "negotiation_log": negotiation_log
+        }
     
     async def propose_resolution(self, conflict: Conflict) -> Dict[str, Any]:
         """Legacy method - now just calls the full negotiation."""

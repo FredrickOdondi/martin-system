@@ -133,3 +133,22 @@ export const dismissConflict = async (conflictId: string, resolution: string = '
     const response = await api.post(`/dashboard/conflicts/${conflictId}/resolve?resolution=${encodeURIComponent(resolution)}`);
     return response.data;
 };
+
+export interface AutonomousLogStats {
+    total_detected: number;
+    auto_resolved: number;
+    escalated: number;
+    resolution_rate: number;
+}
+
+export interface AutonomousLogResponse {
+    stats: AutonomousLogStats;
+    conflicts: ConflictAlert[];
+}
+
+export const getAutonomousLog = async (days: number = 7): Promise<AutonomousLogResponse> => {
+    const response = await api.get('/dashboard/conflicts/autonomous-log', {
+        params: { days }
+    });
+    return response.data;
+};
