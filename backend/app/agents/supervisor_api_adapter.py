@@ -56,7 +56,7 @@ class SupervisorAPIAdapter:
              # Underlying resume_chat is sync currently in base agent, 
              # but we can wrap or just call it if we assume it doesn't block too long.
              # Actually, if execute_tools_node uses threadpool, it might be fine.
-             return self.supervisor.resume_chat(thread_id, resume_value)
+             return await self.supervisor.resume_chat(thread_id, resume_value)
         except GraphInterrupt as gi:
              logger.info(f"[ADAPTER] GraphInterrupt detected during resume")
              raise gi

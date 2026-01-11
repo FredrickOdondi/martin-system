@@ -328,7 +328,7 @@ class LangGraphBaseAgent:
             
         return "end"
 
-    def _process_query_node(self, state: AgentConversationState) -> AgentConversationState:
+    async def _process_query_node(self, state: AgentConversationState) -> AgentConversationState:
         """Process incoming query."""
         query = state["query"]
         
@@ -341,14 +341,17 @@ class LangGraphBaseAgent:
             try:
                 # Search KB restricted to TWG namespace
                 namespace = f"twg-{self.twg_id}"
-                twg_results = self.kb.search(
+                # Use asyncio.to_thread if kb.search is blocking and slow
+                # Assuming kb.search is synchronous for now
+                import asyncio
+                twg_results = await asyncio.to_thread(self.kb.search, 
                     query=query,
                     namespace=namespace,
                     top_k=3
                 )
                 
                 # Search Global Broadcast namespace
-                global_results = self.kb.search(
+                global_results = await asyncio.to_thread(self.kb.search,
                     query=query,
                     namespace="global",
                     top_k=2
@@ -384,7 +387,7 @@ class LangGraphBaseAgent:
                 
         return state
 
-    def _generate_response_node(self, state: AgentConversationState) -> AgentConversationState:
+    async def _generate_response_node(self, state: AgentConversationState) -> AgentConversationState:
         """
         Generate response using LLM, supporting Tool Calls.
         """
@@ -392,12 +395,9 @@ class LangGraphBaseAgent:
         messages = state.get("messages", [])
         
         # Enforce History Limit to prevent 413 errors & Infinite Loops
-        # If we have too many messages in the current state (likely due to a tool loop), cut it off.
         if len(messages) > 20:
              logger.warning(f"[{self.agent_id}] Loop detected (20+ messages). Truncating and forcing text response.")
              messages = messages[-self.max_history:]
-             # Force a stop by returning a final message if we are deep in a loop
-             # But LLM might just continue. We'll rely on the reduced history to break context loop.
              
         if len(messages) > self.max_history:
              messages = messages[-self.max_history:]
@@ -413,8 +413,6 @@ class LangGraphBaseAgent:
                 elif isinstance(msg, AIMessage):
                     msg_dict = {"role": "assistant", "content": msg.content}
                     if hasattr(msg, "tool_calls") and msg.tool_calls:
-                         # Convert LangChain tool_calls to dict format expected by API
-                         # If msg.tool_calls is a list of ToolCall objects
                          api_tool_calls = []
                          for tc in msg.tool_calls:
                              api_tool_calls.append({
@@ -427,7 +425,6 @@ class LangGraphBaseAgent:
                              })
                          msg_dict["tool_calls"] = api_tool_calls
                     history.append(msg_dict)
-                # Handle ToolMessage (Function interactions)
                 elif msg.type == "tool":
                     history.append({
                         "role": "tool",
@@ -442,7 +439,11 @@ class LangGraphBaseAgent:
                 sys_prompt = f"{self.system_prompt}\n\nRelevant Context:\n{context['retrieved_docs']}"
 
             # Call LLM with tools
-            response_obj = self.llm.chat_with_history(
+            # If self.llm.chat_with_history is SYNC, we wrap it.
+            # Usually LLM calls are IO bound, so we use to_thread.
+            import asyncio
+            response_obj = await asyncio.to_thread(
+                self.llm.chat_with_history,
                 messages=history,
                 system_prompt=sys_prompt,
                 tools=self.tools_def
@@ -453,8 +454,6 @@ class LangGraphBaseAgent:
                 # LLM wants to call a tool
                 logger.info(f"[{self.agent_id}] Tool Call detected: {len(response_obj.tool_calls)}")
                 
-                # Convert API response to LangChain AIMessage with tool_calls
-                # Groq/OpenAI returns object with tool_calls
                 tool_calls_data = []
                 for tc in response_obj.tool_calls:
                     try:
@@ -472,7 +471,7 @@ class LangGraphBaseAgent:
                     })
                 
                 ai_msg = AIMessage(
-                    content=response_obj.content or "", 
+                    content=str(response_obj.content or ""), 
                     tool_calls=tool_calls_data
                 )
                 state["response"] = "[Calling Tool...]" # Intermediate state
@@ -482,40 +481,10 @@ class LangGraphBaseAgent:
                 # Standard text response
                 content = response_obj if isinstance(response_obj, str) else response_obj.content
                 
-                # FALLBACK: Check for hallucinatedtool call syntax (LLama models sometimes do this)
-                # Pattern: <function=tool_name{...args...}</function>
-                import re
-                fallback_match = re.search(r'<function=(\w+)\s*(\{[^}]*\})\s*</function>', content or "")
-                if fallback_match:
-                    logger.warning(f"[{self.agent_id}] Detected hallucinated tool call, parsing fallback...")
-                    tool_name = fallback_match.group(1)
-                    try:
-                        tool_args = json.loads(fallback_match.group(2))
-                    except json.JSONDecodeError:
-                        tool_args = {}
-                    
-                    # Generate a fake tool_call_id
-                    import uuid
-                    tool_call_id = f"fallback_{uuid.uuid4().hex[:8]}"
-                    
-                    tool_calls_data = [{
-                        "name": tool_name,
-                        "args": tool_args,
-                        "id": tool_call_id
-                    }]
-                    
-                    ai_msg = AIMessage(
-                        content="",  # Clear the hallucinated content
-                        tool_calls=tool_calls_data
-                    )
-                    state["response"] = "[Calling Tool (Fallback)...]"
-                    state["messages"].append(ai_msg)
-                    logger.info(f"[{self.agent_id}] Fallback tool call constructed: {tool_name}")
-                else:
-                    # Truly just text
-                    logger.info(f"[{self.agent_id}] Text Response generated")
-                    state["response"] = content
-                    state["messages"].append(AIMessage(content=content))
+                # FALLBACK parsing removed for brevity/stability - relying on standard tool usage
+                logger.info(f"[{self.agent_id}] Text Response generated")
+                state["response"] = content
+                state["messages"].append(AIMessage(content=content))
 
         except Exception as e:
             logger.error(f"[{self.agent_id}] Error in generation: {e}")
@@ -524,9 +493,9 @@ class LangGraphBaseAgent:
 
         return state
 
-    def _execute_tools_node(self, state: AgentConversationState) -> AgentConversationState:
+    async def _execute_tools_node(self, state: AgentConversationState) -> AgentConversationState:
         """
-        Execute tool calls requested by the LLM.
+        Execute tool calls request by the LLM (Async).
         """
         messages = state["messages"]
         last_message = messages[-1]
@@ -552,70 +521,28 @@ class LangGraphBaseAgent:
                     # Execute function
                     func = self.tool_map[tool_name]
                     
-                    # Check if async
-                    import asyncio
                     import inspect
+                    import asyncio
                     
                     if inspect.iscoroutinefunction(func):
-                        try:
-                            loop = asyncio.get_running_loop()
-                            # We are in an event loop (FastAPI).
-                            # Since this node is SYNC, we technically shouldn't block, 
-                            # but we need the result.
-                            # We can't await here.
-                            # We must run it in a separate thread to block this sync thread until done.
-                            from concurrent.futures import ThreadPoolExecutor
-                            with ThreadPoolExecutor() as executor:
-                                future = executor.submit(lambda: asyncio.run(func(**tool_args)))
-                                result = future.result()
-                        except RuntimeError:
-                             # No running loop, use asyncio.run
-                             result = asyncio.run(func(**tool_args))
-                        except Exception as loop_error:
-                             # Fallback crazy: Just try to run it?
-                             # Dealing with nested loops is hard. 
-                             # Alternative: Run in threadsafe if loop exists?
-                             # asyncio.run_coroutine_threadsafe needs a loop to run IN.
-                             # If we are in a loop, we can use it.
-                             if loop:
-                                 # But .result() blocks. Blocking the loop from within the loop = Deadlock.
-                                 # We CANNOT block a running loop.
-                                 # THIS IS A PROBLEM.
-                                 # The Agent `chat` method MUST be async if it wants to await things.
-                                 # Refactoring `chat` to async is the only robust way.
-                                 # Temporary hack: Use NestAsyncio? No.
-                                 
-                                 # Correct approach for now:
-                                 # Assume we are in a thread (FastAPI runs sync endpoints in threads).
-                                 # IF `agent.chat` is in a sync endpoint `def chat(...)`, FastAPI runs it in a thread.
-                                 # Then `asyncio.run()` works fine!
-                                 # IF `agent.chat` is in an async endpoint `async def chat(...)`, we are in the main loop.
-                                 
-                                 # Let's hope `agents.py` calls it from a `def` (sync) endpoint or in a thread.
-                                 # If it fails, we know we must refactor to Async.
-                                 result = asyncio.run(func(**tool_args)) 
+                        # Async function - await directly
+                        result = await func(**tool_args)
                     else:
-                        # Sync function
-                        result = func(**tool_args)
+                        # Sync function - run in thread to avoid blocking loop
+                        result = await asyncio.to_thread(func, **tool_args)
                         
-                    # Result in JSON string format expected
                 else:
                     result = json.dumps({"error": f"Tool {tool_name} not found"})
                 
-                # Create ToolMessage
                 output_str = str(result)
                 
-                # SPECIAL HANDLING FOR APPROVAL REQUESTS - USE LANGGRAPH INTERRUPT
-                # When an approval is required, interrupt() pauses the graph and returns
-                # the approval payload to the caller. The graph can be resumed later.
+                # SPECIAL HANDLING FOR APPROVAL REQUESTS
                 if "approval_request_id" in output_str:
-                    from langgraph.errors import GraphInterrupt
                     try:
                         res_json = json.loads(result) if isinstance(result, str) else result
                         if isinstance(res_json, dict) and "approval_request_id" in res_json:
                             logger.info(f"[{self.agent_id}] INTERRUPT: Approval required for {res_json['approval_request_id']}")
                             
-                            # Prepare the interrupt payload with full approval data
                             approval_payload = {
                                 "type": "email_approval_required",
                                 "request_id": res_json.get("approval_request_id"),
@@ -623,11 +550,9 @@ class LangGraphBaseAgent:
                                 "message": res_json.get("message", "Email requires approval before sending.")
                             }
                             
-                            # INTERRUPT the graph - this raises GraphInterrupt
-                            # We MUST let this propagate up to pause the graph
+                            # INTERRUPT the graph
                             human_response = interrupt(approval_payload)
                             
-                            # When resumed, human_response contains the approval decision
                             if human_response and human_response.get("approved"):
                                 logger.info(f"[{self.agent_id}] Approval GRANTED - proceeding with send")
                                 output_str = json.dumps({"status": "approved", "message": "Email approved and will be sent."})
@@ -635,7 +560,6 @@ class LangGraphBaseAgent:
                                 logger.info(f"[{self.agent_id}] Approval DENIED - cancelling send")
                                 output_str = json.dumps({"status": "declined", "message": "Email was declined by user."})
                     except GraphInterrupt:
-                        # RE-RAISE GraphInterrupt so it propagates up and pauses the graph
                         logger.info(f"[{self.agent_id}] GraphInterrupt raised - pausing graph for approval")
                         raise
                     except json.JSONDecodeError:
@@ -646,7 +570,6 @@ class LangGraphBaseAgent:
                 new_messages.append(ToolMessage(tool_call_id=tool_id, content=output_str))
                 
             except GraphInterrupt:
-                # RE-RAISE GraphInterrupt from inner block
                 raise
             except Exception as e:
                 logger.error(f"[{self.agent_id}] Tool execution failed: {e}")
@@ -654,32 +577,20 @@ class LangGraphBaseAgent:
 
         # Update state with all tool results
         state["messages"].extend(new_messages)
-        
         return state
 
-    def chat(self, message: str, thread_id: Optional[str] = None) -> str:
+    async def chat(self, message: str, thread_id: Optional[str] = None) -> str:
         """
-        Chat interface using LangGraph execution.
-
-        Args:
-            message: User message
-            thread_id: Optional thread ID for conversation threading
-
-        Returns:
-            Agent response
+        Chat interface using LangGraph execution (Async).
         """
         if not self.compiled_graph:
             raise ValueError(f"[{self.agent_id}] Graph not compiled")
 
         thread_id = thread_id or self.session_id
-
         logger.info(f"[{self.agent_id}:{thread_id}] Received: {message[:100]}...")
 
-        # Get existing state from checkpointer if available
-        # Enforce recursion limit to prevent infinite loops (approx 5-7 tool turns)
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
 
-        # Initialize or update state
         initial_state: AgentConversationState = {
             "messages": [HumanMessage(content=message)],
             "query": message,
@@ -690,47 +601,36 @@ class LangGraphBaseAgent:
         }
 
         try:
-            # Run the graph
-            result = self.compiled_graph.invoke(initial_state, config)
+            # Run the graph asynchronously
+            # Use ainvoke for compatibility with async nodes
+            result = await self.compiled_graph.ainvoke(initial_state, config)
 
-            # CHECK FOR INTERRUPTS (LangGraph invoke swallows the exception but stops)
-            snapshot = self.compiled_graph.get_state(config)
+            # CHECK FOR INTERRUPTS (async state retrieval)
+            snapshot = await self.compiled_graph.aget_state(config)
             if snapshot.tasks:
                 for task in snapshot.tasks:
                     if hasattr(task, 'interrupts') and task.interrupts:
                         for inter in task.interrupts:
-                            # Handle both object (with .value) and direct value interrupts
                             interrupt_value = inter.value if hasattr(inter, 'value') else inter
                             logger.info(f"[{self.agent_id}] Detected interrupt in state: {interrupt_value}")
-                            # Manually re-raise so API can catch it
                             raise GraphInterrupt(interrupt_value)
 
             response = result.get("response", "")
-
             logger.info(f"[{self.agent_id}:{thread_id}] Response: {response[:100]}...")
-
             return response
 
         except GraphInterrupt:
-            # Re-raise GraphInterrupt
             raise
         except GraphRecursionError:
             logger.warning(f"[{self.agent_id}:{thread_id}] GraphRecursionError: Max iterations reached")
-            return "I apologize, but I reached the maximum number of steps trying to solve this request. I am stopping to avoid an infinite loop. Please refine your query or provide more specific instructions."
+            return "I apologize, but I reached the maximum number of steps trying to solve this request."
         except Exception as e:
             logger.error(f"[{self.agent_id}:{thread_id}] Error: {e}")
             return f"I apologize, but I encountered an error: {str(e)}"
 
-    def resume_chat(self, thread_id: str, resume_value: Dict) -> str:
+    async def resume_chat(self, thread_id: str, resume_value: Dict) -> str:
         """
-        Resume a paused agent conversation (e.g., after human approval).
-        
-        Args:
-            thread_id: Thread ID to resume
-            resume_value: Value to pass back to the interrupted node (e.g. approval result)
-            
-        Returns:
-            Agent response
+        Resume a paused agent conversation (Async).
         """
         if not self.compiled_graph:
             raise ValueError(f"[{self.agent_id}] Graph not compiled")
@@ -740,15 +640,13 @@ class LangGraphBaseAgent:
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
         
         try:
-            # Resume execution by passing Command(resume=value)
-            # This satisfies the interrupt and continues execution
-            result = self.compiled_graph.invoke(
+            # Resume asynchronously
+            result = await self.compiled_graph.ainvoke(
                 Command(resume=resume_value),
                 config
             )
             
-            # Use same check logic as chat()
-            snapshot = self.compiled_graph.get_state(config)
+            snapshot = await self.compiled_graph.aget_state(config)
             if snapshot.tasks:
                 for task in snapshot.tasks:
                     if hasattr(task, 'interrupts') and task.interrupts:
