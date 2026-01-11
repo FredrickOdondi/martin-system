@@ -156,7 +156,7 @@ class ContinuousMonitor:
                 conflict_type=conflict_data["conflict_type"],
                 severity=conflict_data["severity"],
                 description=conflict_data["description"],
-                agents_involved=agents_involved,
+                agents_involved=[str(a) for a in agents_involved], # Ensure strings for JSON serialization
                 status=ConflictStatus.DETECTED,
                 detected_at=datetime.utcnow()
             )
