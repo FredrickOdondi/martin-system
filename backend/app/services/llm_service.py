@@ -17,6 +17,26 @@ except ImportError:
     OpenAI = None
 
 
+
+class SimpleFunction:
+    """Mimics OpenAI Function object."""
+    def __init__(self, name: str, arguments: str):
+        self.name = name
+        self.arguments = arguments
+
+class SimpleToolCall:
+    """Mimics OpenAI ToolCall object."""
+    def __init__(self, id: str, type: str, function: SimpleFunction):
+        self.id = id
+        self.type = type
+        self.function = function
+
+class SimpleMessage:
+    """Simple wrapper to mimic OpenAI Message object for compatibility."""
+    def __init__(self, content: str = None, tool_calls: List[SimpleToolCall] = None):
+        self.content = content
+        self.tool_calls = tool_calls or []
+
 class LLMService:
     """Base interface for LLM services"""
     def chat(self, prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
@@ -27,6 +47,7 @@ class LLMService:
 
     def transcribe_audio(self, file_path: str, **kwargs) -> str:
         raise NotImplementedError
+
 
 
 class OllamaLLMService(LLMService):
@@ -103,34 +124,54 @@ class OllamaLLMService(LLMService):
 class OpenAILLMService(LLMService):
     """Service for interacting with OpenAI API"""
 
-    def __init__(self, api_key: str, model: str = "gpt-4-turbo-preview", temperature: float = 0.7):
+    def __init__(self, api_key: str, model: str = "gpt-4-turbo-preview", temperature: float = 0.7, base_url: Optional[str] = None):
         if not OpenAI:
             raise ImportError("openai package not installed. Run 'pip install openai'")
         
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.model = model
         self.temperature = temperature
-        logger.info(f"Initialized OpenAI LLM Service: {self.model}")
+        logger.info(f"Initialized OpenAI LLM Service: {self.model} (Base URL: {base_url or 'Default'})")
 
-    def chat(self, prompt: str, system_prompt: Optional[str] = None, temperature: Optional[float] = None, max_tokens: int = 2000) -> str:
+    def chat(self, prompt: str, system_prompt: Optional[str] = None, temperature: Optional[float] = None, max_tokens: int = 2000, tools: Optional[List[Dict]] = None) -> Any:
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
+        # Filter out invalid or unsupported arguments if needed, but OpenAI client generally handles valid kwargs
+        # We need to pass tools if present
+        
+        create_kwargs = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature if temperature is not None else self.temperature,
+            "max_tokens": max_tokens
+        }
+        
+        if tools:
+            # Convert tools to standard OpenAI format if they aren't already
+            # Assuming incoming tools are already in OpenAI JSON schema format as per LangGraph
+            create_kwargs["tools"] = tools
+
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=temperature if temperature is not None else self.temperature,
-                max_tokens=max_tokens
-            )
-            return response.choices[0].message.content.strip()
+            response = self.client.chat.completions.create(**create_kwargs)
+            
+            message = response.choices[0].message
+            # If tool calls are present, we should probably return the message object or a custom wrapper
+            # For backward compatibility with string return type expectations in basic chat, we handle carefully
+            if message.tool_calls:
+                 # We return a SimpleMessage-like structure or the raw message if feasible
+                 # NOTE: LangGraph expectation is likely an object with .content and .tool_calls
+                 # SimpleMessage is defined in llm_service.py for Gemini, we can reuse or just return the OpenAI message object if it has compatible attributes
+                 return message
+            
+            return message.content.strip()
         except Exception as e:
             logger.error(f"OpenAI API error: {e}")
             raise Exception(f"OpenAI Error: {str(e)}")
 
-    def chat_with_history(self, messages: List[Dict[str, str]], system_prompt: Optional[str] = None, temperature: Optional[float] = None) -> str:
+    def chat_with_history(self, messages: List[Dict[str, str]], system_prompt: Optional[str] = None, temperature: Optional[float] = None, tools: Optional[List[Dict]] = None) -> Any:
         full_messages = []
         if system_prompt:
             full_messages.append({"role": "system", "content": system_prompt})
@@ -138,17 +179,40 @@ class OpenAILLMService(LLMService):
         # Ensure correct role names for OpenAI
         for m in messages:
             role = m.get("role", "user")
-            if role not in ["system", "user", "assistant"]:
-                role = "user"
-            full_messages.append({"role": role, "content": m.get("content", "")})
+            if role not in ["system", "user", "assistant", "tool", "function"]:
+                 # Map non-standard roles if necessary, or default to user
+                 if role == "model": role = "assistant"
+                 else: role = "user"
+            
+            # OpenAI message structure
+            msg_obj = {"role": role, "content": m.get("content", "")}
+            
+            if "tool_calls" in m and m["tool_calls"]:
+                msg_obj["tool_calls"] = m["tool_calls"]
+            if "tool_call_id" in m:
+                msg_obj["tool_call_id"] = m["tool_call_id"]
+            if "name" in m:
+                 msg_obj["name"] = m["name"]
+                 
+            full_messages.append(msg_obj)
+
+        create_kwargs = {
+            "model": self.model,
+            "messages": full_messages,
+            "temperature": temperature if temperature is not None else self.temperature
+        }
+        
+        if tools:
+            create_kwargs["tools"] = tools
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=full_messages,
-                temperature=temperature if temperature is not None else self.temperature
-            )
-            return response.choices[0].message.content.strip()
+            response = self.client.chat.completions.create(**create_kwargs)
+            message = response.choices[0].message
+            
+            if message.tool_calls:
+                 return message
+                 
+            return message.content.strip()
         except Exception as e:
             logger.error(f"OpenAI History error: {e}")
             raise Exception(f"OpenAI Error: {str(e)}")
@@ -274,6 +338,178 @@ class GroqLLMService(LLMService):
             raise Exception(f"Groq Transcription Error: {str(e)}")
 
 
+class GeminiLLMService(LLMService):
+    """Service for interacting with Google Gemini API via REST"""
+
+    def __init__(self, api_key: str, model: str = "gemini-2.0-flash", temperature: float = 0.7):
+        self.api_key = api_key
+        # Ensure model has 'models/' prefix only if missing
+        self.model = model if model.startswith("models/") else f"models/{model}"
+        self.temperature = temperature
+        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
+        logger.info(f"Initialized Gemini LLM Service: {self.model}")
+
+    def _convert_tools_to_gemini(self, tools: List[Dict]) -> List[Dict]:
+        """Convert OpenAI tool definitions to Gemini FunctionDeclarations."""
+        if not tools:
+            return None
+            
+        gemini_tools = []
+        for tool in tools:
+            if tool.get("type") == "function":
+                func = tool.get("function", {})
+                gemini_tool = {
+                    "name": func.get("name"),
+                    "description": func.get("description"),
+                    "parameters": func.get("parameters")
+                }
+                gemini_tools.append(gemini_tool)
+        
+        return [{"function_declarations": gemini_tools}]
+
+    def _parse_gemini_response(self, data: Dict) -> Any:
+        """Parse Gemini response into SimpleMessage or string."""
+        if not data.get("candidates"):
+            return ""
+            
+        candidate = data["candidates"][0]
+        if candidate.get("finishReason") == "SAFETY":
+            return "[Response Blocked due to Safety Settings]"
+            
+        content_parts = candidate.get("content", {}).get("parts", [])
+        if not content_parts:
+             return ""
+             
+        # Check for function calls
+        tool_calls = []
+        text_content = ""
+        
+        for part in content_parts:
+            if "text" in part:
+                text_content += part["text"]
+            
+            if "functionCall" in part:
+                fc = part["functionCall"]
+                tool_calls.append(SimpleToolCall(
+                    id=f"call_{fc['name']}",
+                    type="function",
+                    function=SimpleFunction(
+                        name=fc["name"],
+                        arguments=json.dumps(fc.get("args", {}))
+                    )
+                ))
+        
+        if tool_calls:
+            # Return object with tool_calls attribute
+            return SimpleMessage(content=text_content, tool_calls=tool_calls)
+            
+        return text_content.strip()
+
+    def chat(self, prompt: str, system_prompt: Optional[str] = None, temperature: Optional[float] = None, max_tokens: int = 2000, tools: Optional[List[Dict]] = None) -> Any:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "user", "parts": [{"text": f"System Instruction: {system_prompt}"}]})
+            messages.append({"role": "model", "parts": [{"text": "Understood."}]})
+        
+        messages.append({"role": "user", "parts": [{"text": prompt}]})
+
+        return self._generate(messages, temperature, max_tokens, tools)
+
+    def chat_with_history(self, messages: List[Dict[str, str]], system_prompt: Optional[str] = None, temperature: Optional[float] = None, tools: Optional[List[Dict]] = None) -> Any:
+        formatted_messages = []
+        
+        if system_prompt:
+            formatted_messages.append({"role": "user", "parts": [{"text": f"System Instruction: {system_prompt}"}]})
+            formatted_messages.append({"role": "model", "parts": [{"text": "Understood."}]})
+
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            
+            parts = []
+            if content:
+                parts.append({"text": content})
+                
+            # Handle tool calls in history (if any)
+            if "tool_calls" in m and m["tool_calls"]:
+                # Gemini expects functionCall in model parts
+                # We simply approximate by adding text description since we can't easily reconstruct the exact functionCall object structure accepted by API for history mostly
+                # OR we try to skip precise reconstruction if it's too complex. 
+                # For now, let's append tool calls as text to context to avoid schema validation errors in history
+                 parts.append({"text": f"[System: Previous Tool Call: {json.dumps(m['tool_calls'])}]"})
+
+            if role == "assistant":
+                gemini_role = "model"
+            elif role == "tool":
+                # Gemini expects 'functionResponse' role but it's tricky via REST without proper context.
+                # Treat tool outputs as user messages for simplicity
+                gemini_role = "user" 
+                parts = [{"text": f"Tool Output: {content}"}]
+            elif role == "system":
+                gemini_role = "user" 
+                parts = [{"text": f"System Update: {content}"}]
+            else:
+                gemini_role = "user"
+                
+            formatted_messages.append({"role": gemini_role, "parts": parts})
+
+        return self._generate(formatted_messages, temperature, max_tokens=2000, tools=tools)
+
+    def _generate(self, contents: List[Dict], temperature: float, max_tokens: int, tools: Optional[List[Dict]] = None) -> Any:
+        url = f"{self.base_url}/{self.model}:generateContent?key={self.api_key}"
+        
+        generation_config = {
+            "temperature": temperature if temperature is not None else self.temperature,
+            "maxOutputTokens": max_tokens
+        }
+        
+        gemini_tools = self._convert_tools_to_gemini(tools)
+        
+        payload = {
+            "contents": contents,
+            "generationConfig": generation_config
+        }
+        
+        if gemini_tools:
+            payload["tools"] = gemini_tools
+        
+        # Retry parameters
+        max_retries = 3
+        base_delay = 5  # Start with 5 seconds as Gemini 429 usually asks for ~5s wait
+        
+        import time
+        
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=60)
+                
+                if response.status_code == 429:
+                    logger.warning(f"Gemini Rate Limit hit (429). Attempt {attempt+1}/{max_retries}. Retrying in {base_delay}s...")
+                    time.sleep(base_delay)
+                    base_delay *= 2  # Exponential backoff
+                    continue
+                    
+                if response.status_code != 200:
+                    logger.error(f"Gemini API Error {response.status_code}: {response.text}")
+                    raise Exception(f"Gemini API Error: {response.text}")
+                    
+                data = response.json()
+                return self._parse_gemini_response(data)
+                
+            except Exception as e:
+                # If it's a connection error, maybe retry? For now, re-raise only on final attempt or non-retriable 
+                if attempt == max_retries - 1:
+                    logger.error(f"Gemini Request failed after {max_retries} attempts: {e}")
+                    raise Exception(f"Gemini Error after retries: {str(e)}")
+                
+                logger.warning(f"Gemini request failed: {e}. Retrying...")
+                time.sleep(base_delay)
+                base_delay *= 2
+                
+        raise Exception("Gemini API Request failed after max retries")
+
+    def transcribe_audio(self, file_path: str, **kwargs) -> str:
+        raise NotImplementedError("Audio transcription not implemented for Gemini REST yet")
 # Singleton instance
 _llm_service = None
 
@@ -285,6 +521,7 @@ def get_llm_service() -> LLMService:
     global _llm_service
     if _llm_service is None:
         provider = getattr(settings, "LLM_PROVIDER", "ollama").lower()
+        logger.info(f"Selecting LLM Provider: {provider}")
         
         if provider == "openai" and getattr(settings, "OPENAI_API_KEY", None):
             _llm_service = OpenAILLMService(
@@ -297,6 +534,19 @@ def get_llm_service() -> LLMService:
                 api_key=settings.GROQ_API_KEY,
                 model=getattr(settings, "GROQ_MODEL", "llama-3.3-70b-versatile"),
                 temperature=settings.LLM_TEMPERATURE
+            )
+        elif provider == "gemini" and getattr(settings, "GEMINI_API_KEY", None):
+             _llm_service = GeminiLLMService(
+                api_key=settings.GEMINI_API_KEY,
+                model=getattr(settings, "GEMINI_MODEL", "gemini-2.0-flash"),
+                temperature=settings.LLM_TEMPERATURE
+            )
+        elif provider == "github" and getattr(settings, "GITHUB_TOKEN", None):
+             _llm_service = OpenAILLMService(
+                api_key=settings.GITHUB_TOKEN,
+                model=getattr(settings, "GITHUB_MODEL", "openai/gpt-4o-mini"),
+                temperature=settings.LLM_TEMPERATURE,
+                base_url="https://models.github.ai/inference"
             )
         else:
             if provider == "openai":

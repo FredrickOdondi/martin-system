@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 import json
 from loguru import logger
 
-from app.services.groq_llm_service import get_llm_service
+from app.services.llm_service import get_llm_service
 
 
 class DirectiveIntent(BaseModel):

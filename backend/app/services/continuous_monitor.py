@@ -126,10 +126,15 @@ class ContinuousMonitor:
                                 # Auto-handle conflict
                                 await self._handle_detected_conflicts(
                                     db_session=db, 
-                                    conflict_data={
+                                    conflict_data = {
                                         "description": f"{reason} between {m1.title} and {m2.title}",
-                                        "conflict_type": "temporal",
-                                        "severity": severity
+                                        "conflict_type": "schedule_clash",
+                                        "severity": severity,
+                                        "conflicting_positions": {
+                                            "meeting_1": str(m1.id),
+                                            "meeting_2": str(m2.id),
+                                            "reason": reason
+                                        }
                                     },
                                     agents_involved=[m1.twg_id, m2.twg_id] # Assuming twg_id is what we need, or name
                                 )

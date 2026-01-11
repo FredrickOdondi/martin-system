@@ -167,8 +167,8 @@ async def chat_with_martin(
         if isinstance(interrupt_value, str):
             # Humanize the error message using LLM
             try:
-                from app.services.groq_llm_service import GroqLLMService
-                llm = GroqLLMService()
+                from app.services.llm_service import get_llm_service
+                llm = get_llm_service()
                 humanized_msg = llm.chat(
                     system_prompt="You are a helpful assistant. The user's request was stopped by the system with the following error. "
                                 "Rewrite this error message to be polite, concise, and helpful to the user. "
