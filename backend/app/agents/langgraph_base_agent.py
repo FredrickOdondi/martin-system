@@ -457,9 +457,17 @@ class LangGraphBaseAgent:
                 # Groq/OpenAI returns object with tool_calls
                 tool_calls_data = []
                 for tc in response_obj.tool_calls:
+                    try:
+                        args_parsed = json.loads(tc.function.arguments)
+                    except (json.JSONDecodeError, TypeError):
+                        args_parsed = {}
+                    
+                    if not isinstance(args_parsed, dict):
+                        args_parsed = {}
+                        
                     tool_calls_data.append({
                         "name": tc.function.name,
-                        "args": json.loads(tc.function.arguments),
+                        "args": args_parsed,
                         "id": tc.id
                     })
                 
