@@ -37,8 +37,8 @@ class SupervisorAPIAdapter:
             GraphInterrupt: When the graph requires human approval before continuing.
         """
         try:
-            # Call the sync method (LangGraph handles state internally)
-            response = self.supervisor.chat(message, twg_id=twg_id)
+            # Call the async method (LangGraph handles state internally)
+            response = await self.supervisor.chat(message, twg_id=twg_id)
             return response
         except GraphInterrupt as gi:
             # Re-raise GraphInterrupt so the API can catch it and return the approval payload

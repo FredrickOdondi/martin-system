@@ -45,3 +45,6 @@ class AgentState(TypedDict):
 
     # Context and history (optional)
     context: Optional[Dict[str, any]]
+    
+    # Structured Intent from LLM Parser
+    directive_intent: Optional[Dict[str, any]]

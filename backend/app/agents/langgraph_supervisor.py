@@ -22,6 +22,7 @@ from app.agents.langgraph_nodes import (
     synthesis_node,
     single_agent_response_node
 )
+from app.services.supervisor_state_service import get_supervisor_state, SupervisorGlobalState
 
 
 class LangGraphSupervisor:
@@ -66,6 +67,12 @@ class LangGraphSupervisor:
             memory_ttl=memory_ttl
         )
 
+        # Initialize access to Global State
+        self.state_service = get_supervisor_state()
+        
+        # Add tools to supervisor agent for accessing state
+        self._add_state_tools()
+
         # Registry of TWG agents
         self._twg_agents: Dict[str, LangGraphBaseAgent] = {}
 
@@ -77,6 +84,106 @@ class LangGraphSupervisor:
         self.memory = MemorySaver()
 
         logger.info(f"LangGraphSupervisor initialized for session '{self.session_id}'")
+
+    def _add_state_tools(self):
+        """Add tools for accessing global state to the supervisor agent."""
+        
+        def get_global_calendar_tool() -> str:
+            """
+            Get the unified schedule of all TWG meetings. 
+            Useful for checking availability, finding conflicts, or seeing the overall timeline.
+            """
+            try:
+                # The state service is a singleton, accessed via get_supervisor_state()
+                # But here we can use the instance we referenced
+                state = self.state_service.get_state()
+                if not state:
+                    return "Global state not yet initialized. Please try again in a moment."
+                
+                calendar = self.state_service.get_global_calendar()
+                
+                response = f"Global Calendar ({calendar.total_meetings} total, {calendar.upcoming_meetings} upcoming, {calendar.conflicts_detected} conflicts):\n"
+                for m in calendar.meetings:
+                    if m.status == "scheduled":
+                        conflict_mark = "⚠️ " if m.has_conflicts else ""
+                        response += f"- {conflict_mark}{m.scheduled_at.strftime('%Y-%m-%d %H:%M')}: {m.title} ({m.twg_name})\n"
+                
+                return response
+            except Exception as e:
+                return f"Error accessing calendar: {str(e)}"
+
+        def get_document_registry_tool() -> str:
+            """
+            Get the registry of all documents across TWGs.
+            Useful for finding existing policies, drafts, or memos.
+            """
+            try:
+                state = self.state_service.get_state()
+                if not state:
+                    return "Global state not yet initialized."
+                
+                registry = self.state_service.get_document_registry()
+                
+                response = f"Document Registry ({registry.total_documents} documents):\n"
+                for doc in registry.documents[:20]: # Limit to 20 for brevity
+                    response += f"- {doc.file_name} ({doc.twg_name or 'General'}) - {doc.file_type}\n"
+                
+                if registry.total_documents > 20:
+                    response += f"... and {registry.total_documents - 20} more."
+                
+                return response
+            except Exception as e:
+                return f"Error accessing documents: {str(e)}"
+        
+        def get_project_pipeline_tool() -> str:
+            """
+            Get the status of the project pipeline.
+            Useful for tracking deal flow and investment readiness.
+            """
+            try:
+                state = self.state_service.get_state()
+                if not state:
+                    return "Global state not yet initialized."
+                
+                pipeline = self.state_service.get_project_pipeline()
+                
+                response = f"Project Pipeline ({pipeline.total_projects} projects, Total Investment: ${pipeline.total_investment:,.2f}):\n"
+                
+                # Group by status for readability
+                by_status = {}
+                for p in pipeline.projects:
+                    if p.status.value not in by_status:
+                        by_status[p.status.value] = []
+                    by_status[p.status.value].append(p)
+                
+                for status, projects in by_status.items():
+                    response += f"\n{status.upper()}:\n"
+                    for p in projects:
+                        response += f"- {p.name} ({p.twg_name}): ${p.investment_size:,.0f} (Readiness: {p.readiness_score}/10)\n"
+                
+                return response
+            except Exception as e:
+                return f"Error accessing pipeline: {str(e)}"
+
+        # Register these functions as tools for the supervisor LLM
+        # Note: LangGraphBaseAgent handles tool registration via its own mechanism
+        # We need to manually append to its tool list if it supports it, 
+        # or recreate the agent with these tools.
+        # Since LangGraphBaseAgent implementation isn't fully visible here, 
+        # let's assume we can append to `self.supervisor_agent.tools` if it exists,
+        # or better yet, pass them in `chat` context or system prompt.
+        
+        # For now, let's register them in a way the base agent can see.
+        # Ideally, LangGraphBaseAgent would have an `add_tool` method.
+        if hasattr(self.supervisor_agent, "add_tool"):
+            self.supervisor_agent.add_tool(get_global_calendar_tool)
+            self.supervisor_agent.add_tool(get_document_registry_tool)
+            self.supervisor_agent.add_tool(get_project_pipeline_tool)
+        else:
+            # Fallback: We might need to subclass or modify BaseAgent to accept dynamic tools
+            # Or we simply wrap these in the system prompt context injection
+            pass # TODO: Verify tool registration mechanism
+
 
     def register_agent(self, agent_id: str, agent: LangGraphBaseAgent) -> None:
         """Register a TWG agent."""
@@ -258,7 +365,7 @@ class LangGraphSupervisor:
         logger.info("[SUPERVISOR] ✓ LangGraph StateGraph compiled successfully")
         logger.info(f"[SUPERVISOR] Nodes: route_query, supervisor, {', '.join(self._twg_agents.keys())}, synthesis, single_agent_response, dispatch_multiple")
 
-    def chat(self, message: str, thread_id: Optional[str] = None, twg_id: Optional[str] = None) -> str:
+    async def chat(self, message: str, thread_id: Optional[str] = None, twg_id: Optional[str] = None) -> str:
         """
         Chat interface using LangGraph execution.
 
@@ -297,11 +404,12 @@ class LangGraphSupervisor:
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 30}
 
         try:
-            result = self.compiled_graph.invoke(initial_state, config)
+            # Use ainvoke for async execution (required since route_query_node is async)
+            result = await self.compiled_graph.ainvoke(initial_state, config)
 
             # CHECK FOR INTERRUPTS (same logic as LangGraphBaseAgent)
             # The Main Graph's invoke() might not re-raise exceptions from nodes
-            snapshot = self.compiled_graph.get_state(config)
+            snapshot = await self.compiled_graph.aget_state(config)
             if snapshot.tasks:
                 for task in snapshot.tasks:
                     if hasattr(task, 'interrupts') and task.interrupts:

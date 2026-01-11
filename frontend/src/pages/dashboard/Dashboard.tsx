@@ -323,7 +323,7 @@ export default function Dashboard() {
                             {/* Vertical line */}
                             <div className="absolute left-[27px] top-4 bottom-4 w-0.5 bg-[#e7ebf3] dark:bg-[#2d3748] -z-0"></div>
 
-                            {timeline.length > 0 ? timeline.map((item, index) => {
+                            {timeline.length > 0 ? timeline.slice(0, 5).map((item, index) => {
                                 const date = new Date(item.date);
                                 const month = date.toLocaleString('en-US', { month: 'short' });
                                 const day = date.getDate();
@@ -334,7 +334,7 @@ export default function Dashboard() {
                                             <span className={`text-xs font-bold uppercase ${item.status === 'critical' ? 'text-red-500' : 'text-primary'}`}>{month}</span>
                                             <span className="text-xl font-black text-[#0d121b] dark:text-white">{day}</span>
                                         </div>
-                                        <div className={`pb-6 ${index !== timeline.length - 1 ? 'border-b border-[#f0f2f5] dark:border-[#2d3748]' : ''} w-full`}>
+                                        <div className={`pb-6 ${index !== 4 ? 'border-b border-[#f0f2f5] dark:border-[#2d3748]' : ''} w-full`}>
                                             <h4 className="font-bold text-[#0d121b] dark:text-white text-sm">{item.title}</h4>
                                             <p className="text-xs text-[#4c669a] dark:text-[#a0aec0] mt-1">{item.twg}</p>
                                             <div className="mt-2 flex items-center gap-2">
@@ -354,7 +354,10 @@ export default function Dashboard() {
                                 </div>
                             )}
                         </div>
-                        <button className="w-full mt-6 py-2 text-sm text-[#0d121b] dark:text-[#a0aec0] font-medium border border-[#e7ebf3] dark:border-[#2d3748] rounded-lg hover:bg-gray-50 dark:hover:bg-[#2d3748] transition-colors">
+                        <button
+                            onClick={() => navigate('/schedule')}
+                            className="w-full mt-6 py-2 text-sm text-[#0d121b] dark:text-[#a0aec0] font-medium border border-[#e7ebf3] dark:border-[#2d3748] rounded-lg hover:bg-gray-50 dark:hover:bg-[#2d3748] transition-colors"
+                        >
                             View All Events
                         </button>
                     </div>

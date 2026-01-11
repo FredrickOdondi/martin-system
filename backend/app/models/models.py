@@ -3,7 +3,7 @@ import enum
 from datetime import datetime
 from typing import List, Optional
 from decimal import Decimal
-from sqlalchemy import String, DateTime, Enum, ForeignKey, Column, Table, Text, Numeric, Float, Boolean, JSON, Uuid
+from sqlalchemy import String, DateTime, Enum, ForeignKey, Column, Table, Text, Numeric, Float, Boolean, JSON, Uuid, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 try:
@@ -298,6 +298,21 @@ class Document(Base):
     # Relationships
     twg: Mapped[Optional["TWG"]] = relationship(back_populates="documents")
     meeting: Mapped[Optional["Meeting"]] = relationship(back_populates="documents")
+
+    # Versioning
+    version: Mapped[int] = mapped_column(Integer, default=1)
+
+    # Knowledge Broadcasting
+    scope: Mapped[List[str]] = mapped_column(JSON, default=["twg_restricted"]) 
+    category: Mapped[str] = mapped_column(String(50), default="twg_specific")
+    last_broadcast: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    access_control: Mapped[str] = mapped_column(String(50), default="twg_restricted")
+    parent_document_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("documents.id"), nullable=True)
+
+    # Relationships
+    parent_document: Mapped[Optional["Document"]] = relationship("Document", remote_side="Document.id", back_populates="versions")
+    versions: Mapped[List["Document"]] = relationship("Document", back_populates="parent_document", cascade="all, delete-orphan")
+
     uploaded_by: Mapped["User"] = relationship("User", foreign_keys=[uploaded_by_id])
 
 class RefreshToken(Base):

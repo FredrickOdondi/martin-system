@@ -222,6 +222,54 @@ class LangGraphBaseAgent:
 
         logger.info(f"[{agent_id}] LangGraph agent initialized")
 
+        logger.info(f"[{agent_id}] LangGraph agent initialized")
+
+    def add_tool(self, tool_func):
+        """
+        Add a python function as a tool to the agent.
+        Autogenerates the schema from the function signature and docstring.
+        """
+        import inspect
+        
+        func_name = tool_func.__name__
+        doc = tool_func.__doc__ or "No description provided."
+        
+        # Simple schema generation
+        sig = inspect.signature(tool_func)
+        parameters = {}
+        required = []
+        
+        for name, param in sig.parameters.items():
+            param_type = "string"
+            if param.annotation == int:
+                param_type = "integer"
+            elif param.annotation == bool:
+                param_type = "boolean"
+                
+            parameters[name] = {
+                "type": param_type,
+                "description": f"Parameter {name}" 
+            }
+            if param.default == inspect.Parameter.empty:
+                required.append(name)
+        
+        tool_def = {
+            "type": "function",
+            "function": {
+                "name": func_name,
+                "description": doc.strip(),
+                "parameters": {
+                    "type": "object",
+                    "properties": parameters,
+                    "required": required
+                }
+            }
+        }
+        
+        self.tools_def.append(tool_def)
+        self.tool_map[func_name] = tool_func
+        logger.info(f"[{self.agent_id}] Added tool: {func_name}")
+
     def _build_graph(self) -> None:
         """
         Build the LangGraph StateGraph for this agent.
@@ -293,11 +341,23 @@ class LangGraphBaseAgent:
             try:
                 # Search KB restricted to TWG namespace
                 namespace = f"twg-{self.twg_id}"
-                results = self.kb.search(
+                twg_results = self.kb.search(
                     query=query,
                     namespace=namespace,
-                    top_k=2  # LIMIT: Only top 2 docs
+                    top_k=3
                 )
+                
+                # Search Global Broadcast namespace
+                global_results = self.kb.search(
+                    query=query,
+                    namespace="global",
+                    top_k=2
+                )
+                
+                # Merge and Sort by Score
+                results = twg_results + global_results
+                results.sort(key=lambda x: x['score'], reverse=True)
+                results = results[:3] # Keep top 3 most relevant context pieces
                 
                 # Format context
                 if results:

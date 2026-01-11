@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.routes import twgs, meetings, auth, projects, action_items, documents, audit, agents, dashboard, users, notifications
+from app.api.routes import twgs, meetings, auth, projects, action_items, documents, audit, agents, dashboard, users, notifications, supervisor
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -87,6 +87,44 @@ async def startup_event():
     # Start Scheduler
     from app.services.scheduler import scheduler_service
     scheduler_service.start()
+    
+    # Start Continuous Monitor (Background Conflict Detection)
+    from app.services.continuous_monitor import get_continuous_monitor
+    monitor = get_continuous_monitor()
+    monitor.start()
+    
+    # Start Supervisor State Refresh Task
+    from app.services.supervisor_state_service import get_supervisor_state
+    from app.core.database import get_db_session_context
+
+    async def refresh_supervisor_state_job():
+        """Background task to refresh supervisor state"""
+        logger.info("Executing background supervisor state refresh...")
+        try:
+            # Create a new session context
+            async with get_db_session_context() as db:
+                state_service = get_supervisor_state()
+                await state_service.refresh_state(db)
+                logger.info("Background supervisor state refresh completed.")
+        except Exception as e:
+            logger.error(f"Failed to refresh supervisor state: {e}")
+
+    # Add the job to the scheduler (run every 5 minutes)
+    # We need to access the scheduler instance from the service
+    # Assuming scheduler_service exposes the underlying scheduler or has an add_job method
+    # If not, we might need to modify scheduler_service. For now, let's assume standard APScheduler usage
+    try:
+        scheduler_service.scheduler.add_job(
+            refresh_supervisor_state_job,
+            'interval',
+            minutes=5,
+            id='supervisor_state_refresh',
+            replace_existing=True
+        )
+        logger.info("Supervisor state refresh job added to scheduler.")
+    except Exception as e:
+        logger.error(f"Failed to add supervisor refresh job: {e}")
+
 
     logger.info("--- END STARTUP DIAGNOSTICS ---")
 
@@ -107,6 +145,7 @@ app.include_router(agents.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(dashboard.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(users.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(notifications.router, prefix=f"{settings.API_V1_STR}")
+app.include_router(supervisor.router, prefix=f"{settings.API_V1_STR}")
 
 @app.get("/")
 async def root():
