@@ -103,13 +103,19 @@ async def upload_document(
     
     db.add(db_doc)
     await db.commit()
-    await db.refresh(db_doc)
     
+    # Reload with relationships instead of refresh
+    result = await db.execute(
+        select(Document)
+        .where(Document.id == db_doc.id)
+        .options(
+            selectinload(Document.twg),
+            selectinload(Document.uploaded_by)
+        )
+    )
+    db_doc = result.scalar_one()
     
-    # Return document (Ingestion is now a separate manual step)
-    response = db_doc.__dict__.copy()
-    response['ingestion'] = None
-    return response
+    return db_doc
 
 @router.get("/", response_model=List[DocumentRead])
 async def list_documents(
