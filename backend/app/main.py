@@ -23,6 +23,13 @@ else:
 if "https://frontend-production-1abb.up.railway.app" not in cors_origins:
     cors_origins.append("https://frontend-production-1abb.up.railway.app")
 
+# Add custom domain
+if "https://ecowasiisummit.net" not in cors_origins:
+    cors_origins.append("https://ecowasiisummit.net")
+
+if "https://www.ecowasiisummit.net" not in cors_origins:
+    cors_origins.append("https://www.ecowasiisummit.net")
+
 # Add IPv4 localhost variant to support 127.0.0.1 connections
 if "http://127.0.0.1:5173" not in cors_origins:
     cors_origins.append("http://127.0.0.1:5173")
