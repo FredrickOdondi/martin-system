@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response, Response
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -120,6 +120,7 @@ async def upload_document(
 
 @router.get("/", response_model=List[DocumentRead])
 async def list_documents(
+    response: Response,
     skip: int = 0,
     limit: int = 100,
     twg_id: uuid.UUID = None,
@@ -132,14 +133,20 @@ async def list_documents(
     # Filtered documents for display: Eager load relationships
     # We need to import selectinload
     from sqlalchemy.orm import selectinload
+    from sqlalchemy import func
     
+    # Base query for counting (without eager loads)
+    count_query = select(func.count(Document.id))
+    
+    # Query for fetching data
     query = select(Document).options(
         selectinload(Document.uploaded_by),
         selectinload(Document.twg)
-    ).offset(skip).limit(limit)
+    )
     
     try:
         if twg_id:
+            count_query = count_query.where(Document.twg_id == twg_id)
             query = query.where(Document.twg_id == twg_id)
             if not has_twg_access(current_user, twg_id):
                 raise HTTPException(status_code=403, detail="Access denied")
@@ -154,13 +161,26 @@ async def list_documents(
                 # 2. Global Secretariat documents (twg_id is NULL)
                 # This enforces the "locked room" principle - no cross-TWG visibility
                 user_twg_ids = [twg.id for twg in current_user.twgs]
-                query = query.where(
-                    (Document.twg_id.in_(user_twg_ids)) | 
-                    (Document.twg_id == None)
-                )
-            
+                filter_condition = (Document.twg_id.in_(user_twg_ids)) | (Document.twg_id == None)
+                
+                count_query = count_query.where(filter_condition)
+                query = query.where(filter_condition)
+        
+        # Execute count
+        total_count = await db.scalar(count_query)
+        
+        # Apply pagination to data query and execute
+        # Note: We must apply offset/limit AFTER filtering
+        query = query.offset(skip).limit(limit).order_by(Document.created_at.desc())
+        
         result = await db.execute(query)
-        return result.scalars().all()
+        documents = result.scalars().all()
+        
+        # Set header
+        response.headers["X-Total-Count"] = str(total_count)
+        
+        return documents
+
     except Exception as e:
         import traceback
         print(f"CRITICAL ERROR in list_documents: {e}")
