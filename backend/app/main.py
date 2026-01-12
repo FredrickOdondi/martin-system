@@ -162,6 +162,7 @@ app.include_router(dashboard.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(users.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(notifications.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(supervisor.router, prefix=f"{settings.API_V1_STR}")
+app.include_router(debug.router, prefix=f"{settings.API_V1_STR}")
 
 @app.get("/")
 async def root():
