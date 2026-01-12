@@ -177,7 +177,12 @@ export default function WorkspaceContextPanel({ twgName, twgId, onInsertContext 
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-4">
-                {activeTab === 'meetings' && (
+                {loading && (
+                    <div className="flex justify-center items-center py-8">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                    </div>
+                )}
+                {!loading && activeTab === 'meetings' && (
                     <div className="space-y-3">
                         {meetings.map((meeting) => (
                             <Card
@@ -224,7 +229,7 @@ export default function WorkspaceContextPanel({ twgName, twgId, onInsertContext 
                     </div>
                 )}
 
-                {activeTab === 'actions' && (
+                {!loading && activeTab === 'actions' && (
                     <div className="space-y-3">
                         {actions.map((action) => (
                             <Card
@@ -265,7 +270,7 @@ export default function WorkspaceContextPanel({ twgName, twgId, onInsertContext 
                     </div>
                 )}
 
-                {activeTab === 'documents' && (
+                {!loading && activeTab === 'documents' && (
                     <div className="space-y-3">
                         {documents.map((doc) => (
                             <Card

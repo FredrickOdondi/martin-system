@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSelector } from 'react-redux';
+import { useParams } from 'react-router-dom';
 import { RootState } from '../../store';
 import { agentService, Citation } from '../../services/agentService';
+import { twgs as twgApi } from '../../services/api';
 import { CommandAutocomplete } from '../../components/agent/CommandAutocomplete';
 import { MentionAutocomplete } from '../../components/agent/MentionAutocomplete';
 import EmailApprovalModal, { EmailApprovalRequest, EmailDraft } from '../../components/agent/EmailApprovalModal';
@@ -52,18 +54,44 @@ export default function TwgAgent() {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
+    const { id } = useParams<{ id: string }>();
+
     // Initialize Active TWG Context
     useEffect(() => {
-        if (!user) return;
+        const initContext = async () => {
+            if (!user) return;
 
-        if (user.role === 'admin' || user.role === 'secretariat_lead') {
-            setActiveTwg({ id: 'secretariat', name: 'Secretariat' });
-        } else if (user.twgs && user.twgs.length > 0) {
-            // Default to first TWG for facilitators/members
-            const primary = user.twgs[0];
-            setActiveTwg({ id: primary.id, name: primary.name });
-        }
-    }, [user]);
+            // 1. Priority: URL Param (Direct Link or navigation)
+            if (id) {
+                // Check if we have it in user's assigned TWGs (saves API call)
+                const assignedTwg = user.twgs?.find(t => t.id === id);
+                if (assignedTwg) {
+                    setActiveTwg({ id: assignedTwg.id, name: assignedTwg.name });
+                    return;
+                }
+
+                // If not assigned (e.g. Admin or public), fetch details
+                try {
+                    const res = await twgApi.get(id);
+                    setActiveTwg({ id: res.data.id, name: res.data.name });
+                } catch (err) {
+                    console.error("Failed to load TWG context from URL", err);
+                    // Fallback to safe default based on role
+                }
+            } else {
+                // 2. Fallback: Role-based Default
+                if (user.role === 'admin' || user.role === 'secretariat_lead') {
+                    setActiveTwg({ id: 'secretariat', name: 'Secretariat' });
+                } else if (user.twgs && user.twgs.length > 0) {
+                    // Default to first assigned TWG
+                    setActiveTwg({ id: user.twgs[0].id, name: user.twgs[0].name });
+                }
+            }
+        };
+
+        initContext();
+    }, [user, id]);
+
 
     // Autocomplete state
     const [commandSuggestions, setCommandSuggestions] = useState<CommandAutocompleteResult[]>([]);
