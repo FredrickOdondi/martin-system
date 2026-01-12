@@ -111,9 +111,14 @@ class UserUpdate(SchemaBase):
     role: Optional[UserRole] = None
     organization: Optional[str] = None
 
+class TWGRef(SchemaBase):
+    id: uuid.UUID
+    name: str
+
 class UserRead(UserBase):
     id: uuid.UUID
     created_at: datetime
+    twgs: List[TWGRef] = []
 
 # --- TWG Schemas ---
 
