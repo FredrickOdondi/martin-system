@@ -109,6 +109,7 @@ function App() {
             }>
                 <Route path="/dashboard" element={<Dashboard />} />
                 <Route path="/twgs" element={<TwgAgent />} />
+                <Route path="/twgs/:id" element={<TwgAgent />} />
                 <Route path="/workspace/:id" element={<TwgWorkspace />} />
                 <Route path="/documents" element={<DocumentLibrary />} />
                 <Route path="/notifications" element={<NotificationCenter />} />

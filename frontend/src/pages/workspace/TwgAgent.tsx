@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { useSelector } from 'react-redux';
+import { useParams } from 'react-router-dom';
 import { RootState } from '../../store';
 import { agentService, Citation } from '../../services/agentService';
+import { twgs as twgApi } from '../../services/api';
 import { CommandAutocomplete } from '../../components/agent/CommandAutocomplete';
 import { MentionAutocomplete } from '../../components/agent/MentionAutocomplete';
 import EmailApprovalModal, { EmailApprovalRequest, EmailDraft } from '../../components/agent/EmailApprovalModal';
@@ -52,644 +54,674 @@ export default function TwgAgent() {
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
 
+    const { id } = useParams<{ id: string }>();
+
     // Initialize Active TWG Context
     useEffect(() => {
-        if (!user) return;
+        const initContext = async () => {
+            if (!user) return;
 
-        if (user.role === 'admin' || user.role === 'secretariat_lead') {
-            setActiveTwg({ id: 'secretariat', name: 'Secretariat' });
-        } else if (user.twgs && user.twgs.length > 0) {
-            // Default to first TWG for facilitators/members
-            const primary = user.twgs[0];
-            setActiveTwg({ id: primary.id, name: primary.name });
-        }
-    }, [user]);
+            // 1. Priority: URL Param (Direct Link or navigation)
+            if (id) {
+                // Check if we have it in user's assigned TWGs (saves API call)
+                const assignedTwg = user.twgs?.find(t => t.id === id);
+                if (assignedTwg) {
+                    setActiveTwg({ id: assignedTwg.id, name: assignedTwg.name });
+                    return;
+                }
 
-    // Autocomplete state
-    const [commandSuggestions, setCommandSuggestions] = useState<CommandAutocompleteResult[]>([]);
-    const [mentionSuggestions, setMentionSuggestions] = useState<AgentMentionSuggestion[]>([]);
-    const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
-    const [autocompleteType, setAutocompleteType] = useState<'command' | 'mention' | null>(null);
-
-    // Email approval state
-    const [pendingEmailApproval, setPendingEmailApproval] = useState<EmailApprovalRequest | null>(null);
-    const [showApprovalModal, setShowApprovalModal] = useState(false);
-
-    // Settings modal state
-    const [showSettingsModal, setShowSettingsModal] = useState(false);
-
-
-    // Context panel state
-    const [showContextPanel, setShowContextPanel] = useState(false);
-
-    // Typing state
-    const [typingMessage, setTypingMessage] = useState<string | null>(null);
-    const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
-
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    };
-
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages, isLoading, typingMessage, thinkingSteps]);
-
-    const handleSendMessage = async () => {
-        if (!inputMessage.trim() || isLoading) return;
-
-        const userMessage: Message = {
-            id: Date.now().toString(),
-            role: 'user',
-            content: inputMessage,
-            timestamp: new Date(),
+                // If not assigned (e.g. Admin or public), fetch details
+                try {
+                    const res = await twgApi.get(id);
+                    setActiveTwg({ id: res.data.id, name: res.data.name });
+                } catch (err) {
+                    console.error("Failed to load TWG context from URL", err);
+                    // Fallback to safe default based on role
+                }
+            } else {
+                // 2. Fallback: Role-based Default
+                if (user.role === 'admin' || user.role === 'secretariat_lead') {
+                    setActiveTwg({ id: 'secretariat', name: 'Secretariat' });
+                } else if (user.twgs && user.twgs.length > 0) {
+                    // Default to first assigned TWG
+                    setActiveTwg({ id: user.twgs[0].id, name: user.twgs[0].name });
+                }
+            }
         };
 
-        setMessages(prev => [...prev, userMessage]);
-        const messageToSend = inputMessage;
-        setInputMessage('');
-        setIsLoading(true);
-        setThinkingSteps([]); // Clear previous steps
-        setTypingMessage('Processing...');
+        initContext();
+    }, [user, id]);
+    // Default to first TWG for facilitators/members
+    const primary = user.twgs[0];
+    setActiveTwg({ id: primary.id, name: primary.name });
+}
+    }, [user]);
 
-        // Create new AbortController for this request
-        abortControllerRef.current = new AbortController();
+// Autocomplete state
+const [commandSuggestions, setCommandSuggestions] = useState<CommandAutocompleteResult[]>([]);
+const [mentionSuggestions, setMentionSuggestions] = useState<AgentMentionSuggestion[]>([]);
+const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
+const [autocompleteType, setAutocompleteType] = useState<'command' | 'mention' | null>(null);
 
-        try {
-            await agentService.chatStream({
-                message: messageToSend,
-                conversation_id: conversationId,
-                twg_id: activeTwg?.id !== 'secretariat' ? activeTwg?.id : undefined // Pass TWG ID if not secretariat
-            }, {
-                onThinking: (status) => {
-                    setThinkingSteps(prev => {
-                        // Avoid duplicates if same status comes twice
-                        if (prev[prev.length - 1] === status) return prev;
-                        return [...prev, status];
-                    });
-                    setTypingMessage(status);
-                },
-                onResponse: (msg: any) => {
-                    console.log('[STREAM] Received response:', msg);
+// Email approval state
+const [pendingEmailApproval, setPendingEmailApproval] = useState<EmailApprovalRequest | null>(null);
+const [showApprovalModal, setShowApprovalModal] = useState(false);
 
-                    // Parse suggestions from content (Format: <<SUGGESTIONS>>["A","B"]<</SUGGESTIONS>>)
-                    let content = msg.content;
-                    let suggestions: string[] = [];
+// Settings modal state
+const [showSettingsModal, setShowSettingsModal] = useState(false);
 
-                    if (content.includes('<<SUGGESTIONS>>')) {
-                        try {
-                            const start = content.indexOf('<<SUGGESTIONS>>');
-                            const end = content.indexOf('<</SUGGESTIONS>>');
-                            if (start !== -1 && end !== -1) {
-                                const jsonStr = content.substring(start + 15, end);
-                                suggestions = JSON.parse(jsonStr);
-                                content = content.substring(0, start).trim();
-                            }
-                        } catch (e) {
-                            console.error('Error parsing suggestions:', e);
-                        }
-                    }
 
-                    const agentMessage: Message = {
-                        id: msg.message_id || Date.now().toString(),
-                        role: 'agent',
-                        content: content,
-                        timestamp: new Date(),
-                        citations: [], // Stream doesn't support citations yet
-                        agentName: activeTwg?.name === 'Secretariat' ? 'Secretariat Assistant' : `${activeTwg?.name} Agent`,
-                        suggestions: suggestions
-                    };
+// Context panel state
+const [showContextPanel, setShowContextPanel] = useState(false);
 
-                    setMessages(prev => [...prev, agentMessage]);
-                    setConversationId(msg.conversation_id);
-                },
-                onDone: () => {
-                    setIsLoading(false);
-                    setTypingMessage(null);
-                },
-                onError: (err) => {
-                    console.error('Stream error:', err);
-                    const errorMessage: Message = {
-                        id: (Date.now() + 1).toString(),
-                        role: 'agent',
-                        content: 'Sorry, I encountered an error. Please try again.',
-                        timestamp: new Date(),
-                    };
-                    setMessages(prev => [...prev, errorMessage]);
-                    setIsLoading(false);
-                    setTypingMessage(null);
-                }
-            });
+// Typing state
+const [typingMessage, setTypingMessage] = useState<string | null>(null);
+const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
 
-        } catch (error: any) {
-            // Fallback handled in onError usually, but strictly catch synchronous startup errors
-            setIsLoading(false);
-            setTypingMessage(null);
-            console.error('Error starting chat:', error);
-        } finally {
-            abortControllerRef.current = null;
-        }
+const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+};
+
+useEffect(() => {
+    scrollToBottom();
+}, [messages, isLoading, typingMessage, thinkingSteps]);
+
+const handleSendMessage = async () => {
+    if (!inputMessage.trim() || isLoading) return;
+
+    const userMessage: Message = {
+        id: Date.now().toString(),
+        role: 'user',
+        content: inputMessage,
+        timestamp: new Date(),
     };
 
-    // Detect slash commands and @mentions in input
-    const handleInputChange = async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-        const value = e.target.value;
-        setInputMessage(value);
+    setMessages(prev => [...prev, userMessage]);
+    const messageToSend = inputMessage;
+    setInputMessage('');
+    setIsLoading(true);
+    setThinkingSteps([]); // Clear previous steps
+    setTypingMessage('Processing...');
 
-        const cursorPosition = e.target.selectionStart;
-        const textBeforeCursor = value.substring(0, cursorPosition);
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
 
-        // Check for command trigger (/)
-        const commandMatch = textBeforeCursor.match(/\/(\w*)$/);
-        if (commandMatch) {
-            const query = '/' + commandMatch[1];
-            try {
-                const response = await axios.get(`/api/agents/commands/autocomplete`, {
-                    params: { query }
+    try {
+        await agentService.chatStream({
+            message: messageToSend,
+            conversation_id: conversationId,
+            twg_id: activeTwg?.id !== 'secretariat' ? activeTwg?.id : undefined // Pass TWG ID if not secretariat
+        }, {
+            onThinking: (status) => {
+                setThinkingSteps(prev => {
+                    // Avoid duplicates if same status comes twice
+                    if (prev[prev.length - 1] === status) return prev;
+                    return [...prev, status];
                 });
-                setCommandSuggestions(response.data.suggestions);
-                setAutocompleteType('command');
-                setSelectedSuggestionIndex(0);
-                return;
-            } catch (error) {
-                console.error('Error fetching command suggestions:', error);
-            }
-        }
+                setTypingMessage(status);
+            },
+            onResponse: (msg: any) => {
+                console.log('[STREAM] Received response:', msg);
 
-        // Check for mention trigger (@)
-        const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
-        if (mentionMatch) {
-            const query = '@' + mentionMatch[1];
-            try {
-                const response = await axios.get(`/api/agents/mentions/autocomplete`, {
-                    params: { query }
-                });
-                setMentionSuggestions(response.data.suggestions);
-                setAutocompleteType('mention');
-                setSelectedSuggestionIndex(0);
-                return;
-            } catch (error) {
-                console.error('Error fetching mention suggestions:', error);
-            }
-        }
+                // Parse suggestions from content (Format: <<SUGGESTIONS>>["A","B"]<</SUGGESTIONS>>)
+                let content = msg.content;
+                let suggestions: string[] = [];
 
-        // Clear autocomplete if no trigger detected
+                if (content.includes('<<SUGGESTIONS>>')) {
+                    try {
+                        const start = content.indexOf('<<SUGGESTIONS>>');
+                        const end = content.indexOf('<</SUGGESTIONS>>');
+                        if (start !== -1 && end !== -1) {
+                            const jsonStr = content.substring(start + 15, end);
+                            suggestions = JSON.parse(jsonStr);
+                            content = content.substring(0, start).trim();
+                        }
+                    } catch (e) {
+                        console.error('Error parsing suggestions:', e);
+                    }
+                }
+
+                const agentMessage: Message = {
+                    id: msg.message_id || Date.now().toString(),
+                    role: 'agent',
+                    content: content,
+                    timestamp: new Date(),
+                    citations: [], // Stream doesn't support citations yet
+                    agentName: activeTwg?.name === 'Secretariat' ? 'Secretariat Assistant' : `${activeTwg?.name} Agent`,
+                    suggestions: suggestions
+                };
+
+                setMessages(prev => [...prev, agentMessage]);
+                setConversationId(msg.conversation_id);
+            },
+            onDone: () => {
+                setIsLoading(false);
+                setTypingMessage(null);
+            },
+            onError: (err) => {
+                console.error('Stream error:', err);
+                const errorMessage: Message = {
+                    id: (Date.now() + 1).toString(),
+                    role: 'agent',
+                    content: 'Sorry, I encountered an error. Please try again.',
+                    timestamp: new Date(),
+                };
+                setMessages(prev => [...prev, errorMessage]);
+                setIsLoading(false);
+                setTypingMessage(null);
+            }
+        });
+
+    } catch (error: any) {
+        // Fallback handled in onError usually, but strictly catch synchronous startup errors
+        setIsLoading(false);
+        setTypingMessage(null);
+        console.error('Error starting chat:', error);
+    } finally {
+        abortControllerRef.current = null;
+    }
+};
+
+// Detect slash commands and @mentions in input
+const handleInputChange = async (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setInputMessage(value);
+
+    const cursorPosition = e.target.selectionStart;
+    const textBeforeCursor = value.substring(0, cursorPosition);
+
+    // Check for command trigger (/)
+    const commandMatch = textBeforeCursor.match(/\/(\w*)$/);
+    if (commandMatch) {
+        const query = '/' + commandMatch[1];
+        try {
+            const response = await axios.get(`/api/agents/commands/autocomplete`, {
+                params: { query }
+            });
+            setCommandSuggestions(response.data.suggestions);
+            setAutocompleteType('command');
+            setSelectedSuggestionIndex(0);
+            return;
+        } catch (error) {
+            console.error('Error fetching command suggestions:', error);
+        }
+    }
+
+    // Check for mention trigger (@)
+    const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+    if (mentionMatch) {
+        const query = '@' + mentionMatch[1];
+        try {
+            const response = await axios.get(`/api/agents/mentions/autocomplete`, {
+                params: { query }
+            });
+            setMentionSuggestions(response.data.suggestions);
+            setAutocompleteType('mention');
+            setSelectedSuggestionIndex(0);
+            return;
+        } catch (error) {
+            console.error('Error fetching mention suggestions:', error);
+        }
+    }
+
+    // Clear autocomplete if no trigger detected
+    setAutocompleteType(null);
+    setCommandSuggestions([]);
+    setMentionSuggestions([]);
+};
+
+const handleCommandSelect = (suggestion: CommandAutocompleteResult) => {
+    const cursorPosition = inputRef.current?.selectionStart || 0;
+    const textBeforeCursor = inputMessage.substring(0, cursorPosition);
+    const textAfterCursor = inputMessage.substring(cursorPosition);
+
+    const commandMatch = textBeforeCursor.match(/\/(\w*)$/);
+    if (commandMatch) {
+        const beforeCommand = textBeforeCursor.substring(0, textBeforeCursor.length - commandMatch[0].length);
+        const newValue = beforeCommand + suggestion.command + ' ' + textAfterCursor;
+        setInputMessage(newValue);
         setAutocompleteType(null);
         setCommandSuggestions([]);
+
+        setTimeout(() => {
+            if (inputRef.current) {
+                const newCursorPos = beforeCommand.length + suggestion.command.length + 1;
+                inputRef.current.focus();
+                inputRef.current.setSelectionRange(newCursorPos, newCursorPos);
+            }
+        }, 0);
+    }
+};
+
+const handleMentionSelect = (suggestion: AgentMentionSuggestion) => {
+    const cursorPosition = inputRef.current?.selectionStart || 0;
+    const textBeforeCursor = inputMessage.substring(0, cursorPosition);
+    const textAfterCursor = inputMessage.substring(cursorPosition);
+
+    const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+    if (mentionMatch) {
+        const beforeMention = textBeforeCursor.substring(0, textBeforeCursor.length - mentionMatch[0].length);
+        const newValue = beforeMention + suggestion.mention + ' ' + textAfterCursor;
+        setInputMessage(newValue);
+        setAutocompleteType(null);
         setMentionSuggestions([]);
-    };
 
-    const handleCommandSelect = (suggestion: CommandAutocompleteResult) => {
-        const cursorPosition = inputRef.current?.selectionStart || 0;
-        const textBeforeCursor = inputMessage.substring(0, cursorPosition);
-        const textAfterCursor = inputMessage.substring(cursorPosition);
+        setTimeout(() => {
+            if (inputRef.current) {
+                const newCursorPos = beforeMention.length + suggestion.mention.length + 1;
+                inputRef.current.focus();
+                inputRef.current.setSelectionRange(newCursorPos, newCursorPos);
+            }
+        }, 0);
+    }
+};
 
-        const commandMatch = textBeforeCursor.match(/\/(\w*)$/);
-        if (commandMatch) {
-            const beforeCommand = textBeforeCursor.substring(0, textBeforeCursor.length - commandMatch[0].length);
-            const newValue = beforeCommand + suggestion.command + ' ' + textAfterCursor;
-            setInputMessage(newValue);
-            setAutocompleteType(null);
-            setCommandSuggestions([]);
+const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (autocompleteType) {
+        const suggestions = autocompleteType === 'command' ? commandSuggestions : mentionSuggestions;
 
-            setTimeout(() => {
-                if (inputRef.current) {
-                    const newCursorPos = beforeCommand.length + suggestion.command.length + 1;
-                    inputRef.current.focus();
-                    inputRef.current.setSelectionRange(newCursorPos, newCursorPos);
-                }
-            }, 0);
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setSelectedSuggestionIndex((prev) => (prev + 1) % suggestions.length);
+            return;
         }
-    };
 
-    const handleMentionSelect = (suggestion: AgentMentionSuggestion) => {
-        const cursorPosition = inputRef.current?.selectionStart || 0;
-        const textBeforeCursor = inputMessage.substring(0, cursorPosition);
-        const textAfterCursor = inputMessage.substring(cursorPosition);
-
-        const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
-        if (mentionMatch) {
-            const beforeMention = textBeforeCursor.substring(0, textBeforeCursor.length - mentionMatch[0].length);
-            const newValue = beforeMention + suggestion.mention + ' ' + textAfterCursor;
-            setInputMessage(newValue);
-            setAutocompleteType(null);
-            setMentionSuggestions([]);
-
-            setTimeout(() => {
-                if (inputRef.current) {
-                    const newCursorPos = beforeMention.length + suggestion.mention.length + 1;
-                    inputRef.current.focus();
-                    inputRef.current.setSelectionRange(newCursorPos, newCursorPos);
-                }
-            }, 0);
-        }
-    };
-
-    const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (autocompleteType) {
-            const suggestions = autocompleteType === 'command' ? commandSuggestions : mentionSuggestions;
-
-            if (e.key === 'ArrowDown') {
-                e.preventDefault();
-                setSelectedSuggestionIndex((prev) => (prev + 1) % suggestions.length);
-                return;
-            }
-
-            if (e.key === 'ArrowUp') {
-                e.preventDefault();
-                setSelectedSuggestionIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
-                return;
-            }
-
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                if (autocompleteType === 'command' && commandSuggestions[selectedSuggestionIndex]) {
-                    handleCommandSelect(commandSuggestions[selectedSuggestionIndex]);
-                } else if (autocompleteType === 'mention' && mentionSuggestions[selectedSuggestionIndex]) {
-                    handleMentionSelect(mentionSuggestions[selectedSuggestionIndex]);
-                }
-                return;
-            }
-
-            if (e.key === 'Escape') {
-                e.preventDefault();
-                setAutocompleteType(null);
-                setCommandSuggestions([]);
-                setMentionSuggestions([]);
-                return;
-            }
+        if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setSelectedSuggestionIndex((prev) => (prev - 1 + suggestions.length) % suggestions.length);
+            return;
         }
 
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            handleSendMessage();
-        }
-    };
-
-    const handleClearConversation = () => {
-        if (messages.length === 0 && !isLoading) return;
-
-        if (window.confirm('Are you sure you want to clear this conversation? This action cannot be undone.')) {
-            if (abortControllerRef.current) {
-                abortControllerRef.current.abort();
-                abortControllerRef.current = null;
+            if (autocompleteType === 'command' && commandSuggestions[selectedSuggestionIndex]) {
+                handleCommandSelect(commandSuggestions[selectedSuggestionIndex]);
+            } else if (autocompleteType === 'mention' && mentionSuggestions[selectedSuggestionIndex]) {
+                handleMentionSelect(mentionSuggestions[selectedSuggestionIndex]);
             }
-
-            setMessages([]);
-            setConversationId(undefined);
-            setIsLoading(false);
-            setTypingMessage(null);
+            return;
         }
-    };
 
-    const handleReact = (messageId: string, emoji: string) => {
-        setMessages(prev => prev.map(msg => {
-            if (msg.id === messageId) {
-                const reactions = msg.reactions || [];
-                const existingReaction = reactions.find(r => r.emoji === emoji);
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            setAutocompleteType(null);
+            setCommandSuggestions([]);
+            setMentionSuggestions([]);
+            return;
+        }
+    }
 
-                if (existingReaction) {
-                    return {
-                        ...msg,
-                        reactions: reactions.map(r =>
-                            r.emoji === emoji
-                                ? { ...r, count: r.count + 1, users: [...r.users, 'You'] }
-                                : r
-                        )
-                    };
-                } else {
-                    return {
-                        ...msg,
-                        reactions: [...reactions, { emoji, count: 1, users: ['You'] }]
-                    };
-                }
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        handleSendMessage();
+    }
+};
+
+const handleClearConversation = () => {
+    if (messages.length === 0 && !isLoading) return;
+
+    if (window.confirm('Are you sure you want to clear this conversation? This action cannot be undone.')) {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
+        }
+
+        setMessages([]);
+        setConversationId(undefined);
+        setIsLoading(false);
+        setTypingMessage(null);
+    }
+};
+
+const handleReact = (messageId: string, emoji: string) => {
+    setMessages(prev => prev.map(msg => {
+        if (msg.id === messageId) {
+            const reactions = msg.reactions || [];
+            const existingReaction = reactions.find(r => r.emoji === emoji);
+
+            if (existingReaction) {
+                return {
+                    ...msg,
+                    reactions: reactions.map(r =>
+                        r.emoji === emoji
+                            ? { ...r, count: r.count + 1, users: [...r.users, 'You'] }
+                            : r
+                    )
+                };
+            } else {
+                return {
+                    ...msg,
+                    reactions: [...reactions, { emoji, count: 1, users: ['You'] }]
+                };
             }
-            return msg;
-        }));
-    };
-
-    const handleInsertContext = (contextType: string, data: any) => {
-        let contextText = '';
-
-        switch (contextType) {
-            case 'meeting':
-                contextText = `Please summarize the meeting "${data.title}" scheduled for ${data.date}`;
-                break;
-            case 'action':
-                contextText = `What is the status of the action item: "${data.task}" assigned to ${data.assignee}?`;
-                break;
-            case 'document':
-                contextText = `Can you provide information about the document "${data.name}"?`;
-                break;
-            case 'template':
-                if (data.type === 'summary') {
-                    contextText = 'Generate a summary of all recent TWG activities';
-                } else if (data.type === 'stats') {
-                    contextText = 'Show me the statistics for this TWG workspace';
-                }
-                break;
-            default:
-                contextText = `Context: ${JSON.stringify(data)}`;
         }
+        return msg;
+    }));
+};
 
-        setInputMessage(contextText);
-        inputRef.current?.focus();
-    };
+const handleInsertContext = (contextType: string, data: any) => {
+    let contextText = '';
 
-    const handleApproveEmail = async (requestId: string, modifications?: EmailDraft) => {
-        try {
-            const approvalData = {
-                request_id: requestId,
-                approved: true,
-                modifications: modifications || null
-            };
+    switch (contextType) {
+        case 'meeting':
+            contextText = `Please summarize the meeting "${data.title}" scheduled for ${data.date}`;
+            break;
+        case 'action':
+            contextText = `What is the status of the action item: "${data.task}" assigned to ${data.assignee}?`;
+            break;
+        case 'document':
+            contextText = `Can you provide information about the document "${data.name}"?`;
+            break;
+        case 'template':
+            if (data.type === 'summary') {
+                contextText = 'Generate a summary of all recent TWG activities';
+            } else if (data.type === 'stats') {
+                contextText = 'Show me the statistics for this TWG workspace';
+            }
+            break;
+        default:
+            contextText = `Context: ${JSON.stringify(data)}`;
+    }
 
-            const result = await agentService.approveEmail(requestId, approvalData);
+    setInputMessage(contextText);
+    inputRef.current?.focus();
+};
 
-            setShowApprovalModal(false);
-            setPendingEmailApproval(null);
+const handleApproveEmail = async (requestId: string, modifications?: EmailDraft) => {
+    try {
+        const approvalData = {
+            request_id: requestId,
+            approved: true,
+            modifications: modifications || null
+        };
 
-            const successMessage: Message = {
-                id: Date.now().toString(),
-                role: 'agent',
-                content: result.email_sent
-                    ? `✅ Email sent successfully! Message ID: ${result.message_id}`
-                    : `⚠️ ${result.message}`,
-                timestamp: new Date()
-            };
-            setMessages(prev => [...prev, successMessage]);
-        } catch (error) {
-            console.error('Error approving email:', error);
-            const errorMessage: Message = {
-                id: Date.now().toString(),
-                role: 'agent',
-                content: `❌ Failed to send email: ${error}`,
-                timestamp: new Date()
-            };
-            setMessages(prev => [...prev, errorMessage]);
-        }
-    };
+        const result = await agentService.approveEmail(requestId, approvalData);
 
-    const handleDeclineEmail = async (requestId: string, reason?: string) => {
-        try {
-            await agentService.declineEmail(requestId, reason);
+        setShowApprovalModal(false);
+        setPendingEmailApproval(null);
 
-            setShowApprovalModal(false);
-            setPendingEmailApproval(null);
+        const successMessage: Message = {
+            id: Date.now().toString(),
+            role: 'agent',
+            content: result.email_sent
+                ? `✅ Email sent successfully! Message ID: ${result.message_id}`
+                : `⚠️ ${result.message}`,
+            timestamp: new Date()
+        };
+        setMessages(prev => [...prev, successMessage]);
+    } catch (error) {
+        console.error('Error approving email:', error);
+        const errorMessage: Message = {
+            id: Date.now().toString(),
+            role: 'agent',
+            content: `❌ Failed to send email: ${error}`,
+            timestamp: new Date()
+        };
+        setMessages(prev => [...prev, errorMessage]);
+    }
+};
 
-            const declineMessage: Message = {
-                id: Date.now().toString(),
-                role: 'agent',
-                content: `🚫 Email sending cancelled: ${reason || 'Declined by user'}`,
-                timestamp: new Date()
-            };
-            setMessages(prev => [...prev, declineMessage]);
-        } catch (error) {
-            console.error('Error declining email:', error);
-        }
-    };
+const handleDeclineEmail = async (requestId: string, reason?: string) => {
+    try {
+        await agentService.declineEmail(requestId, reason);
 
-    const handleSuggestionClick = (suggestion: string) => {
-        setInputMessage(suggestion);
-        // Using strict timeout to ensure state update before firing
-        setTimeout(() => {
-            handleSendMessage();
-        }, 50);
-    };
+        setShowApprovalModal(false);
+        setPendingEmailApproval(null);
 
-    return (
-        <div className="font-display bg-background-light dark:bg-background-dark text-[#0d121b] dark:text-white h-full flex flex-col overflow-hidden">
+        const declineMessage: Message = {
+            id: Date.now().toString(),
+            role: 'agent',
+            content: `🚫 Email sending cancelled: ${reason || 'Declined by user'}`,
+            timestamp: new Date()
+        };
+        setMessages(prev => [...prev, declineMessage]);
+    } catch (error) {
+        console.error('Error declining email:', error);
+    }
+};
+
+const handleSuggestionClick = (suggestion: string) => {
+    setInputMessage(suggestion);
+    // Using strict timeout to ensure state update before firing
+    setTimeout(() => {
+        handleSendMessage();
+    }, 50);
+};
+
+return (
+    <div className="font-display bg-background-light dark:bg-background-dark text-[#0d121b] dark:text-white h-full flex flex-col overflow-hidden">
 
 
-            {/* Main Content */}
-            <main className="flex-1 flex overflow-hidden">
-                {/* Chat Area */}
-                <div className="flex-1 flex flex-col bg-[#f6f6f8] dark:bg-[#0d121b]">
-                    {/* Agent Header */}
-                    <div className="bg-white dark:bg-[#1a202c] border-b border-[#e7ebf3] dark:border-[#2d3748] px-6 py-4 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className="relative">
-                                <div className="size-10 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white">
-                                    <span className="material-symbols-outlined">smart_toy</span>
-                                </div>
-                                <span className="absolute bottom-0 right-0 size-3 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
+        {/* Main Content */}
+        <main className="flex-1 flex overflow-hidden">
+            {/* Chat Area */}
+            <div className="flex-1 flex flex-col bg-[#f6f6f8] dark:bg-[#0d121b]">
+                {/* Agent Header */}
+                <div className="bg-white dark:bg-[#1a202c] border-b border-[#e7ebf3] dark:border-[#2d3748] px-6 py-4 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                        <div className="relative">
+                            <div className="size-10 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white">
+                                <span className="material-symbols-outlined">smart_toy</span>
                             </div>
-                            <div>
-                                <h3 className="font-bold text-[#0d121b] dark:text-white">
-                                    {activeTwg?.name === 'Secretariat' ? 'Secretariat Assistant (v2)' : `${activeTwg?.name} Agent`}
-                                </h3>
-                                <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-                                    <span className="size-1.5 bg-green-500 rounded-full"></span>
-                                    Online
-                                </p>
-                            </div>
+                            <span className="absolute bottom-0 right-0 size-3 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
                         </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => setShowContextPanel(!showContextPanel)}
-                                className={`p-2 rounded-lg transition-colors ${showContextPanel
-                                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                    : 'text-[#4c669a] hover:bg-gray-100 dark:hover:bg-[#2d3748]'
-                                    }`}
-                                title="Toggle workspace context"
-                            >
-                                <span className="material-symbols-outlined">view_sidebar</span>
-                            </button>
-                            {isLoading && (
-                                <button
-                                    onClick={() => {
-                                        if (abortControllerRef.current) {
-                                            abortControllerRef.current.abort();
-                                            abortControllerRef.current = null;
-                                        }
-                                        setIsLoading(false);
-                                        setTypingMessage(null);
-                                    }}
-                                    className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                    title="Stop generation"
-                                >
-                                    <span className="material-symbols-outlined">stop_circle</span>
-                                </button>
-                            )}
-                            <button
-                                onClick={() => setShowSettingsModal(true)}
-                                className="p-2 text-[#4c669a] hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded-lg transition-colors"
-                                title="Settings"
-                            >
-                                <span className="material-symbols-outlined">settings</span>
-                            </button>
-                            <button
-                                onClick={handleClearConversation}
-                                className="p-2 text-[#4c669a] hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                title="Clear conversation"
-                                disabled={messages.length === 0 && !isLoading}
-                            >
-                                <span className="material-symbols-outlined">delete</span>
-                            </button>
+                        <div>
+                            <h3 className="font-bold text-[#0d121b] dark:text-white">
+                                {activeTwg?.name === 'Secretariat' ? 'Secretariat Assistant (v2)' : `${activeTwg?.name} Agent`}
+                            </h3>
+                            <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                                <span className="size-1.5 bg-green-500 rounded-full"></span>
+                                Online
+                            </p>
                         </div>
                     </div>
-
-                    {/* Messages */}
-                    <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-gradient-to-b from-gray-50/50 to-transparent dark:from-[#0d121b]/30 dark:to-transparent">
-                        {messages.length === 0 ? (
-                            <div className="h-full flex flex-col items-center justify-center px-4">
-                                <div className="max-w-3xl w-full text-center mb-8">
-                                    <div className="size-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-900/20">
-                                        <span className="material-symbols-outlined text-white" style={{ fontSize: '32px' }}>smart_toy</span>
-                                    </div>
-                                    <h3 className="text-3xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-purple-600 dark:from-blue-400 dark:to-purple-400 mb-3">
-                                        Hello, Dr. Sow
-                                    </h3>
-                                    <h4 className="text-xl text-slate-600 dark:text-slate-400 font-medium mb-8">
-                                        How can I assist with the TWG today?
-                                    </h4>
-
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-left">
-                                        <button
-                                            onClick={() => {
-                                                setInputMessage("Draft minutes for the last meeting");
-                                                inputRef.current?.focus();
-                                            }}
-                                            className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
-                                        >
-                                            <div className="size-10 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                                                <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">description</span>
-                                            </div>
-                                            <h5 className="font-bold text-slate-900 dark:text-white mb-1">Draft Minutes</h5>
-                                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Generate formal minutes from the latest meeting transcript.</p>
-                                        </button>
-
-                                        <button
-                                            onClick={() => {
-                                                setInputMessage("Summarize the last session's key outcomes");
-                                                inputRef.current?.focus();
-                                            }}
-                                            className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
-                                        >
-                                            <div className="size-10 rounded-full bg-purple-50 dark:bg-purple-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                                                <span className="material-symbols-outlined text-purple-600 dark:text-purple-400">summarize</span>
-                                            </div>
-                                            <h5 className="font-bold text-slate-900 dark:text-white mb-1">Summarize Session</h5>
-                                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Get a quick overview of decisions and action items.</p>
-                                        </button>
-
-                                        <button
-                                            onClick={() => {
-                                                setInputMessage("Check availability for the next board meeting");
-                                                inputRef.current?.focus();
-                                            }}
-                                            className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-green-400 dark:hover:border-green-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
-                                        >
-                                            <div className="size-10 rounded-full bg-green-50 dark:bg-green-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-                                                <span className="material-symbols-outlined text-green-600 dark:text-green-400">calendar_month</span>
-                                            </div>
-                                            <h5 className="font-bold text-slate-900 dark:text-white mb-1">Check Availability</h5>
-                                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Find optimal times for cross-functional meetings.</p>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        ) : (
-                            messages.map((message) => (
-                                <EnhancedMessageBubble
-                                    key={message.id}
-                                    message={{ ...message, approvalRequest: message.approvalRequest }}
-                                    onReact={handleReact}
-                                    onApprove={message.approvalRequest ? () => handleApproveEmail(message.approvalRequest!.request_id) : undefined}
-                                    onDecline={message.approvalRequest ? () => handleDeclineEmail(message.approvalRequest!.request_id) : undefined}
-                                    onSuggestionClick={handleSuggestionClick}
-                                />
-                            ))
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => setShowContextPanel(!showContextPanel)}
+                            className={`p-2 rounded-lg transition-colors ${showContextPanel
+                                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                : 'text-[#4c669a] hover:bg-gray-100 dark:hover:bg-[#2d3748]'
+                                }`}
+                            title="Toggle workspace context"
+                        >
+                            <span className="material-symbols-outlined">view_sidebar</span>
+                        </button>
+                        {isLoading && (
+                            <button
+                                onClick={() => {
+                                    if (abortControllerRef.current) {
+                                        abortControllerRef.current.abort();
+                                        abortControllerRef.current = null;
+                                    }
+                                    setIsLoading(false);
+                                    setTypingMessage(null);
+                                }}
+                                className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                title="Stop generation"
+                            >
+                                <span className="material-symbols-outlined">stop_circle</span>
+                            </button>
                         )}
-                        {(isLoading || typingMessage) && (
-                            <TypingIndicator
-                                agentName="Secretariat Assistant"
-                                steps={thinkingSteps}
-                            />
-                        )}
-                        <div ref={messagesEndRef} />
-                    </div>
-
-                    {/* Input Area */}
-                    <div className="bg-white dark:bg-[#1a202c] border-t border-[#e7ebf3] dark:border-[#2d3748] p-4">
-
-
-                        <div className="relative bg-white dark:bg-[#0d121b] border-2 border-[#e7ebf3] dark:border-[#2d3748] rounded-2xl shadow-lg focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500 dark:focus-within:border-blue-400 transition-all">
-                            {autocompleteType === 'command' && commandSuggestions.length > 0 && (
-                                <CommandAutocomplete
-                                    suggestions={commandSuggestions}
-                                    selectedIndex={selectedSuggestionIndex}
-                                    onSelect={handleCommandSelect}
-                                    onHover={setSelectedSuggestionIndex}
-                                />
-                            )}
-
-                            {autocompleteType === 'mention' && mentionSuggestions.length > 0 && (
-                                <MentionAutocomplete
-                                    suggestions={mentionSuggestions}
-                                    selectedIndex={selectedSuggestionIndex}
-                                    onSelect={handleMentionSelect}
-                                    onHover={setSelectedSuggestionIndex}
-                                />
-                            )}
-
-                            <textarea
-                                ref={inputRef}
-                                value={inputMessage}
-                                onChange={handleInputChange}
-                                onKeyDown={handleKeyPress}
-                                disabled={isLoading}
-                                className="w-full bg-transparent border-none focus:ring-0 text-sm p-4 pr-36 min-h-[60px] max-h-32 resize-none text-[#0d121b] dark:text-white placeholder:text-[#9ca3af] disabled:opacity-50"
-                                placeholder="Ask me anything... Use / for commands or @ for agents"
-                            />
-                            <div className="absolute bottom-3 right-3 flex items-center gap-1.5">
-                                <button className="p-2 text-[#6b7280] dark:text-[#9ca3af] hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all" title="Attach file">
-                                    <span className="material-symbols-outlined text-[20px]">attach_file</span>
-                                </button>
-                                <button className="p-2 text-[#6b7280] dark:text-[#9ca3af] hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all" title="Voice input">
-                                    <span className="material-symbols-outlined text-[20px]">mic</span>
-                                </button>
-                                <div className="w-px h-6 bg-[#e7ebf3] dark:bg-[#2d3748] mx-1"></div>
-                                <button
-                                    onClick={handleSendMessage}
-                                    disabled={!inputMessage.trim() || isLoading}
-                                    className="p-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-md"
-                                    title="Send message"
-                                >
-                                    <span className="material-symbols-outlined text-[20px]">send</span>
-                                </button>
-                            </div>
-                        </div>
+                        <button
+                            onClick={() => setShowSettingsModal(true)}
+                            className="p-2 text-[#4c669a] hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded-lg transition-colors"
+                            title="Settings"
+                        >
+                            <span className="material-symbols-outlined">settings</span>
+                        </button>
+                        <button
+                            onClick={handleClearConversation}
+                            className="p-2 text-[#4c669a] hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            title="Clear conversation"
+                            disabled={messages.length === 0 && !isLoading}
+                        >
+                            <span className="material-symbols-outlined">delete</span>
+                        </button>
                     </div>
                 </div>
 
-                {/* Workspace Context Panel */}
-                {showContextPanel && (
-                    <WorkspaceContextPanel
-                        twgName={activeTwg?.name || 'Loading...'}
-                        twgId={activeTwg?.id}
-                        onInsertContext={handleInsertContext}
-                    />
-                )}
-            </main>
+                {/* Messages */}
+                <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-gradient-to-b from-gray-50/50 to-transparent dark:from-[#0d121b]/30 dark:to-transparent">
+                    {messages.length === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center px-4">
+                            <div className="max-w-3xl w-full text-center mb-8">
+                                <div className="size-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-900/20">
+                                    <span className="material-symbols-outlined text-white" style={{ fontSize: '32px' }}>smart_toy</span>
+                                </div>
+                                <h3 className="text-3xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-purple-600 dark:from-blue-400 dark:to-purple-400 mb-3">
+                                    Hello, Dr. Sow
+                                </h3>
+                                <h4 className="text-xl text-slate-600 dark:text-slate-400 font-medium mb-8">
+                                    How can I assist with the TWG today?
+                                </h4>
 
-            {/* Modals */}
-            {showApprovalModal && pendingEmailApproval && (
-                <EmailApprovalModal
-                    approvalRequest={pendingEmailApproval}
-                    onApprove={handleApproveEmail}
-                    onDecline={handleDeclineEmail}
-                    onClose={() => {
-                        setShowApprovalModal(false);
-                        setPendingEmailApproval(null);
-                    }}
+                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-left">
+                                    <button
+                                        onClick={() => {
+                                            setInputMessage("Draft minutes for the last meeting");
+                                            inputRef.current?.focus();
+                                        }}
+                                        className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
+                                    >
+                                        <div className="size-10 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                                            <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">description</span>
+                                        </div>
+                                        <h5 className="font-bold text-slate-900 dark:text-white mb-1">Draft Minutes</h5>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Generate formal minutes from the latest meeting transcript.</p>
+                                    </button>
+
+                                    <button
+                                        onClick={() => {
+                                            setInputMessage("Summarize the last session's key outcomes");
+                                            inputRef.current?.focus();
+                                        }}
+                                        className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
+                                    >
+                                        <div className="size-10 rounded-full bg-purple-50 dark:bg-purple-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                                            <span className="material-symbols-outlined text-purple-600 dark:text-purple-400">summarize</span>
+                                        </div>
+                                        <h5 className="font-bold text-slate-900 dark:text-white mb-1">Summarize Session</h5>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Get a quick overview of decisions and action items.</p>
+                                    </button>
+
+                                    <button
+                                        onClick={() => {
+                                            setInputMessage("Check availability for the next board meeting");
+                                            inputRef.current?.focus();
+                                        }}
+                                        className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-green-400 dark:hover:border-green-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
+                                    >
+                                        <div className="size-10 rounded-full bg-green-50 dark:bg-green-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                                            <span className="material-symbols-outlined text-green-600 dark:text-green-400">calendar_month</span>
+                                        </div>
+                                        <h5 className="font-bold text-slate-900 dark:text-white mb-1">Check Availability</h5>
+                                        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Find optimal times for cross-functional meetings.</p>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        messages.map((message) => (
+                            <EnhancedMessageBubble
+                                key={message.id}
+                                message={{ ...message, approvalRequest: message.approvalRequest }}
+                                onReact={handleReact}
+                                onApprove={message.approvalRequest ? () => handleApproveEmail(message.approvalRequest!.request_id) : undefined}
+                                onDecline={message.approvalRequest ? () => handleDeclineEmail(message.approvalRequest!.request_id) : undefined}
+                                onSuggestionClick={handleSuggestionClick}
+                            />
+                        ))
+                    )}
+                    {(isLoading || typingMessage) && (
+                        <TypingIndicator
+                            agentName="Secretariat Assistant"
+                            steps={thinkingSteps}
+                        />
+                    )}
+                    <div ref={messagesEndRef} />
+                </div>
+
+                {/* Input Area */}
+                <div className="bg-white dark:bg-[#1a202c] border-t border-[#e7ebf3] dark:border-[#2d3748] p-4">
+
+
+                    <div className="relative bg-white dark:bg-[#0d121b] border-2 border-[#e7ebf3] dark:border-[#2d3748] rounded-2xl shadow-lg focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500 dark:focus-within:border-blue-400 transition-all">
+                        {autocompleteType === 'command' && commandSuggestions.length > 0 && (
+                            <CommandAutocomplete
+                                suggestions={commandSuggestions}
+                                selectedIndex={selectedSuggestionIndex}
+                                onSelect={handleCommandSelect}
+                                onHover={setSelectedSuggestionIndex}
+                            />
+                        )}
+
+                        {autocompleteType === 'mention' && mentionSuggestions.length > 0 && (
+                            <MentionAutocomplete
+                                suggestions={mentionSuggestions}
+                                selectedIndex={selectedSuggestionIndex}
+                                onSelect={handleMentionSelect}
+                                onHover={setSelectedSuggestionIndex}
+                            />
+                        )}
+
+                        <textarea
+                            ref={inputRef}
+                            value={inputMessage}
+                            onChange={handleInputChange}
+                            onKeyDown={handleKeyPress}
+                            disabled={isLoading}
+                            className="w-full bg-transparent border-none focus:ring-0 text-sm p-4 pr-36 min-h-[60px] max-h-32 resize-none text-[#0d121b] dark:text-white placeholder:text-[#9ca3af] disabled:opacity-50"
+                            placeholder="Ask me anything... Use / for commands or @ for agents"
+                        />
+                        <div className="absolute bottom-3 right-3 flex items-center gap-1.5">
+                            <button className="p-2 text-[#6b7280] dark:text-[#9ca3af] hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all" title="Attach file">
+                                <span className="material-symbols-outlined text-[20px]">attach_file</span>
+                            </button>
+                            <button className="p-2 text-[#6b7280] dark:text-[#9ca3af] hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-all" title="Voice input">
+                                <span className="material-symbols-outlined text-[20px]">mic</span>
+                            </button>
+                            <div className="w-px h-6 bg-[#e7ebf3] dark:bg-[#2d3748] mx-1"></div>
+                            <button
+                                onClick={handleSendMessage}
+                                disabled={!inputMessage.trim() || isLoading}
+                                className="p-2.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-md"
+                                title="Send message"
+                            >
+                                <span className="material-symbols-outlined text-[20px]">send</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            {/* Workspace Context Panel */}
+            {showContextPanel && (
+                <WorkspaceContextPanel
+                    twgName={activeTwg?.name || 'Loading...'}
+                    twgId={activeTwg?.id}
+                    onInsertContext={handleInsertContext}
                 />
             )}
+        </main>
 
-            {showSettingsModal && (
-                <SettingsModal
-                    onClose={() => setShowSettingsModal(false)}
-                />
-            )}
-        </div>
-    );
+        {/* Modals */}
+        {showApprovalModal && pendingEmailApproval && (
+            <EmailApprovalModal
+                approvalRequest={pendingEmailApproval}
+                onApprove={handleApproveEmail}
+                onDecline={handleDeclineEmail}
+                onClose={() => {
+                    setShowApprovalModal(false);
+                    setPendingEmailApproval(null);
+                }}
+            />
+        )}
+
+        {showSettingsModal && (
+            <SettingsModal
+                onClose={() => setShowSettingsModal(false)}
+            />
+        )}
+    </div>
+);
 }
