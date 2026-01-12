@@ -12,9 +12,12 @@ app = FastAPI(
 # Set up CORS
 # Convert CORS_ORIGINS to list if it's a string
 # Convert CORS_ORIGINS to list if it's a string
-cors_origins = settings.CORS_ORIGINS
-if isinstance(cors_origins, str):
-    cors_origins = [origin.strip() for origin in cors_origins.split(",")]
+# Handle CORS_ORIGINS which might be a string or a list
+settings_cors = settings.CORS_ORIGINS
+if isinstance(settings_cors, str):
+    cors_origins = [origin.strip() for origin in settings_cors.split(",")]
+else:
+    cors_origins = list(settings_cors)
 
 # Force add production origin to ensure it's never missed
 if "https://frontend-production-1abb.up.railway.app" not in cors_origins:
@@ -56,16 +59,15 @@ async def startup_event():
     logger.info("--- STARTUP DIAGNOSTICS ---")
     
     # Run Database Migrations
+    # Run Database Migrations
     try:
         logger.info("Running database migrations...")
         if os.path.exists("alembic.ini"):
             alembic_cfg = Config("alembic.ini")
-            # Run upgrade head
             # Run upgrade head in a separate thread to avoid asyncio loop conflict
             # because env.py calls asyncio.run()
-            # import asyncio
-            # await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
-            logger.info("Database migrations skipped (handled manually to prevent startup hang).")
+            import asyncio
+            await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
             logger.info("Database migrations completed successfully!")
         else:
             logger.warning("alembic.ini not found! Skipping migrations.")
