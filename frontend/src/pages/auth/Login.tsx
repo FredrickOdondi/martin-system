@@ -19,21 +19,6 @@ export default function Login() {
     const navigate = useNavigate()
     const dispatch = useAppDispatch()
 
-    useEffect(() => {
-        // Initialize Google Login
-        if (window.google) {
-            console.log("[DEBUG] Current Origin:", window.location.origin);
-            window.google.accounts.id.initialize({
-                client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
-                callback: handleGoogleLogin,
-            });
-            window.google.accounts.id.renderButton(
-                document.getElementById("googleSync"),
-                { theme: "dark", size: "large", width: "250" }
-            );
-        }
-    }, []);
-
     const handleGoogleLogin = async (response: any) => {
         setIsLoading(true);
         setLoginError(null);
@@ -58,6 +43,52 @@ export default function Login() {
             setIsLoading(false);
         }
     };
+
+    useEffect(() => {
+        // Function to attempt initialization
+        const initializeGoogle = () => {
+            if (window.google?.accounts?.id && document.getElementById("googleSync")) {
+                console.log("[DEBUG] Google Script Detected. Initializing...");
+                try {
+                    window.google.accounts.id.initialize({
+                        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+                        callback: handleGoogleLogin,
+                    });
+
+                    window.google.accounts.id.renderButton(
+                        document.getElementById("googleSync"),
+                        { theme: "dark", size: "large", width: "250" }
+                    );
+                    return true;
+                } catch (error) {
+                    console.error("[ERROR] Google Sign-In Initialization Error:", error);
+                    return false;
+                }
+            }
+            return false;
+        };
+
+        // Check immediately
+        if (!initializeGoogle()) {
+            // Set up polling interval
+            const intervalId = setInterval(() => {
+                if (initializeGoogle()) {
+                    clearInterval(intervalId);
+                }
+            }, 100);
+
+            // Safety timeout after 10 seconds
+            const timeoutId = setTimeout(() => {
+                clearInterval(intervalId);
+                console.warn("[WARN] Google Sign-In script loading timed out");
+            }, 10000);
+
+            return () => {
+                clearInterval(intervalId);
+                clearTimeout(timeoutId);
+            };
+        }
+    }, [handleGoogleLogin]);
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault()
