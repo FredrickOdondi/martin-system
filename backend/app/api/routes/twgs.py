@@ -41,64 +41,70 @@ async def list_twgs(
     
     Accessible to all active users.
     """
-    # Common loading options with selectinload for leads
-    query_options = [
-        selectinload(TWG.political_lead),
-        selectinload(TWG.technical_lead),
-    ]
-    
-    # We will need to perform separate queries or use scalar subqueries for stats.
-    # For simplicity and clarity in this iteration, let's fetch IDs and then load stats.
-    # A more optimized approach would use group_by and multiple queries.
-    
-    result = await db.execute(select(TWG).options(*query_options).offset(skip).limit(limit))
-    twgs = result.scalars().all()
-    
-    # Enrich with stats
-    for twg in twgs:
-        try:
-            # Meetings Held (Completed)
-            meetings_res = await db.execute(
-                select(func.count(Meeting.id)).where(Meeting.twg_id == twg.id, Meeting.status == MeetingStatus.COMPLETED)
-            )
-            meetings_held = meetings_res.scalar() or 0
-            
-            # Open Actions (Not Completed)
-            # Fix Cartesian product: Remove implicit TWG reference (TWG.id == twg.id)
-            actions_res = await db.execute(
-                select(func.count(ActionItem.id)).where(ActionItem.twg_id == twg.id, ActionItem.status.in_([ActionItemStatus.PENDING, ActionItemStatus.IN_PROGRESS, ActionItemStatus.OVERDUE]))
-            )
-            open_actions = actions_res.scalar() or 0
-            
-            # Pipeline Projects (All)
-            projects_res = await db.execute(
-                 select(func.count(Project.id)).where(Project.twg_id == twg.id)
-            )
-            pipeline_projects = projects_res.scalar() or 0
-            
-            # Resources (Documents)
-            docs_res = await db.execute(
-                select(func.count(Document.id)).where(Document.twg_id == twg.id)
-            )
-            resources_count = docs_res.scalar() or 0
-            
-            twg.stats = {
-                "meetings_held": meetings_held,
-                "open_actions": open_actions,
-                "pipeline_projects": pipeline_projects,
-                "resources_count": resources_count
-            }
-        except Exception as e:
-            # Fallback stats on error
-            print(f"Error calculating stats for TWG {twg.name}: {e}")
-            twg.stats = {
-                "meetings_held": 0,
-                "open_actions": 0,
-                "pipeline_projects": 0,
-                "resources_count": 0
-            }
+    try:
+        # Common loading options with selectinload for leads
+        query_options = [
+            selectinload(TWG.political_lead),
+            selectinload(TWG.technical_lead),
+        ]
         
-    return twgs
+        # We will need to perform separate queries or use scalar subqueries for stats.
+        # For simplicity and clarity in this iteration, let's fetch IDs and then load stats.
+        # A more optimized approach would use group_by and multiple queries.
+        
+        result = await db.execute(select(TWG).options(*query_options).offset(skip).limit(limit))
+        twgs = result.scalars().all()
+        
+        # Enrich with stats
+        for twg in twgs:
+            try:
+                # Meetings Held (Completed)
+                meetings_res = await db.execute(
+                    select(func.count(Meeting.id)).where(Meeting.twg_id == twg.id, Meeting.status == MeetingStatus.COMPLETED)
+                )
+                meetings_held = meetings_res.scalar() or 0
+                
+                # Open Actions (Not Completed)
+                # Fix Cartesian product: Remove implicit TWG reference (TWG.id == twg.id)
+                actions_res = await db.execute(
+                    select(func.count(ActionItem.id)).where(ActionItem.twg_id == twg.id, ActionItem.status.in_([ActionItemStatus.PENDING, ActionItemStatus.IN_PROGRESS, ActionItemStatus.OVERDUE]))
+                )
+                open_actions = actions_res.scalar() or 0
+                
+                # Pipeline Projects (All)
+                projects_res = await db.execute(
+                     select(func.count(Project.id)).where(Project.twg_id == twg.id)
+                )
+                pipeline_projects = projects_res.scalar() or 0
+                
+                # Resources (Documents)
+                docs_res = await db.execute(
+                    select(func.count(Document.id)).where(Document.twg_id == twg.id)
+                )
+                resources_count = docs_res.scalar() or 0
+                
+                twg.stats = {
+                    "meetings_held": meetings_held,
+                    "open_actions": open_actions,
+                    "pipeline_projects": pipeline_projects,
+                    "resources_count": resources_count
+                }
+            except Exception as e:
+                # Fallback stats on error
+                print(f"Error calculating stats for TWG {twg.name}: {e}")
+                twg.stats = {
+                    "meetings_held": 0,
+                    "open_actions": 0,
+                    "pipeline_projects": 0,
+                    "resources_count": 0
+                }
+            
+        return twgs
+    except Exception as e:
+        import traceback
+        print(f"CRITICAL ERROR in list_twgs: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Internal Server Error listing TWGs")
 
 @router.get("/{twg_id}", response_model=TWGRead)
 async def get_twg(
