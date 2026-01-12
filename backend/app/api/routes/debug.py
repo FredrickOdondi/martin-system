@@ -22,7 +22,12 @@ async def inspect_schema(db: AsyncSession = Depends(get_db)):
         doc_result = await db.execute(text(
             "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'documents';"
         ))
-        doc_columns = [{"name": row[0], "type": row[1]} for row in doc_result.fetchall()]
+        return {
+            "twgs_columns": twg_columns,
+            "documents_columns": doc_columns
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 @router.get("/debug/test_twgs")
 async def test_twgs(db: AsyncSession = Depends(get_db)):
