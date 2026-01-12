@@ -29,6 +29,8 @@ export default function DocumentLibrary({ twgId }: { twgId?: string } = {}) {
     const [selectedTwgId, setSelectedTwgId] = useState<string>(twgId || '')
     const [isConfidential, setIsConfidential] = useState(false)
 
+    const [totalItems, setTotalItems] = useState(0)
+
     // Selection & Pagination State
     const [selectedDocs, setSelectedDocs] = useState<string[]>([])
     const [currentPage, setCurrentPage] = useState(1)
@@ -61,13 +63,14 @@ export default function DocumentLibrary({ twgId }: { twgId?: string } = {}) {
 
     useEffect(() => {
         fetchData()
-    }, [])
+    }, [currentPage])
 
     const fetchData = async () => {
         try {
             setLoading(true)
-            const docsData = await documentService.listDocuments()
-            setDocuments(docsData)
+            const { data, total } = await documentService.listDocuments(twgId, currentPage, itemsPerPage)
+            setDocuments(data)
+            setTotalItems(total)
         } catch (error) {
             console.error('Error fetching data:', error)
         } finally {
@@ -262,11 +265,8 @@ export default function DocumentLibrary({ twgId }: { twgId?: string } = {}) {
         }
     });
 
-    const totalPages = Math.ceil(filteredAndSortedDocuments.length / itemsPerPage);
-    const paginatedDocs = filteredAndSortedDocuments.slice(
-        (currentPage - 1) * itemsPerPage,
-        currentPage * itemsPerPage
-    );
+    const totalPages = Math.ceil(totalItems / itemsPerPage);
+    const paginatedDocs = filteredAndSortedDocuments;
 
     const libraryItems = [
         { id: 'all', label: 'All Documents', icon: 'folder', count: documents.length },

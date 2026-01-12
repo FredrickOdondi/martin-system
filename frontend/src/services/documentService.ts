@@ -49,10 +49,15 @@ export const documentService = {
         return response.data;
     },
 
-    listDocuments: async (twgId?: string): Promise<Document[]> => {
-        const params = twgId ? { twg_id: twgId } : {};
+    listDocuments: async (twgId?: string, page: number = 1, limit: number = 10): Promise<{ data: Document[]; total: number }> => {
+        const params = {
+            ...(twgId ? { twg_id: twgId } : {}),
+            skip: (page - 1) * limit,
+            limit
+        };
         const response = await api.get<Document[]>('/documents/', { params });
-        return response.data;
+        const total = parseInt(response.headers['x-total-count'] || '0', 10);
+        return { data: response.data, total };
     },
 
     downloadDocument: async (docId: string): Promise<void> => {
