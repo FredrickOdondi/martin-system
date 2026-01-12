@@ -43,7 +43,7 @@ async def test_twgs(db: AsyncSession = Depends(get_db)):
         ]
         result = await db.execute(select(TWG).options(*query_options).limit(5))
         twgs = result.scalars().all()
-        return {"status": "success", "count": len(twgs), "data": [t.name for t in twgs]}
+        return {"status": "success", "count": len(twgs), "data": [{"name": t.name, "pillar": str(t.pillar)} for t in twgs]}
     except Exception as e:
         import traceback
         return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
