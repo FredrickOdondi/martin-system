@@ -693,6 +693,57 @@ class LangGraphSupervisor:
             logger.error(f"[SUPERVISOR:{thread_id}] Error: {e}")
             return f"I apologize, but I encountered an error: {str(e)}"
 
+    async def stream_chat(self, message: str, thread_id: Optional[str] = None, twg_id: Optional[str] = None):
+        """
+        Stream chat events from LangGraph execution.
+        Yields events for each step in the graph.
+        """
+        if not self.compiled_graph:
+            raise ValueError("Graph not built. Call build_graph() first.")
+
+        thread_id = thread_id or self.session_id
+        logger.info(f"[SUPERVISOR:{thread_id}] Streaming: {message[:100]}...")
+
+        initial_state: AgentState = {
+            "messages": [HumanMessage(content=message)],
+            "query": message,
+            "relevant_agents": [],
+            "agent_responses": {},
+            "synthesized_response": None,
+            "final_response": "",
+            "requires_synthesis": False,
+            "delegation_type": "supervisor_only",
+            "session_id": self.session_id,
+            "user_id": None,
+            "context": {"twg_id": twg_id} if twg_id else None
+        }
+
+        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 30}
+
+        try:
+            # Use astream just for state updates.
+            # astream yields the state updates after each node.
+            # We can infer which node just ran based on the keys in the chunk or explicit events if we used astream_events
+            # For simplicity in this codebase, let's use astream and map output keys to "Thinking" steps.
+            
+            async for chunk in self.compiled_graph.astream(initial_state, config):
+                # chunk is a dict where keys are node names and values are the state update
+                for node_name, state_update in chunk.items():
+                    yield {
+                        "type": "node_update",
+                        "node": node_name,
+                        "state": state_update # Be careful exposing full state
+                    }
+                    
+                    if "final_response" in state_update and state_update["final_response"]:
+                        yield {
+                             "type": "final_response",
+                             "content": state_update["final_response"]
+                        }
+
+        except Exception as e:
+            yield {"type": "error", "error": str(e)}
+
     async def resume_chat(self, thread_id: str, resume_value: Dict) -> str:
         """
         Resume a paused conversation by checking which agent is interrupted.

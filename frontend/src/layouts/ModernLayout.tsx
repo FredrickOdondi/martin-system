@@ -324,7 +324,7 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
 
                 {/* Main Content Area */}
                 <main className="flex-1 overflow-y-auto p-4 lg:p-6">
-                    <div className="max-w-[1440px] mx-auto w-full">
+                    <div className="max-w-[1440px] mx-auto w-full h-full">
                         {children || <Outlet />}
                     </div>
                 </main>

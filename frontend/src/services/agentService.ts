@@ -31,6 +31,7 @@ export interface AgentChatResponse {
         message: string;
     };
     thread_id?: string;
+    suggestions?: string[];
 }
 
 export interface AgentTaskRequest {
@@ -54,6 +55,71 @@ export const agentService = {
         console.log('[AGENT_SERVICE] Raw response.data:', response.data);
         console.log('[AGENT_SERVICE] interrupted?', response.data.interrupted, 'payload?', !!response.data.interrupt_payload);
         return response.data;
+    },
+
+    // Streaming chat
+    chatStream: async (
+        chatRequest: AgentChatRequest,
+        callbacks: {
+            onThinking?: (status: string) => void;
+            onResponse?: (response: any) => void;
+            onError?: (error: any) => void;
+            onDone?: () => void;
+        }
+    ): Promise<void> => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${api.defaults.baseURL}/agents/chat/stream`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(chatRequest)
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Error ${response.status}: ${errorText}`);
+            }
+
+            if (!response.body) throw new Error('ReadableStream not supported in this browser.');
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n\n');
+
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.substring(6));
+                            console.log('[STREAM]', data);
+
+                            if (data.type === 'thinking') {
+                                callbacks.onThinking?.(data.status);
+                            } else if (data.type === 'response') {
+                                callbacks.onResponse?.(data.message);
+                            } else if (data.type === 'done') {
+                                callbacks.onDone?.();
+                            } else if (data.type === 'error') {
+                                callbacks.onError?.(data.error);
+                            }
+                        } catch (e) {
+                            console.error('Error parsing SSE data:', e, line);
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('[STREAM] Connection error:', err);
+            callbacks.onError?.(err);
+        }
     },
 
     // Assign a task to the agent

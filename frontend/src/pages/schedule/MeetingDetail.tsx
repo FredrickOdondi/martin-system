@@ -237,6 +237,7 @@ export default function MeetingDetail() {
 
     const handleAddGuest = async () => {
         if (!meetingId || !guestEmail) return
+        setIsLoadingAction(true)
         try {
             await meetings.addParticipants(meetingId, [{
                 name: guestName,
@@ -249,13 +250,15 @@ export default function MeetingDetail() {
         } catch (error) {
             console.error("Failed to add guest", error)
             alert("Failed to add guest")
+        } finally {
+            setIsLoadingAction(false)
         }
     }
 
     const handleSendInvites = async () => {
         if (!meetingId || isSendingInvites || isCheckingConflicts) return
 
-        // Step 1: Run conflict check first (Supervisor Air Traffic Control)
+        // Step 1: Run conflict check first
         setIsCheckingConflicts(true)
         try {
             const conflictRes = await meetings.conflictCheck(meetingId)
@@ -1187,10 +1190,14 @@ export default function MeetingDetail() {
                                                         />
                                                         <button
                                                             onClick={handleAddGuest}
-                                                            disabled={!guestEmail}
-                                                            className="btn-primary text-sm"
+                                                            disabled={!guestEmail || isLoadingAction}
+                                                            className="btn-primary text-sm flex items-center gap-2"
                                                         >
-                                                            Add
+                                                            {isLoadingAction ? (
+                                                                <><span className="animate-spin">⏳</span> Adding...</>
+                                                            ) : (
+                                                                'Add'
+                                                            )}
                                                         </button>
                                                     </div>
                                                 </Card>

@@ -14,6 +14,10 @@ export interface User {
     is_active: boolean;
     assigned_twg_id?: string;
     twg_ids: string[];
+    twgs?: Array<{
+        id: string;
+        name: string;
+    }>;
     avatar?: string;
 }
 

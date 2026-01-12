@@ -439,6 +439,18 @@ class EmailService:
         if attachments:
             params["attachments"] = attachments
             
+        print(f"[Resend Debug] ICS Content: {bool(ics_content)}")
+        if ics_content:
+            # Add ICS as a specially formatted attachment
+            # Resend might not support 'content_type' with parameters perfectly in all SDK versions,
+            # but usually passing the full string works or is handled by the provider.
+            # Key modification: Explicitly set method=REQUEST
+            params["attachments"] = params.get("attachments", []) + [{
+                "filename": ics_filename,
+                "content": base64.b64encode(ics_content).decode('utf-8'),
+                "content_type": "text/calendar; method=REQUEST"
+            }]
+            
         # Debug logging
         print(f"[Resend] Sending email to {len(to_emails)} recipients. Subject: {subject}")
         print(f"[Resend] Has attachments: {bool(attachments)} Count: {len(attachments) if attachments else 0}")
@@ -482,6 +494,7 @@ class EmailService:
             part_ics.set_payload(ics_content)
             encoders.encode_base64(part_ics)
             part_ics.add_header("Content-Disposition", "attachment", filename=ics_filename)
+            part_ics.add_header("Content-Type", "text/calendar; method=REQUEST")
             part_ics.add_header("Content-Class", "urn:content-classes:calendarmessage")
             part_ics.add_header("Content-Class", "urn:content-classes:calendarmessage")
             message.attach(part_ics)

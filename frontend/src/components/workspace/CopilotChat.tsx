@@ -5,7 +5,7 @@ import { ChatMessage, ChatMessageType, EnhancedChatRequest, ActionType } from '.
 import { useStreamingChat, StreamEvent } from '../../hooks/useStreamingChat';
 import ReactMarkdown from 'react-markdown';
 
-export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
+export default function CopilotChat({ twgId: propTwgId, twgName }: { twgId?: string, twgName?: string }) {
     // Determine TWG Context: Use prop if available, otherwise fallback to user's primary TWG
     const user = useSelector((state: RootState) => state.auth.user);
     // State for Mentions
@@ -18,6 +18,7 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
     // Chat State
     const [input, setInput] = useState('');
     const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [conversationId, setConversationId] = useState<string | undefined>(undefined);
 
@@ -32,17 +33,45 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
                     message_id: 'welcome',
                     conversation_id: 'init',
                     message_type: ChatMessageType.AGENT_TEXT,
-                    content: "Hello Dr. Sow. I can help you analyze documents, draft agendas, and coordinate with other TWGs. How can I assist you today?",
+                    content: twgName
+                        ? `Hello. I am the ${twgName} Agent. How can I assist you with ${twgName} matters today?`
+                        : "Hello Dr. Sow. I can help you analyze documents, draft agendas, and coordinate with other TWGs. How can I assist you today?",
                     sender: 'agent',
                     timestamp: new Date().toISOString()
                 }
             ]);
         }
-    }, [messages.length]);
+    }, [messages.length, twgName]); // Update welcome if twgName loads late? careful with loops
 
-    // Auto-scroll to bottom
+    // ... (omitted for brevity, assume standard existing code is preserved if unchanged, but ReplaceFileContent requires context match)
+    // Actually, ReplaceFileContent replaces a block. I need to replace from signature down to header.
+    // I will target the Signature line and the Header lines.
+    // But they are far apart (Line 8 vs Line 167).
+    // I should use `multi_replace_file_content` or just replace the header if I can't change signature easily without context.
+    // Wait, signature is line 8.
+    // Header is line 167.
+    // I will use `replace_file_content` for the signature and `replace_file_content` for the header? No, parallel calls not allowed on same file usually, or discouraged.
+    // I will use `multi_replace_file_content`.
+
+    // Wait, Replace 1: Signature
+    // Replace 2: Welcome Message (Lines 28-41)
+    // Replace 3: Header Display (Lines 167)
+
+    // This is perfect for `multi_replace_file_content`.
+
+    // Lint fix: "Property 'twgName' does not exist..." (ID: 29ee6...)
+    // This tool call will fix it.
+
+
+    // Auto-scroll to bottom (Scoped to container to prevent page jump)
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        if (messagesContainerRef.current) {
+            const { scrollHeight, clientHeight } = messagesContainerRef.current;
+            messagesContainerRef.current.scrollTo({
+                top: scrollHeight - clientHeight,
+                behavior: 'smooth'
+            });
+        }
     }, [messages, streamingState]);
 
     const handleSendMessage = async () => {
@@ -164,14 +193,17 @@ export default function CopilotChat({ twgId: propTwgId }: { twgId?: string }) {
                         <h3 className="font-bold text-sm text-slate-900 dark:text-white">ECOWAS AI Copilot</h3>
                         <p className="text-[10px] text-green-500 font-bold uppercase flex items-center gap-1 transition-colors">
                             <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                            Online • {user?.role === 'admin' ? 'Secretariat Mode' : 'Energy Context'}
+                            Online • {twgName ? `${twgName} Agent` : (user?.role === 'admin' ? 'Secretariat Mode' : 'General Context')}
                         </p>
                     </div>
                 </div>
             </div>
 
             {/* Chat Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div
+                ref={messagesContainerRef}
+                className="flex-1 overflow-y-auto p-4 space-y-4"
+            >
                 {messages.map((msg, idx) => (
                     <div key={msg.message_id || idx} className={`flex gap-3 ${msg.sender === 'user' ? 'flex-row-reverse' : ''}`}>
                         {msg.sender !== 'user' && (

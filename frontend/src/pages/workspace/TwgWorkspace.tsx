@@ -418,7 +418,7 @@ export default function TwgWorkspace() {
 
                 <div className="w-80 flex flex-col gap-6">
                     <Card className="flex-1 flex flex-col p-0 overflow-hidden bg-white dark:bg-dark-card border-slate-100 dark:border-dark-border transition-colors h-[calc(100vh-140px)]">
-                        <CopilotChat twgId={twgId} />
+                        <CopilotChat twgId={twgId} twgName={twg?.name} />
                     </Card>
                 </div>
             </div>

@@ -50,7 +50,8 @@ class CalendarService:
                              start_time: datetime.datetime, 
                              duration_minutes: int, 
                              description: str = "",
-                             attendees: list = []) -> Dict[str, Any]:
+                             attendees: list = [],
+                             meeting_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Creates a Google Calendar event with a Google Meet link.
         Returns the full event object (including hangoutLink).
@@ -81,12 +82,21 @@ class CalendarService:
             },
         }
 
+        if meeting_id:
+            event['extendedProperties'] = {
+                'private': {
+                    'meeting_id': str(meeting_id)
+                }
+            }
+
         try:
             # conferenceDataVersion=1 is REQUIRED for creating Meet links
+            # sendUpdates='none' prevents Google from sending its own email invites
             created_event = self.service.events().insert(
                 calendarId='primary', 
                 body=event, 
-                conferenceDataVersion=1
+                conferenceDataVersion=1,
+                sendUpdates='none' 
             ).execute()
             
             logger.info(f"Event created: {created_event.get('htmlLink')}")
@@ -96,5 +106,100 @@ class CalendarService:
             logger.error(f"Error creating calendar event: {e}")
             return {}
 
+    def get_meeting_rsvps(self, meeting_id: str) -> Dict[str, str]:
+        """
+        Retrieves RSVP status for a given meeting ID by searching extended properties.
+        Returns a dict mapping email -> status.
+        Status values: 'accepted', 'declined', 'needsAction', 'tentative'
+        """
+        if not self.service:
+            return {}
+
+        try:
+            # Search for event with privateExtendedProperty meeting_id=<id>
+            events_result = self.service.events().list(
+                calendarId='primary',
+                privateExtendedProperty=f"meeting_id={meeting_id}",
+                singleEvents=True
+            ).execute()
+
+            events = events_result.get('items', [])
+            if not events:
+                logger.warning(f"No calendar event found for meeting_id {meeting_id}")
+                return {}
+
+            # Should only be one event
+            event = events[0]
+            attendees = event.get('attendees', [])
+            
+            rsvps = {}
+            for attendee in attendees:
+                email = attendee.get('email')
+                status = attendee.get('responseStatus')
+                if email and status:
+                    rsvps[email] = status
+                    
+            return rsvps
+
+        except Exception as e:
+            logger.error(f"Error fetching RSVPs for meeting {meeting_id}: {e}")
+            return {}
+
+    def add_attendees_to_event(self, meeting_id: str, new_emails: list) -> bool:
+        """
+        Adds attendees to an existing Google Calendar event found by meeting_id.
+        """
+        if not self.service:
+            return False
+
+        try:
+            # 1. Find the event
+            events_result = self.service.events().list(
+                calendarId='primary',
+                privateExtendedProperty=f"meeting_id={meeting_id}",
+                singleEvents=True
+            ).execute()
+
+            events = events_result.get('items', [])
+            if not events:
+                logger.warning(f"No calendar event found for meeting_id {meeting_id} to add attendees")
+                return False
+
+            event = events[0]
+            event_id = event['id']
+            
+            # 2. Get existing attendees
+            existing_attendees = event.get('attendees', [])
+            existing_emails = {a.get('email') for a in existing_attendees}
+            
+            # 3. Append new ones
+            updated = False
+            for email in new_emails:
+                if email and email not in existing_emails:
+                    existing_attendees.append({'email': email})
+                    updated = True
+            
+            if not updated:
+                return True
+
+            event['attendees'] = existing_attendees
+            
+            # 4. Patch the event
+            # Ensure we don't send updates (since we sent our own email)
+            self.service.events().patch(
+                calendarId='primary',
+                eventId=event_id,
+                body={'attendees': existing_attendees},
+                sendUpdates='none'
+            ).execute()
+            
+            logger.info(f"Added {len(new_emails)} attendees to event {event_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error adding attendees to meeting {meeting_id}: {e}")
+            return False
+
 # Singleton instance
 calendar_service = CalendarService()
+

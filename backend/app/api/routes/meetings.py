@@ -53,6 +53,9 @@ async def create_meeting(
         logger = logging.getLogger(__name__)
         logger.warning(f"CREATE_MEETING: meeting_type='{meeting_in.meeting_type}'")
         
+        # Generate ID explicitly so we can link it in GCal
+        meeting_id = uuid.uuid4()
+        
         generated_video_link = None
         if meeting_in.meeting_type == "virtual":
             logger.warning("CREATE_MEETING: Entering virtual meeting block")
@@ -63,7 +66,8 @@ async def create_meeting(
                     start_time=meeting_in.scheduled_at,
                     duration_minutes=meeting_in.duration_minutes,
                     description=f"Automated meeting for TWG: {meeting_in.twg_id}",
-                    attendees=[]
+                    attendees=[],
+                    meeting_id=str(meeting_id)
                 )
                 if calendar_event.get('hangoutLink'):
                      logger.warning(f"CREATE_MEETING: Generated link: {calendar_event.get('hangoutLink')}")
@@ -78,6 +82,7 @@ async def create_meeting(
 
         # Create meeting with video_link
         meeting_data = meeting_in.model_dump()
+        meeting_data['id'] = meeting_id
         meeting_data['video_link'] = generated_video_link
         db_meeting = Meeting(**meeting_data)
         db.add(db_meeting)
@@ -106,16 +111,21 @@ async def create_meeting(
 async def list_meetings(
     skip: int = 0,
     limit: int = 100,
+    twg_id: Optional[uuid.UUID] = None,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
     """
     List all meetings visible to the user.
     """
-    # If admin, show all. If member, show only their TWG meetings.
+    # If admin, show all (unless filtered). If member, show only their TWG meetings.
     query = select(Meeting).offset(skip).limit(limit)
     
-    if current_user.role != UserRole.ADMIN:
+    if twg_id:
+        if not has_twg_access(current_user, twg_id):
+             raise HTTPException(status_code=403, detail="Access denied to this TWG")
+        query = query.where(Meeting.twg_id == twg_id)
+    elif current_user.role != UserRole.ADMIN:
         # Get IDs of TWGs user belongs to
         user_twg_ids = [twg.id for twg in current_user.twgs]
         query = query.where(Meeting.twg_id.in_(user_twg_ids))
@@ -1250,6 +1260,20 @@ async def add_participants(
          new_participants.append(db_p)
          
     await db.commit()
+    
+    # Sync to Google Calendar
+    try:
+        from app.services.calendar_service import calendar_service
+        # Get DB meeting to check type
+        if db_meeting.meeting_type == 'virtual' or db_meeting.meeting_type == 'hybrid': # Assume virtual/hybrid have links
+             emails_to_add = [p.email for p in new_participants if p.email]
+             if emails_to_add:
+                 calendar_service.add_attendees_to_event(str(meeting_id), emails_to_add)
+    except Exception as e:
+        # Don't fail the request if sync fails
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to sync participants to GCal: {e}")
     
     # Refresh to return
     for p in new_participants:

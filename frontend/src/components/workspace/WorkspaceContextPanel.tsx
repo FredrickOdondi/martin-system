@@ -1,8 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import api from '../../services/api';
 import { Card, Badge } from '../ui';
 
 interface WorkspaceContextPanelProps {
     twgName: string;
+    twgId?: string;
     onInsertContext?: (contextType: string, data: any) => void;
 }
 
@@ -30,81 +32,61 @@ interface Document {
     uploadedAt: string;
 }
 
-export default function WorkspaceContextPanel({ twgName, onInsertContext }: WorkspaceContextPanelProps) {
+export default function WorkspaceContextPanel({ twgName, twgId, onInsertContext }: WorkspaceContextPanelProps) {
     const [activeTab, setActiveTab] = useState<'meetings' | 'actions' | 'documents'>('meetings');
     const [isCollapsed, setIsCollapsed] = useState(false);
 
-    // Mock data - replace with actual API calls
-    const meetings: Meeting[] = [
-        {
-            id: '1',
-            title: 'Regional Power Pool Integration',
-            date: 'Feb 10, 2024 • 10:00 AM',
-            status: 'upcoming',
-            hasAgenda: true,
-        },
-        {
-            id: '2',
-            title: 'Sustainability Policy Framework',
-            date: 'Feb 01, 2024 • 02:00 PM',
-            status: 'completed',
-            hasMinutes: true,
-            hasAgenda: true,
-        },
-        {
-            id: '3',
-            title: 'Governance & Funding Round',
-            date: 'Jan 24, 2024 • 09:00 AM',
-            status: 'completed',
-            hasMinutes: true,
-            hasAgenda: true,
-        },
-    ];
+    const [meetings, setMeetings] = useState<Meeting[]>([]);
+    const [actions, setActions] = useState<ActionItem[]>([]);
+    const [documents, setDocuments] = useState<Document[]>([]);
+    const [loading, setLoading] = useState(false);
 
-    const actions: ActionItem[] = [
-        {
-            id: '1',
-            task: 'Review Renewable Energy Annex',
-            assignee: 'John Doe',
-            dueDate: 'Oct 10',
-            status: 'in_progress',
-        },
-        {
-            id: '2',
-            task: 'Approve Minutes from Sept 1st',
-            assignee: 'Dr. A. Sow',
-            dueDate: 'Sept 15',
-            status: 'overdue',
-        },
-        {
-            id: '3',
-            task: 'Draft Logistics Plan',
-            assignee: 'M. Kone',
-            dueDate: 'Oct 20',
-            status: 'not_started',
-        },
-    ];
+    useEffect(() => {
+        if (!twgId || twgId === 'secretariat') return;
 
-    const documents: Document[] = [
-        {
-            id: '1',
-            name: 'Agenda_Template_2024.docx',
-            type: 'template',
-            uploadedAt: '2 days ago',
-        },
-        {
-            id: '2',
-            name: 'Regional_Power_Pool_Draft_v1.pdf',
-            type: 'output',
-            uploadedAt: '1 week ago',
-        },
-        {
-            id: '3',
-            name: 'Technical_Standards_Review.xlsx',
-            type: 'output',
-            uploadedAt: '3 days ago',
-        },
-    ];
+        const fetchData = async () => {
+            setLoading(true);
+            try {
+                if (activeTab === 'meetings') {
+                    const res = await api.get('/meetings', { params: { twg_id: twgId } });
+                    // Map backend response to UI interface if needed
+                    // Backend returns MeetingRead. UI expects Meeting interface.
+                    // meeting.scheduled_at -> meeting.date
+                    setMeetings(res.data.map((m: any) => ({
+                        id: m.id,
+                        title: m.title,
+                        date: new Date(m.scheduled_at).toLocaleString(),
+                        status: m.status === 'scheduled' ? 'upcoming' : 'completed', // Simple mapping
+                        hasAgenda: !!m.agenda, // Check if agenda exists
+                        hasMinutes: !!m.minutes
+                    })));
+                } else if (activeTab === 'actions') {
+                    const res = await api.get('/action-items', { params: { twg_id: twgId } });
+                    setActions(res.data.map((a: any) => ({
+                        id: a.id,
+                        task: a.description, // Corrected from a.title
+                        assignee: a.owner?.full_name || 'Unassigned',
+                        dueDate: a.due_date ? new Date(a.due_date).toLocaleDateString() : 'No Date',
+                        status: a.status.toLowerCase()
+                    })));
+                } else if (activeTab === 'documents') {
+                    const res = await api.get('/documents', { params: { twg_id: twgId } });
+                    setDocuments(res.data.map((d: any) => ({
+                        id: d.id,
+                        name: d.file_name,
+                        type: d.file_type.includes('pdf') ? 'output' : 'template', // Simple heuristic
+                        uploadedAt: new Date(d.created_at).toLocaleDateString()
+                    })));
+                }
+            } catch (error) {
+                console.error("Failed to fetch context data", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchData();
+    }, [twgId, activeTab]);
 
     const handleInsertContext = (type: string, item: any) => {
         if (onInsertContext) {
@@ -158,22 +140,20 @@ export default function WorkspaceContextPanel({ twgName, onInsertContext }: Work
             <div className="flex border-b border-[#e7ebf3] dark:border-[#2d3748]">
                 <button
                     onClick={() => setActiveTab('meetings')}
-                    className={`flex-1 px-4 py-3 text-xs font-semibold transition-colors ${
-                        activeTab === 'meetings'
-                            ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
-                            : 'text-[#6b7280] dark:text-[#9ca3af] hover:text-[#0d121b] dark:hover:text-white'
-                    }`}
+                    className={`flex-1 px-4 py-3 text-xs font-semibold transition-colors ${activeTab === 'meetings'
+                        ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                        : 'text-[#6b7280] dark:text-[#9ca3af] hover:text-[#0d121b] dark:hover:text-white'
+                        }`}
                 >
                     <span className="material-symbols-outlined text-[16px] block mx-auto mb-0.5">event</span>
                     Meetings
                 </button>
                 <button
                     onClick={() => setActiveTab('actions')}
-                    className={`flex-1 px-4 py-3 text-xs font-semibold transition-colors ${
-                        activeTab === 'actions'
-                            ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
-                            : 'text-[#6b7280] dark:text-[#9ca3af] hover:text-[#0d121b] dark:hover:text-white'
-                    }`}
+                    className={`flex-1 px-4 py-3 text-xs font-semibold transition-colors ${activeTab === 'actions'
+                        ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                        : 'text-[#6b7280] dark:text-[#9ca3af] hover:text-[#0d121b] dark:hover:text-white'
+                        }`}
                 >
                     <span className="material-symbols-outlined text-[16px] block mx-auto mb-0.5">task_alt</span>
                     Actions
@@ -185,11 +165,10 @@ export default function WorkspaceContextPanel({ twgName, onInsertContext }: Work
                 </button>
                 <button
                     onClick={() => setActiveTab('documents')}
-                    className={`flex-1 px-4 py-3 text-xs font-semibold transition-colors ${
-                        activeTab === 'documents'
-                            ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
-                            : 'text-[#6b7280] dark:text-[#9ca3af] hover:text-[#0d121b] dark:hover:text-white'
-                    }`}
+                    className={`flex-1 px-4 py-3 text-xs font-semibold transition-colors ${activeTab === 'documents'
+                        ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                        : 'text-[#6b7280] dark:text-[#9ca3af] hover:text-[#0d121b] dark:hover:text-white'
+                        }`}
                 >
                     <span className="material-symbols-outlined text-[16px] block mx-auto mb-0.5">description</span>
                     Docs
@@ -255,13 +234,12 @@ export default function WorkspaceContextPanel({ twgName, onInsertContext }: Work
                             >
                                 <div className="flex items-start gap-2 mb-2">
                                     <div
-                                        className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold ${
-                                            action.status === 'overdue'
-                                                ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
-                                                : action.status === 'in_progress'
+                                        className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold ${action.status === 'overdue'
+                                            ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                                            : action.status === 'in_progress'
                                                 ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400'
                                                 : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
-                                        }`}
+                                            }`}
                                     >
                                         {action.status === 'completed' ? '✓' : '○'}
                                     </div>
@@ -297,20 +275,19 @@ export default function WorkspaceContextPanel({ twgName, onInsertContext }: Work
                             >
                                 <div className="flex items-start gap-3">
                                     <div
-                                        className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                                            doc.type === 'template'
-                                                ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400'
-                                                : doc.type === 'output'
+                                        className={`w-8 h-8 rounded-lg flex items-center justify-center ${doc.type === 'template'
+                                            ? 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400'
+                                            : doc.type === 'output'
                                                 ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400'
                                                 : 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
-                                        }`}
+                                            }`}
                                     >
                                         <span className="material-symbols-outlined text-[16px]">
                                             {doc.name.endsWith('.pdf')
                                                 ? 'picture_as_pdf'
                                                 : doc.name.endsWith('.xlsx')
-                                                ? 'table_chart'
-                                                : 'description'}
+                                                    ? 'table_chart'
+                                                    : 'description'}
                                         </span>
                                     </div>
                                     <div className="flex-1 min-w-0">

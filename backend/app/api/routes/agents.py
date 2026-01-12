@@ -48,6 +48,28 @@ def get_supervisor() -> SupervisorWithTools:
     return supervisor_agent
 
 
+def has_twg_access(user: User, twg_id: uuid.UUID) -> bool:
+    """
+    Check if user has access to the specified TWG.
+    
+    Args:
+        user: The user to check
+        twg_id: The TWG ID to verify access for
+        
+    Returns:
+        True if user has access, False otherwise
+    """
+    from app.models.models import UserRole
+    
+    # Admins have access to all TWGs
+    if user.role == UserRole.ADMIN:
+        return True
+    
+    # Check if user is a member or facilitator of this TWG
+    user_twg_ids = user.twg_ids  # Property, not a method
+    return twg_id in user_twg_ids
+
+
 # Command and Mention Handlers (Phase 2)
 
 async def handle_command(supervisor: SupervisorWithTools, parsed: dict, original_message: str) -> str:
@@ -132,28 +154,85 @@ async def chat_with_martin(
     current_user: User = Depends(get_current_active_user)
 ):
     """
-    Chat with the Supervisor AI agent.
-
-    Uses the actual LLM-powered supervisor with tool execution capabilities.
+    Chat with AI agents - routes based on user role and context.
+    
+    - Admins: Access Supervisor agent (full cross-TWG access)
+    - TWG Facilitators/Members: Access their TWG-specific agent (restricted to their TWG)
     """
     from langgraph.errors import GraphInterrupt
+    from app.models.models import UserRole
     
     conv_id = chat_in.conversation_id or uuid.uuid4()
 
     try:
-        # Get the supervisor agent
-        supervisor = get_supervisor()
+        # ROLE-BASED ROUTING
+        if current_user.role == UserRole.ADMIN:
+            # Admins always get Supervisor access with full permissions
+            supervisor = get_supervisor()
+            twg_context = str(chat_in.twg_id) if chat_in.twg_id else None
+            response_text = await supervisor.chat_with_tools(chat_in.message, twg_id=twg_context)
+            agent_id = "supervisor_v1"
+            
+        elif current_user.role in [UserRole.TWG_FACILITATOR, UserRole.TWG_MEMBER]:
+            # TWG users must provide twg_id and can only access their TWG agent
+            if not chat_in.twg_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="TWG ID required for TWG member access. Please access the agent from your TWG page."
+                )
+            
+            # Verify user has access to this TWG
+            if not has_twg_access(current_user, chat_in.twg_id):
+                raise HTTPException(
+                    status_code=403,
+                    detail="You do not have access to this TWG"
+                )
+            
+            # Route to TWG-specific agent (using Supervisor with strict TWG context)
+            # Note: In the future, this could be replaced with dedicated TWG agent instances
+            supervisor = get_supervisor()
+            response_text = await supervisor.chat_with_tools(
+                chat_in.message,
+                twg_id=str(chat_in.twg_id)
+            )
+            agent_id = f"twg_{chat_in.twg_id}_agent"
+            
+            agent_id = f"twg_{chat_in.twg_id}_agent"
+            
+        else:
+            # Other roles (e.g., SECRETARIAT_LEAD) don't have agent access yet
+            raise HTTPException(
+                status_code=403,
+                detail="Insufficient permissions to access AI agents"
+            )
 
-        # Chat with the supervisor using tools (Pass TWG Context for strict RBAC)
-        twg_context = str(chat_in.twg_id) if chat_in.twg_id else None
-        response_text = await supervisor.chat_with_tools(chat_in.message, twg_id=twg_context)
+        # Extract suggestions from response text if present
+        suggestions = []
+        if "<<SUGGESTIONS>>" in response_text and "<</SUGGESTIONS>>" in response_text:
+            try:
+                start_tag = "<<SUGGESTIONS>>"
+                end_tag = "<</SUGGESTIONS>>"
+                start_index = response_text.find(start_tag)
+                end_index = response_text.find(end_tag)
+                
+                json_str = response_text[start_index + len(start_tag):end_index]
+                suggestions = json.loads(json_str)
+                
+                # Remove the suggestions block from the visible response
+                response_text = response_text[:start_index].strip()
+            except Exception as e:
+                logger.error(f"Failed to parse suggestions: {e}")
 
         return {
             "response": response_text,
             "conversation_id": conv_id,
-            "citations": [],  # Citations will be extracted from the response in future
-            "agent_id": "supervisor_v1"
+            "citations": [],
+            "agent_id": agent_id,
+            "suggestions": suggestions
         }
+    except HTTPException:
+        # Re-raise HTTP exceptions (access control errors)
+        raise
     except GraphInterrupt as gi:
         # Graph was interrupted for human approval
         # Extract the interrupt payload - GraphInterrupt stores it in args[0]
@@ -180,11 +259,14 @@ async def chat_with_martin(
                 logger.error(f"Failed to humanize interrupt message: {e}")
                 response_content = f"🛑 {interrupt_value}"
 
+            # Determine agent_id based on user role
+            agent_id = "supervisor_v1" if current_user.role == UserRole.ADMIN else f"twg_{chat_in.twg_id}_agent"
+
             return {
                 "response": response_content, 
                 "conversation_id": conv_id,
                 "citations": [],
-                "agent_id": "supervisor_v1",
+                "agent_id": agent_id,
                 # We do NOT set interrupted=True here because we don't need UI approval.
                 # We just want to halt and show the message.
             }
@@ -204,11 +286,14 @@ async def chat_with_martin(
                 if approval_service.update_approval_request_thread(req_id, str(conv_id)):
                     logger.info(f"[CHAT] Linked thread {conv_id} to approval request {req_id}")
         
+        # Determine agent_id based on user role
+        agent_id = "supervisor_v1" if current_user.role == UserRole.ADMIN else f"twg_{chat_in.twg_id}_agent"
+        
         response_dict = {
             "response": "",  # Empty - frontend will handle the message display
             "conversation_id": conv_id,
             "citations": [],
-            "agent_id": "supervisor_v1",
+            "agent_id": agent_id,
             "interrupted": True,
             "interrupt_payload": interrupt_value,
             "thread_id": str(conv_id)  # Used to resume the graph
@@ -221,11 +306,14 @@ async def chat_with_martin(
         import traceback
         traceback.print_exc()
 
+        # Determine agent_id based on user role
+        agent_id = "supervisor_v1" if current_user.role == UserRole.ADMIN else f"twg_{chat_in.twg_id}_agent"
+
         return {
             "response": f"I apologize, but I encountered an error processing your request: {str(e)}",
             "conversation_id": conv_id,
             "citations": [],
-            "agent_id": "supervisor_v1"
+            "agent_id": agent_id
         }
 
 @router.post("/chat/enhanced", response_model=EnhancedChatResponse)
@@ -399,12 +487,34 @@ async def stream_chat(
                 # Natural language - show thinking
                 yield f"data: {json.dumps({'type': 'thinking', 'status': 'Processing your request...'})}\n\n"
 
-                # Simulate LLM thinking
-                await asyncio.sleep(0.5)
-                yield f"data: {json.dumps({'type': 'thinking', 'status': 'Analyzing context...'})}\n\n"
+                # Natural language - stream real graph events
+                yield f"data: {json.dumps({'type': 'thinking', 'status': 'Starting Supervisor...'})}\n\n"
 
-                # Execute
-                response_text = await supervisor.chat_with_tools(chat_in.message)
+                response_text = ""
+                
+                # Stream events from LangGraph
+                async for event in supervisor.stream_chat_events(chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None):
+                    if event["type"] == "node_update":
+                        node = event["node"]
+                        status_msg = f"Processing step: {node}"
+                        
+                        # Map nodes to friendly messages
+                        if node == "route_query":
+                            status_msg = "Routing your query..."
+                        elif node == "supervisor":
+                            status_msg = "Supervisor Analyzing..."
+                        elif node == "dispatch_multiple":
+                            status_msg = "Dispatching to multiple agents..."
+                        elif node == "synthesis":
+                            status_msg = "Synthesizing insights..."
+                        elif node in ["energy", "agriculture", "minerals", "digital", "protocol", "resource_mobilization"]:
+                            status_msg = f"Consulting {node.title()} TWG Agent..."
+                        
+                        yield f"data: {json.dumps({'type': 'thinking', 'status': status_msg})}\n\n"
+                    
+                    elif event["type"] == "final_response":
+                        response_text = event["content"]
+                        
                 message_type = ChatMessageType.AGENT_TEXT
 
             # Send completion event

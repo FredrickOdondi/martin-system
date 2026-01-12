@@ -23,6 +23,7 @@ from app.models.models import (
     Conflict, ConflictType, ConflictSeverity, ConflictStatus,
     User, TWG
 )
+from app.services.calendar_service import calendar_service
 
 class EventPriority(str, Enum):
     """Event priority levels"""
@@ -149,6 +150,39 @@ class GlobalScheduler:
 
             await session.commit()
             
+            # 3. Create Google Calendar Event (if scheduled)
+            if status == MeetingStatus.SCHEDULED:
+                try:
+                    # Get participant emails
+                    # We need to query them again or use the IDs we have. 
+                    # For simplicity, we'll fetch VIP emails.
+                    vip_emails = []
+                    if vip_attendee_ids:
+                        stmt_users = select(User.email).where(User.id.in_(vip_attendee_ids))
+                        res_users = await session.execute(stmt_users)
+                        vip_emails = list(res_users.scalars().all())
+
+                    gcal_event = calendar_service.create_meeting_event(
+                        title=title,
+                        start_time=start_time,
+                        duration_minutes=duration_minutes,
+                        description=description or "",
+                        attendees=vip_emails,
+                        meeting_id=str(new_meeting.id)
+                    )
+                    
+                    if gcal_event and 'htmlLink' in gcal_event:
+                        # Update meeting with video link if available
+                        new_meeting.video_link = gcal_event.get('hangoutLink')
+                        # We need to merge/add updates
+                        session.add(new_meeting)
+                        await session.commit()
+                        logger.info(f"Google Calendar event created: {gcal_event.get('htmlLink')}")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to create Google Calendar event: {e}")
+                    # Don't fail the booking, just log error
+
             logger.info(f"✓ Booking created: '{title}' ({status})")
             
             return {

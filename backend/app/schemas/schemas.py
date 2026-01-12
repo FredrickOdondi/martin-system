@@ -377,6 +377,7 @@ class AgentChatResponse(SchemaBase):
     interrupted: Optional[bool] = False
     interrupt_payload: Optional[dict] = None
     thread_id: Optional[str] = None
+    suggestions: List[str] = []
 
 class AgentTaskRequest(SchemaBase):
     task_type: str # drafting, research, analysis, synthesis

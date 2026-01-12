@@ -2,14 +2,15 @@ import { useState, useRef, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '../../store';
 import { agentService, Citation } from '../../services/agentService';
-import { twgService } from '../../services/twgService';
 import { CommandAutocomplete } from '../../components/agent/CommandAutocomplete';
 import { MentionAutocomplete } from '../../components/agent/MentionAutocomplete';
 import EmailApprovalModal, { EmailApprovalRequest, EmailDraft } from '../../components/agent/EmailApprovalModal';
 import SettingsModal from '../../components/agent/SettingsModal';
+import EnhancedMessageBubble from '../../components/agent/EnhancedMessageBubble';
+import TypingIndicator from '../../components/agent/TypingIndicator';
+import WorkspaceContextPanel from '../../components/workspace/WorkspaceContextPanel';
 import { CommandAutocompleteResult } from '../../types/agent';
-
-
+import axios from 'axios';
 
 interface Message {
     id: string;
@@ -17,51 +18,17 @@ interface Message {
     content: string;
     timestamp: Date;
     citations?: Citation[];
+    reactions?: MessageReaction[];
+    agentName?: string;
+    agentIcon?: string;
+    approvalRequest?: any;
+    suggestions?: string[];
 }
 
-// Function to parse and format markdown-like text
-const formatMarkdownText = (text: string): JSX.Element => {
-    const lines = text.split('\n');
-    const elements: JSX.Element[] = [];
-
-    lines.forEach((line, index) => {
-        // Remove markdown bold syntax
-        let formattedLine = line.replace(/\*\*(.*?)\*\*/g, '$1');
-
-        // Handle numbered lists
-        if (/^\d+\.\s/.test(formattedLine)) {
-            const content = formattedLine.replace(/^\d+\.\s/, '');
-            elements.push(
-                <div key={index} className="mb-2">
-                    <span className="font-semibold">{content}</span>
-                </div>
-            );
-        }
-        // Handle bullet points with - or *
-        else if (/^\s*[-*]\s/.test(formattedLine)) {
-            const indent = formattedLine.search(/[-*]/);
-            const content = formattedLine.replace(/^\s*[-*]\s/, '');
-            elements.push(
-                <div key={index} className="mb-1" style={{ paddingLeft: `${indent * 8}px` }}>
-                    • {content}
-                </div>
-            );
-        }
-        // Empty lines
-        else if (formattedLine.trim() === '') {
-            elements.push(<div key={index} className="h-2"></div>);
-        }
-        // Regular text
-        else {
-            elements.push(
-                <div key={index} className="mb-1">
-                    {formattedLine}
-                </div>
-            );
-        }
-    });
-
-    return <>{elements}</>;
+interface MessageReaction {
+    emoji: string;
+    count: number;
+    users: string[];
 }
 
 interface AgentMentionSuggestion {
@@ -74,42 +41,29 @@ interface AgentMentionSuggestion {
 }
 
 export default function TwgAgent() {
-    // User context for dynamic agent routing
     const user = useSelector((state: RootState) => state.auth.user);
-    const twgId = user?.role !== 'admin' ? user?.twg_ids?.[0] : undefined;
-
-    // Agent name state (fetched from TWG)
-    const [agentName, setAgentName] = useState<string>('Your Assistant');
-
-    // Fetch TWG details to get the proper agent name
-    useEffect(() => {
-        const fetchTwgDetails = async () => {
-            if (!twgId) {
-                setAgentName('Secretariat Assistant');
-                return;
-            }
-            try {
-                const twg = await twgService.getTWG(twgId);
-                // Extract pillar name from TWG name (e.g., "Energy TWG" -> "Energy Agent")
-                const pillarName = twg.name.replace(' TWG', '').replace('TWG', '').trim();
-                setAgentName(`${pillarName} Agent`);
-            } catch (error) {
-                console.error('Failed to fetch TWG details:', error);
-                setAgentName('Your TWG Agent');
-            }
-        };
-        fetchTwgDetails();
-    }, [twgId]);
-
     const [messages, setMessages] = useState<Message[]>([]);
-
-
     const [inputMessage, setInputMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [conversationId, setConversationId] = useState<string | undefined>();
+    const [activeTwg, setActiveTwg] = useState<{ id: string; name: string } | null>(null);
+
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
+
+    // Initialize Active TWG Context
+    useEffect(() => {
+        if (!user) return;
+
+        if (user.role === 'admin' || user.role === 'secretariat_lead') {
+            setActiveTwg({ id: 'secretariat', name: 'Secretariat' });
+        } else if (user.twgs && user.twgs.length > 0) {
+            // Default to first TWG for facilitators/members
+            const primary = user.twgs[0];
+            setActiveTwg({ id: primary.id, name: primary.name });
+        }
+    }, [user]);
 
     // Autocomplete state
     const [commandSuggestions, setCommandSuggestions] = useState<CommandAutocompleteResult[]>([]);
@@ -124,13 +78,21 @@ export default function TwgAgent() {
     // Settings modal state
     const [showSettingsModal, setShowSettingsModal] = useState(false);
 
+
+    // Context panel state
+    const [showContextPanel, setShowContextPanel] = useState(false);
+
+    // Typing state
+    const [typingMessage, setTypingMessage] = useState<string | null>(null);
+    const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
+
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
     useEffect(() => {
         scrollToBottom();
-    }, [messages]);
+    }, [messages, isLoading, typingMessage, thinkingSteps]);
 
     const handleSendMessage = async () => {
         if (!inputMessage.trim() || isLoading) return;
@@ -146,78 +108,84 @@ export default function TwgAgent() {
         const messageToSend = inputMessage;
         setInputMessage('');
         setIsLoading(true);
+        setThinkingSteps([]); // Clear previous steps
+        setTypingMessage('Processing...');
 
         // Create new AbortController for this request
         abortControllerRef.current = new AbortController();
 
         try {
-            const response = await agentService.chat({
+            await agentService.chatStream({
                 message: messageToSend,
                 conversation_id: conversationId,
-                twg_id: twgId,
+                twg_id: activeTwg?.id !== 'secretariat' ? activeTwg?.id : undefined // Pass TWG ID if not secretariat
+            }, {
+                onThinking: (status) => {
+                    setThinkingSteps(prev => {
+                        // Avoid duplicates if same status comes twice
+                        if (prev[prev.length - 1] === status) return prev;
+                        return [...prev, status];
+                    });
+                    setTypingMessage(status);
+                },
+                onResponse: (msg: any) => {
+                    console.log('[STREAM] Received response:', msg);
+
+                    // Parse suggestions from content (Format: <<SUGGESTIONS>>["A","B"]<</SUGGESTIONS>>)
+                    let content = msg.content;
+                    let suggestions: string[] = [];
+
+                    if (content.includes('<<SUGGESTIONS>>')) {
+                        try {
+                            const start = content.indexOf('<<SUGGESTIONS>>');
+                            const end = content.indexOf('<</SUGGESTIONS>>');
+                            if (start !== -1 && end !== -1) {
+                                const jsonStr = content.substring(start + 15, end);
+                                suggestions = JSON.parse(jsonStr);
+                                content = content.substring(0, start).trim();
+                            }
+                        } catch (e) {
+                            console.error('Error parsing suggestions:', e);
+                        }
+                    }
+
+                    const agentMessage: Message = {
+                        id: msg.message_id || Date.now().toString(),
+                        role: 'agent',
+                        content: content,
+                        timestamp: new Date(),
+                        citations: [], // Stream doesn't support citations yet
+                        agentName: activeTwg?.name === 'Secretariat' ? 'Secretariat Assistant' : `${activeTwg?.name} Agent`,
+                        suggestions: suggestions
+                    };
+
+                    setMessages(prev => [...prev, agentMessage]);
+                    setConversationId(msg.conversation_id);
+                },
+                onDone: () => {
+                    setIsLoading(false);
+                    setTypingMessage(null);
+                },
+                onError: (err) => {
+                    console.error('Stream error:', err);
+                    const errorMessage: Message = {
+                        id: (Date.now() + 1).toString(),
+                        role: 'agent',
+                        content: 'Sorry, I encountered an error. Please try again.',
+                        timestamp: new Date(),
+                    };
+                    setMessages(prev => [...prev, errorMessage]);
+                    setIsLoading(false);
+                    setTypingMessage(null);
+                }
             });
 
-            setConversationId(response.conversation_id);
-
-            console.log('[DEBUG] Full Agent Response:', response);
-            console.log('[DEBUG] Interrupted?', response.interrupted, 'Has Payload?', !!response.interrupt_payload);
-
-            // NEW: Check for LangGraph interrupt (proper HITL pattern)
-            if (response.interrupted && response.interrupt_payload) {
-                console.log('[APPROVAL] Graph interrupted for approval:', response.interrupt_payload);
-
-                // The interrupt_payload contains the approval data directly
-                const draftData = response.interrupt_payload.draft || {};
-                const draftWithId: EmailDraft = {
-                    ...draftData,
-                    draft_id: draftData.draft_id || `draft-${Date.now()}`,
-                    to: draftData.to || [],
-                    subject: draftData.subject || '(No Subject)',
-                    body: draftData.body || '',
-                    created_at: draftData.created_at || new Date().toISOString()
-                };
-
-                const approvalRequest: EmailApprovalRequest = {
-                    request_id: response.interrupt_payload.request_id,
-                    draft: draftWithId,
-                    message: response.interrupt_payload.message || 'Email requires approval before sending.'
-                };
-
-                console.log('[APPROVAL] Setting approval state:', approvalRequest);
-                setPendingEmailApproval(approvalRequest);
-                setShowApprovalModal(true);
-                console.log('[APPROVAL] Modal triggered');
-                return; // Don't add another message below
-            }
-
-            // Only add a regular message if there's actual content (not an interrupt-only response)
-            if (response.response && response.response.trim()) {
-                const agentMessage: Message = {
-                    id: (Date.now() + 1).toString(),
-                    role: 'agent',
-                    content: response.response,
-                    timestamp: new Date(),
-                    citations: response.citations,
-                };
-
-                setMessages(prev => [...prev, agentMessage]);
-            }
         } catch (error: any) {
-            // Don't show error if request was aborted
-            if (error?.name === 'AbortError' || error?.message?.includes('abort')) {
-                console.log('Request aborted by user');
-            } else {
-                console.error('Error sending message:', error);
-                const errorMessage: Message = {
-                    id: (Date.now() + 1).toString(),
-                    role: 'agent',
-                    content: 'Sorry, I encountered an error processing your request. Please try again.',
-                    timestamp: new Date(),
-                };
-                setMessages(prev => [...prev, errorMessage]);
-            }
-        } finally {
+            // Fallback handled in onError usually, but strictly catch synchronous startup errors
             setIsLoading(false);
+            setTypingMessage(null);
+            console.error('Error starting chat:', error);
+        } finally {
             abortControllerRef.current = null;
         }
     };
@@ -227,58 +195,35 @@ export default function TwgAgent() {
         const value = e.target.value;
         setInputMessage(value);
 
-        // Get cursor position
         const cursorPosition = e.target.selectionStart;
         const textBeforeCursor = value.substring(0, cursorPosition);
 
         // Check for command trigger (/)
         const commandMatch = textBeforeCursor.match(/\/(\w*)$/);
         if (commandMatch) {
-            const query = '/' + commandMatch[1].toLowerCase();
-
-            // Client-side command list with role-based access control
-            const ALL_COMMANDS: CommandAutocompleteResult[] = [
-                { command: '/email', description: 'Send emails or search inbox', category: 'communication', examples: '/email summary' },
-                { command: '/search', description: 'Search knowledge base', category: 'general', examples: '/search mining' },
-                { command: '/schedule', description: 'Check schedules or create meetings', category: 'meetings', examples: '/schedule meeting' },
-                { command: '/draft', description: 'Draft documents or minutes', category: 'documents', examples: '/draft minutes' },
-                { command: '/analyze', description: 'Analyze uploaded documents', category: 'analysis', examples: '/analyze report.pdf' },
-                { command: '/broadcast', description: 'Broadcast message to all TWGs', category: 'communication', examples: '/broadcast unexpected delay', roles: ['admin', 'secretariat_lead'] }
-            ];
-
-            // Filter commands based on query and user role
-            const filteredCommands = ALL_COMMANDS.filter(cmd => {
-                const matchesQuery = cmd.command.toLowerCase().startsWith(query);
-                const hasRole = !cmd.roles || (user?.role && cmd.roles.includes(user.role as any)); // Check if user has required role
-                return matchesQuery && hasRole;
-            });
-
-            if (filteredCommands.length > 0) {
-                setCommandSuggestions(filteredCommands);
+            const query = '/' + commandMatch[1];
+            try {
+                const response = await axios.get(`/api/agents/commands/autocomplete`, {
+                    params: { query }
+                });
+                setCommandSuggestions(response.data.suggestions);
                 setAutocompleteType('command');
                 setSelectedSuggestionIndex(0);
                 return;
+            } catch (error) {
+                console.error('Error fetching command suggestions:', error);
             }
         }
 
         // Check for mention trigger (@)
         const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
         if (mentionMatch) {
-            const query = mentionMatch[1].toLowerCase();
+            const query = '@' + mentionMatch[1];
             try {
-                const twgs = await twgService.listTWGs();
-                const filtered = twgs.filter((t: any) =>
-                    t.name.toLowerCase().includes(query) ||
-                    t.pillar?.toLowerCase().includes(query)
-                ).map((t: any) => ({
-                    mention: `@${t.name}`,
-                    agent_id: t.id,
-                    name: t.name,
-                    icon: 'smart_toy',
-                    description: t.pillar || 'Technical Working Group'
-                }));
-
-                setMentionSuggestions(filtered as any); // Type assertion to handle interface mismatch if any
+                const response = await axios.get(`/api/agents/mentions/autocomplete`, {
+                    params: { query }
+                });
+                setMentionSuggestions(response.data.suggestions);
                 setAutocompleteType('mention');
                 setSelectedSuggestionIndex(0);
                 return;
@@ -294,7 +239,6 @@ export default function TwgAgent() {
     };
 
     const handleCommandSelect = (suggestion: CommandAutocompleteResult) => {
-        // Replace the partial command with the full command
         const cursorPosition = inputRef.current?.selectionStart || 0;
         const textBeforeCursor = inputMessage.substring(0, cursorPosition);
         const textAfterCursor = inputMessage.substring(cursorPosition);
@@ -307,7 +251,6 @@ export default function TwgAgent() {
             setAutocompleteType(null);
             setCommandSuggestions([]);
 
-            // Focus input and set cursor position
             setTimeout(() => {
                 if (inputRef.current) {
                     const newCursorPos = beforeCommand.length + suggestion.command.length + 1;
@@ -319,7 +262,6 @@ export default function TwgAgent() {
     };
 
     const handleMentionSelect = (suggestion: AgentMentionSuggestion) => {
-        // Replace the partial mention with the full mention
         const cursorPosition = inputRef.current?.selectionStart || 0;
         const textBeforeCursor = inputMessage.substring(0, cursorPosition);
         const textAfterCursor = inputMessage.substring(cursorPosition);
@@ -332,7 +274,6 @@ export default function TwgAgent() {
             setAutocompleteType(null);
             setMentionSuggestions([]);
 
-            // Focus input and set cursor position
             setTimeout(() => {
                 if (inputRef.current) {
                     const newCursorPos = beforeMention.length + suggestion.mention.length + 1;
@@ -344,7 +285,6 @@ export default function TwgAgent() {
     };
 
     const handleKeyPress = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        // Handle autocomplete navigation
         if (autocompleteType) {
             const suggestions = autocompleteType === 'command' ? commandSuggestions : mentionSuggestions;
 
@@ -379,32 +319,82 @@ export default function TwgAgent() {
             }
         }
 
-        // Normal message send
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             handleSendMessage();
         }
     };
 
-    // Clear conversation handler
     const handleClearConversation = () => {
         if (messages.length === 0 && !isLoading) return;
 
         if (window.confirm('Are you sure you want to clear this conversation? This action cannot be undone.')) {
-            // Abort any ongoing request
             if (abortControllerRef.current) {
                 abortControllerRef.current.abort();
                 abortControllerRef.current = null;
             }
 
-            // Clear state
             setMessages([]);
             setConversationId(undefined);
             setIsLoading(false);
+            setTypingMessage(null);
         }
     };
 
-    // Email approval handlers
+    const handleReact = (messageId: string, emoji: string) => {
+        setMessages(prev => prev.map(msg => {
+            if (msg.id === messageId) {
+                const reactions = msg.reactions || [];
+                const existingReaction = reactions.find(r => r.emoji === emoji);
+
+                if (existingReaction) {
+                    return {
+                        ...msg,
+                        reactions: reactions.map(r =>
+                            r.emoji === emoji
+                                ? { ...r, count: r.count + 1, users: [...r.users, 'You'] }
+                                : r
+                        )
+                    };
+                } else {
+                    return {
+                        ...msg,
+                        reactions: [...reactions, { emoji, count: 1, users: ['You'] }]
+                    };
+                }
+            }
+            return msg;
+        }));
+    };
+
+    const handleInsertContext = (contextType: string, data: any) => {
+        let contextText = '';
+
+        switch (contextType) {
+            case 'meeting':
+                contextText = `Please summarize the meeting "${data.title}" scheduled for ${data.date}`;
+                break;
+            case 'action':
+                contextText = `What is the status of the action item: "${data.task}" assigned to ${data.assignee}?`;
+                break;
+            case 'document':
+                contextText = `Can you provide information about the document "${data.name}"?`;
+                break;
+            case 'template':
+                if (data.type === 'summary') {
+                    contextText = 'Generate a summary of all recent TWG activities';
+                } else if (data.type === 'stats') {
+                    contextText = 'Show me the statistics for this TWG workspace';
+                }
+                break;
+            default:
+                contextText = `Context: ${JSON.stringify(data)}`;
+        }
+
+        setInputMessage(contextText);
+        inputRef.current?.focus();
+    };
+
     const handleApproveEmail = async (requestId: string, modifications?: EmailDraft) => {
         try {
             const approvalData = {
@@ -415,11 +405,9 @@ export default function TwgAgent() {
 
             const result = await agentService.approveEmail(requestId, approvalData);
 
-            // Close modal
             setShowApprovalModal(false);
             setPendingEmailApproval(null);
 
-            // Add success message
             const successMessage: Message = {
                 id: Date.now().toString(),
                 role: 'agent',
@@ -445,11 +433,9 @@ export default function TwgAgent() {
         try {
             await agentService.declineEmail(requestId, reason);
 
-            // Close modal
             setShowApprovalModal(false);
             setPendingEmailApproval(null);
 
-            // Add decline message
             const declineMessage: Message = {
                 id: Date.now().toString(),
                 role: 'agent',
@@ -462,9 +448,20 @@ export default function TwgAgent() {
         }
     };
 
+    const handleSuggestionClick = (suggestion: string) => {
+        setInputMessage(suggestion);
+        // Using strict timeout to ensure state update before firing
+        setTimeout(() => {
+            handleSendMessage();
+        }, 50);
+    };
+
     return (
-        <>
-            <div className="h-[calc(100vh-140px)] flex overflow-hidden">
+        <div className="font-display bg-background-light dark:bg-background-dark text-[#0d121b] dark:text-white h-full flex flex-col overflow-hidden">
+
+
+            {/* Main Content */}
+            <main className="flex-1 flex overflow-hidden">
                 {/* Chat Area */}
                 <div className="flex-1 flex flex-col bg-[#f6f6f8] dark:bg-[#0d121b]">
                     {/* Agent Header */}
@@ -477,7 +474,9 @@ export default function TwgAgent() {
                                 <span className="absolute bottom-0 right-0 size-3 border-2 border-white dark:border-[#1a202c] bg-green-500 rounded-full"></span>
                             </div>
                             <div>
-                                <h3 className="font-bold text-[#0d121b] dark:text-white">{agentName}</h3>
+                                <h3 className="font-bold text-[#0d121b] dark:text-white">
+                                    {activeTwg?.name === 'Secretariat' ? 'Secretariat Assistant (v2)' : `${activeTwg?.name} Agent`}
+                                </h3>
                                 <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
                                     <span className="size-1.5 bg-green-500 rounded-full"></span>
                                     Online
@@ -485,6 +484,16 @@ export default function TwgAgent() {
                             </div>
                         </div>
                         <div className="flex items-center gap-2">
+                            <button
+                                onClick={() => setShowContextPanel(!showContextPanel)}
+                                className={`p-2 rounded-lg transition-colors ${showContextPanel
+                                    ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                                    : 'text-[#4c669a] hover:bg-gray-100 dark:hover:bg-[#2d3748]'
+                                    }`}
+                                title="Toggle workspace context"
+                            >
+                                <span className="material-symbols-outlined">view_sidebar</span>
+                            </button>
                             {isLoading && (
                                 <button
                                     onClick={() => {
@@ -493,6 +502,7 @@ export default function TwgAgent() {
                                             abortControllerRef.current = null;
                                         }
                                         setIsLoading(false);
+                                        setTypingMessage(null);
                                     }}
                                     className="p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
                                     title="Stop generation"
@@ -521,170 +531,90 @@ export default function TwgAgent() {
                     {/* Messages */}
                     <div className="flex-1 overflow-y-auto p-8 space-y-6 bg-gradient-to-b from-gray-50/50 to-transparent dark:from-[#0d121b]/30 dark:to-transparent">
                         {messages.length === 0 ? (
-                            <div className="h-full flex items-center justify-center px-4">
-                                <div className="max-w-4xl w-full">
-                                    <div className="text-center mb-12">
-                                        <div className="size-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-500/10 to-purple-500/10 flex items-center justify-center backdrop-blur-sm">
-                                            <span className="material-symbols-outlined text-blue-600 dark:text-blue-400" style={{ fontSize: '48px' }}>chat_bubble</span>
-                                        </div>
-                                        <h3 className="text-2xl font-semibold text-[#0d121b] dark:text-white mb-3">Welcome to ECOWAS Summit Assistant</h3>
-                                        <p className="text-base text-[#6b7280] dark:text-[#9ca3af] max-w-xl mx-auto leading-relaxed">
-                                            I'm here to help with TWG coordination, document drafting, and summit preparation. What can I assist you with today?
-                                        </p>
+                            <div className="h-full flex flex-col items-center justify-center px-4">
+                                <div className="max-w-3xl w-full text-center mb-8">
+                                    <div className="size-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center shadow-lg shadow-blue-900/20">
+                                        <span className="material-symbols-outlined text-white" style={{ fontSize: '32px' }}>smart_toy</span>
                                     </div>
+                                    <h3 className="text-3xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-purple-600 dark:from-blue-400 dark:to-purple-400 mb-3">
+                                        Hello, Dr. Sow
+                                    </h3>
+                                    <h4 className="text-xl text-slate-600 dark:text-slate-400 font-medium mb-8">
+                                        How can I assist with the TWG today?
+                                    </h4>
 
-                                    {/* Available Commands */}
-                                    <div className="mb-8">
-                                        <h4 className="text-sm font-semibold text-[#0d121b] dark:text-white mb-4 flex items-center gap-2">
-                                            <span className="material-symbols-outlined text-[20px] text-blue-600">terminal</span>
-                                            Quick Commands
-                                        </h4>
-                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-blue-300 dark:hover:border-blue-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
-                                                        <span className="material-symbols-outlined text-[20px] text-blue-600 dark:text-blue-400">email</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-1">/email</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af] leading-relaxed">Send emails or search inbox</div>
-                                                    </div>
-                                                </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-left">
+                                        <button
+                                            onClick={() => {
+                                                setInputMessage("Draft minutes for the last meeting");
+                                                inputRef.current?.focus();
+                                            }}
+                                            className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
+                                        >
+                                            <div className="size-10 rounded-full bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                                                <span className="material-symbols-outlined text-blue-600 dark:text-blue-400">description</span>
                                             </div>
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-purple-300 dark:hover:border-purple-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-lg bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
-                                                        <span className="material-symbols-outlined text-[20px] text-purple-600 dark:text-purple-400">search</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-1">/search</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af] leading-relaxed">Search knowledge base</div>
-                                                    </div>
-                                                </div>
+                                            <h5 className="font-bold text-slate-900 dark:text-white mb-1">Draft Minutes</h5>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Generate formal minutes from the latest meeting transcript.</p>
+                                        </button>
+
+                                        <button
+                                            onClick={() => {
+                                                setInputMessage("Summarize the last session's key outcomes");
+                                                inputRef.current?.focus();
+                                            }}
+                                            className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-purple-400 dark:hover:border-purple-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
+                                        >
+                                            <div className="size-10 rounded-full bg-purple-50 dark:bg-purple-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                                                <span className="material-symbols-outlined text-purple-600 dark:text-purple-400">summarize</span>
                                             </div>
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-green-300 dark:hover:border-green-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-lg bg-green-50 dark:bg-green-900/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
-                                                        <span className="material-symbols-outlined text-[20px] text-green-600 dark:text-green-400">event</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-1">/schedule</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af] leading-relaxed">Check schedules or create meetings</div>
-                                                    </div>
-                                                </div>
+                                            <h5 className="font-bold text-slate-900 dark:text-white mb-1">Summarize Session</h5>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Get a quick overview of decisions and action items.</p>
+                                        </button>
+
+                                        <button
+                                            onClick={() => {
+                                                setInputMessage("Check availability for the next board meeting");
+                                                inputRef.current?.focus();
+                                            }}
+                                            className="p-5 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-green-400 dark:hover:border-green-500 hover:shadow-md dark:hover:bg-[#2d3748] transition-all group"
+                                        >
+                                            <div className="size-10 rounded-full bg-green-50 dark:bg-green-900/30 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+                                                <span className="material-symbols-outlined text-green-600 dark:text-green-400">calendar_month</span>
                                             </div>
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-orange-300 dark:hover:border-orange-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-lg bg-orange-50 dark:bg-orange-900/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
-                                                        <span className="material-symbols-outlined text-[20px] text-orange-600 dark:text-orange-400">description</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-1">/draft</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af] leading-relaxed">Draft documents</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-indigo-300 dark:hover:border-indigo-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
-                                                        <span className="material-symbols-outlined text-[20px] text-indigo-600 dark:text-indigo-400">analytics</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-1">/analyze</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af] leading-relaxed">Analyze documents or data</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                            <div className="group bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-xl p-4 hover:border-pink-300 dark:hover:border-pink-600 hover:shadow-md transition-all cursor-pointer">
-                                                <div className="flex items-start gap-3">
-                                                    <div className="size-10 rounded-lg bg-pink-50 dark:bg-pink-900/20 flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
-                                                        <span className="material-symbols-outlined text-[20px] text-pink-600 dark:text-pink-400">campaign</span>
-                                                    </div>
-                                                    <div className="flex-1 min-w-0">
-                                                        <div className="text-sm font-semibold text-[#0d121b] dark:text-white font-mono mb-1">/broadcast</div>
-                                                        <div className="text-xs text-[#6b7280] dark:text-[#9ca3af] leading-relaxed">Broadcast to all TWGs</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
+                                            <h5 className="font-bold text-slate-900 dark:text-white mb-1">Check Availability</h5>
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Find optimal times for cross-functional meetings.</p>
+                                        </button>
                                     </div>
                                 </div>
                             </div>
                         ) : (
                             messages.map((message) => (
-                                <div key={message.id} className={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-                                    {message.role === 'agent' && (
-                                        <div className="size-9 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white shrink-0 shadow-md">
-                                            <span className="material-symbols-outlined text-[20px]">smart_toy</span>
-                                        </div>
-                                    )}
-                                    <div className={`max-w-[75%] ${message.role === 'user' ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white shadow-lg' : 'bg-white dark:bg-[#1a202c] shadow-md border border-[#e7ebf3] dark:border-[#2d3748]'} rounded-2xl p-4`}>
-                                        <div className={`text-sm leading-relaxed ${message.role === 'agent' ? 'text-[#0d121b] dark:text-white' : 'text-white'}`}>
-                                            {message.role === 'agent' ? formatMarkdownText(message.content) : message.content}
-                                        </div>
-                                        {message.citations && message.citations.length > 0 && (
-                                            <div className="mt-4 pt-3 border-t border-[#e7ebf3] dark:border-[#2d3748]">
-                                                <div className="text-xs font-semibold text-[#6b7280] dark:text-[#9ca3af] mb-2 flex items-center gap-1">
-                                                    <span className="material-symbols-outlined text-[14px]">library_books</span>
-                                                    Sources
-                                                </div>
-                                                {message.citations.map((citation, idx) => (
-                                                    <div key={idx} className="text-xs text-[#6b7280] dark:text-[#9ca3af] flex items-center gap-2 mb-1.5 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer">
-                                                        <span className="material-symbols-outlined text-[14px]">article</span>
-                                                        <span>{citation.source} (Page {citation.page})</span>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                        <div className={`text-[10px] mt-2.5 ${message.role === 'user' ? 'text-white/70' : 'text-[#9ca3af]'}`}>
-                                            {message.timestamp.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-                                        </div>
-                                    </div>
-                                    {message.role === 'user' && (
-                                        <div className="size-9 rounded-full bg-gradient-to-br from-gray-400 to-gray-500 flex items-center justify-center shrink-0 shadow-md">
-                                            <span className="material-symbols-outlined text-white text-[18px]">person</span>
-                                        </div>
-                                    )}
-                                </div>
+                                <EnhancedMessageBubble
+                                    key={message.id}
+                                    message={{ ...message, approvalRequest: message.approvalRequest }}
+                                    onReact={handleReact}
+                                    onApprove={message.approvalRequest ? () => handleApproveEmail(message.approvalRequest!.request_id) : undefined}
+                                    onDecline={message.approvalRequest ? () => handleDeclineEmail(message.approvalRequest!.request_id) : undefined}
+                                    onSuggestionClick={handleSuggestionClick}
+                                />
                             ))
                         )}
-                        {isLoading && (
-                            <div className="flex gap-3 justify-start animate-in fade-in duration-300">
-                                <div className="size-9 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white shrink-0 shadow-md">
-                                    <span className="material-symbols-outlined text-[20px]">smart_toy</span>
-                                </div>
-                                <div className="bg-white dark:bg-[#1a202c] border border-[#e7ebf3] dark:border-[#2d3748] rounded-2xl p-4 shadow-md">
-                                    <div className="flex gap-1.5 items-center">
-                                        <div className="size-2.5 bg-blue-600 dark:bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                                        <div className="size-2.5 bg-purple-600 dark:bg-purple-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                                        <div className="size-2.5 bg-blue-600 dark:bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                                    </div>
-                                </div>
-                            </div>
+                        {(isLoading || typingMessage) && (
+                            <TypingIndicator
+                                agentName="Secretariat Assistant"
+                                steps={thinkingSteps}
+                            />
                         )}
                         <div ref={messagesEndRef} />
                     </div>
 
                     {/* Input Area */}
                     <div className="bg-white dark:bg-[#1a202c] border-t border-[#e7ebf3] dark:border-[#2d3748] p-4">
-                        <div className="flex gap-2 mb-3 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
-                            <button className="shrink-0 text-xs font-medium px-4 py-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-700 dark:text-blue-300 transition-all flex items-center gap-1.5 border border-blue-200 dark:border-blue-800 hover:shadow-sm">
-                                <span className="material-symbols-outlined text-[16px]">description</span>
-                                Draft Minutes
-                            </button>
-                            <button className="shrink-0 text-xs font-medium px-4 py-2 rounded-lg bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/30 text-purple-700 dark:text-purple-300 transition-all flex items-center gap-1.5 border border-purple-200 dark:border-purple-800 hover:shadow-sm">
-                                <span className="material-symbols-outlined text-[16px]">summarize</span>
-                                Summarize Last Session
-                            </button>
-                            <button className="shrink-0 text-xs font-medium px-4 py-2 rounded-lg bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/30 text-green-700 dark:text-green-300 transition-all flex items-center gap-1.5 border border-green-200 dark:border-green-800 hover:shadow-sm">
-                                <span className="material-symbols-outlined text-[16px]">calendar_month</span>
-                                Check Availability
-                            </button>
-                        </div>
 
-                        <div className="relative bg-white dark:bg-[#0d121b] border border-[#e7ebf3] dark:border-[#2d3748] rounded-2xl shadow-lg focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500 dark:focus-within:border-blue-400 transition-all">
-                            {/* Command Autocomplete */}
-                            {autocompleteType === 'command' && (commandSuggestions || []).length > 0 && (
+
+                        <div className="relative bg-white dark:bg-[#0d121b] border-2 border-[#e7ebf3] dark:border-[#2d3748] rounded-2xl shadow-lg focus-within:ring-2 focus-within:ring-blue-500/30 focus-within:border-blue-500 dark:focus-within:border-blue-400 transition-all">
+                            {autocompleteType === 'command' && commandSuggestions.length > 0 && (
                                 <CommandAutocomplete
                                     suggestions={commandSuggestions}
                                     selectedIndex={selectedSuggestionIndex}
@@ -693,8 +623,7 @@ export default function TwgAgent() {
                                 />
                             )}
 
-                            {/* Mention Autocomplete */}
-                            {autocompleteType === 'mention' && (mentionSuggestions || []).length > 0 && (
+                            {autocompleteType === 'mention' && mentionSuggestions.length > 0 && (
                                 <MentionAutocomplete
                                     suggestions={mentionSuggestions}
                                     selectedIndex={selectedSuggestionIndex}
@@ -733,26 +662,34 @@ export default function TwgAgent() {
                     </div>
                 </div>
 
-                {/* Email Approval Modal */}
-                {showApprovalModal && pendingEmailApproval && (
-                    <EmailApprovalModal
-                        approvalRequest={pendingEmailApproval}
-                        onApprove={handleApproveEmail}
-                        onDecline={handleDeclineEmail}
-                        onClose={() => {
-                            setShowApprovalModal(false);
-                            setPendingEmailApproval(null);
-                        }}
+                {/* Workspace Context Panel */}
+                {showContextPanel && (
+                    <WorkspaceContextPanel
+                        twgName={activeTwg?.name || 'Loading...'}
+                        twgId={activeTwg?.id}
+                        onInsertContext={handleInsertContext}
                     />
                 )}
+            </main>
 
-                {/* Settings Modal */}
-                {showSettingsModal && (
-                    <SettingsModal
-                        onClose={() => setShowSettingsModal(false)}
-                    />
-                )}
-            </div>
-        </>
+            {/* Modals */}
+            {showApprovalModal && pendingEmailApproval && (
+                <EmailApprovalModal
+                    approvalRequest={pendingEmailApproval}
+                    onApprove={handleApproveEmail}
+                    onDecline={handleDeclineEmail}
+                    onClose={() => {
+                        setShowApprovalModal(false);
+                        setPendingEmailApproval(null);
+                    }}
+                />
+            )}
+
+            {showSettingsModal && (
+                <SettingsModal
+                    onClose={() => setShowSettingsModal(false)}
+                />
+            )}
+        </div>
     );
 }
