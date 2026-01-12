@@ -97,6 +97,14 @@ export default function CopilotChat({ twgId: propTwgId, twgName }: { twgId?: str
             twg_id: propTwgId || (user?.role !== 'admin' ? user?.twg_ids?.[0] : undefined) // Pass TWG Context
         };
 
+        // DEBUG: Log the request details
+        console.log('[COPILOT] Sending request:', {
+            twg_id: request.twg_id,
+            propTwgId,
+            userRole: user?.role,
+            userTwgIds: user?.twg_ids
+        });
+
         await sendStreamingMessage(
             request,
             (event: StreamEvent) => {

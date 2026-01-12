@@ -703,6 +703,7 @@ class LangGraphSupervisor:
 
         thread_id = thread_id or self.session_id
         logger.info(f"[SUPERVISOR:{thread_id}] Streaming: {message[:100]}...")
+        logger.info(f"[SUPERVISOR:{thread_id}] TWG ID parameter: {twg_id} (type: {type(twg_id).__name__})")
 
         initial_state: AgentState = {
             "messages": [HumanMessage(content=message)],

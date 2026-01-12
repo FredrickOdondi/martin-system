@@ -422,6 +422,10 @@ async def stream_chat(
         """Generate SSE events for streaming."""
         # Ensure conv_id is always a string for JSON serialization
         conv_id = str(chat_in.conversation_id) if chat_in.conversation_id else str(uuid.uuid4())
+        
+        # DEBUG: Log the request details
+        logger.info(f"[STREAM] Request - Message: {chat_in.message[:50]}...")
+        logger.info(f"[STREAM] Request - TWG ID: {chat_in.twg_id} (type: {type(chat_in.twg_id).__name__ if chat_in.twg_id else 'None'})")
 
         try:
             # Send initial event

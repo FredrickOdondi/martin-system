@@ -26,6 +26,10 @@ async def route_query_node(state: AgentState) -> AgentState:
     query = state["query"]
     query_lower = query.lower()
     
+    # --- DEBUG LOGGING ---
+    logger.info(f"[ROUTE] State keys: {list(state.keys())}")
+    logger.info(f"[ROUTE] Context value: {state.get('context')}")
+    
     # --- STRICT RBAC ENFORCEMENT ---
     context = state.get("context")
     if context and context.get("twg_id"):
