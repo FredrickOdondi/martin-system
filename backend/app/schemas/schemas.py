@@ -115,6 +115,9 @@ class TWGRef(SchemaBase):
     id: uuid.UUID
     name: str
 
+class UserSimple(UserBase):
+    id: uuid.UUID
+    
 class UserRead(UserBase):
     id: uuid.UUID
     created_at: datetime
@@ -147,8 +150,8 @@ class TWGStats(SchemaBase):
 
 class TWGRead(TWGBase):
     id: uuid.UUID
-    political_lead: Optional["UserRead"] = None
-    technical_lead: Optional["UserRead"] = None
+    political_lead: Optional["UserSimple"] = None
+    technical_lead: Optional["UserSimple"] = None
     stats: Optional[TWGStats] = None
     # Removed action_items and documents to prevent MissingGreenlet errors
 
@@ -170,7 +173,7 @@ class DocumentRead(DocumentBase):
     id: uuid.UUID
     file_path: str
     uploaded_by_id: uuid.UUID
-    uploaded_by: Optional["UserRead"] = None
+    uploaded_by: Optional["UserSimple"] = None
     twg: Optional["TWGBase"] = None
     ingested_at: Optional[datetime] = None
     created_at: datetime
@@ -233,7 +236,7 @@ class MeetingParticipantRead(SchemaBase):
     attended: bool = False
     
     # Nested user details if available
-    user: Optional["UserRead"] = None
+    user: Optional["UserSimple"] = None
 
 class MeetingParticipantCreate(SchemaBase):
     user_id: Optional[uuid.UUID] = None
