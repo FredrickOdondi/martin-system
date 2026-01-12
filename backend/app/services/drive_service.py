@@ -45,7 +45,8 @@ class DriveService:
             else:
                 logger.warning("No Google Credentials found. DriveService will not function.")
         except Exception as e:
-            logger.error(f"Failed to initialize DriveService: {e}")
+            logger.warning(f"Failed to initialize DriveService (Google Drive integration will be disabled): {e}")
+            self.service = None
 
     def list_recent_transcripts(self, hours: int = 24) -> List[Dict[str, Any]]:
         """
