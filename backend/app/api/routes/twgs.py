@@ -55,6 +55,7 @@ async def list_twgs(
     twgs = result.scalars().all()
     
     # Enrich with stats
+    for twg in twgs:
         try:
             # Meetings Held (Completed)
             meetings_res = await db.execute(
