@@ -43,7 +43,16 @@ async def test_twgs(db: AsyncSession = Depends(get_db)):
         ]
         result = await db.execute(select(TWG).options(*query_options).limit(5))
         twgs = result.scalars().all()
-        return {"status": "success", "count": len(twgs), "data": [{"name": t.name, "pillar": str(t.pillar)} for t in twgs]}
+        # Try accessing the nested relationship that might be causing lazy load error
+        debug_data = []
+        for t in twgs:
+            p_lead_twgs = "N/A"
+            if t.political_lead:
+                # This access should crash if User.twgs is not loaded
+                p_lead_twgs = str(len(t.political_lead.twgs))
+            debug_data.append({"name": t.name, "pillar": str(t.pillar), "leads_twgs_loaded": p_lead_twgs})
+            
+        return {"status": "success", "count": len(twgs), "data": debug_data}
     except Exception as e:
         import traceback
         return {"status": "error", "error": str(e), "traceback": traceback.format_exc()}
