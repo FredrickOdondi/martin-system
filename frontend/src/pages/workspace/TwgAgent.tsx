@@ -3,7 +3,7 @@ import { useSelector } from 'react-redux';
 import { useParams } from 'react-router-dom';
 import { RootState } from '../../store';
 import { agentService, Citation } from '../../services/agentService';
-import { twgs as twgApi } from '../../services/api';
+import { twgs as twgApi, default as api } from '../../services/api';
 import { CommandAutocomplete } from '../../components/agent/CommandAutocomplete';
 import { MentionAutocomplete } from '../../components/agent/MentionAutocomplete';
 import EmailApprovalModal, { EmailApprovalRequest, EmailDraft } from '../../components/agent/EmailApprovalModal';
@@ -12,7 +12,6 @@ import EnhancedMessageBubble from '../../components/agent/EnhancedMessageBubble'
 import TypingIndicator from '../../components/agent/TypingIndicator';
 import WorkspaceContextPanel from '../../components/workspace/WorkspaceContextPanel';
 import { CommandAutocompleteResult } from '../../types/agent';
-import axios from 'axios';
 
 interface Message {
     id: string;
@@ -85,6 +84,15 @@ export default function TwgAgent() {
                 } else if (user.twgs && user.twgs.length > 0) {
                     // Default to first assigned TWG
                     setActiveTwg({ id: user.twgs[0].id, name: user.twgs[0].name });
+                } else if (user.twg_ids && user.twg_ids.length > 0) {
+                    // Fallback: If full TWG objects missing, fetch by ID
+                    try {
+                        console.log('[TwgAgent] Fetching default TWG details for ID:', user.twg_ids[0]);
+                        const res = await twgApi.get(user.twg_ids[0]);
+                        setActiveTwg({ id: res.data.id, name: res.data.name });
+                    } catch (err) {
+                        console.error("Failed to fetch default TWG details", err);
+                    }
                 }
             }
         };
@@ -190,6 +198,20 @@ export default function TwgAgent() {
                     setMessages(prev => [...prev, agentMessage]);
                     setConversationId(msg.conversation_id);
                 },
+                onInterrupt: (payload: any) => {
+                    console.log('[STREAM] Received interrupt:', payload);
+                    const interruptMsg: Message = {
+                        id: `interrupt-${Date.now()}`,
+                        role: 'agent',
+                        content: payload.message || 'Action required.',
+                        timestamp: new Date(),
+                        agentName: activeTwg?.name === 'Secretariat' ? 'Secretariat Assistant' : `${activeTwg?.name} Agent`,
+                        approvalRequest: payload
+                    };
+                    setMessages(prev => [...prev, interruptMsg]);
+                    setIsLoading(false);
+                    setTypingMessage(null);
+                },
                 onDone: () => {
                     setIsLoading(false);
                     setTypingMessage(null);
@@ -231,7 +253,7 @@ export default function TwgAgent() {
         if (commandMatch) {
             const query = '/' + commandMatch[1];
             try {
-                const response = await axios.get(`/api/agents/commands/autocomplete`, {
+                const response = await api.get(`/agents/commands/autocomplete`, {
                     params: { query }
                 });
                 setCommandSuggestions(response.data.suggestions);
@@ -243,12 +265,12 @@ export default function TwgAgent() {
             }
         }
 
-        // Check for mention trigger (@)
+        // Check for mention trigger (@) - RESTRICTED TO ADMINS
         const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
-        if (mentionMatch) {
+        if (mentionMatch && user?.role === 'admin') {
             const query = '@' + mentionMatch[1];
             try {
-                const response = await axios.get(`/api/agents/mentions/autocomplete`, {
+                const response = await api.get(`/agents/mentions/autocomplete`, {
                     params: { query }
                 });
                 setMentionSuggestions(response.data.suggestions);
@@ -622,7 +644,7 @@ export default function TwgAgent() {
                                     key={message.id}
                                     message={{ ...message, approvalRequest: message.approvalRequest }}
                                     onReact={handleReact}
-                                    onApprove={message.approvalRequest ? () => handleApproveEmail(message.approvalRequest!.request_id) : undefined}
+                                    onApprove={message.approvalRequest ? (id, mods) => handleApproveEmail(id, mods) : undefined}
                                     onDecline={message.approvalRequest ? () => handleDeclineEmail(message.approvalRequest!.request_id) : undefined}
                                     onSuggestionClick={handleSuggestionClick}
                                 />
