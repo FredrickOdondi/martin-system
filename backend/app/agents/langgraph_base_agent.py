@@ -625,6 +625,49 @@ class LangGraphBaseAgent:
         """
         if not self.compiled_graph:
             raise ValueError(f"[{self.agent_id}] Graph not compiled")
+            
+        # ------------------------------------------------------------------
+        # CONTEXT INJECTION (Supervisor Feedback Loop)
+        # ------------------------------------------------------------------
+        # Check for pending notifications for this TWG's Lead
+        try:
+            from app.core.database import get_db_session_context
+            from app.models.models import TWG, Notification, NotificationType
+            from sqlalchemy import select, and_
+            
+            twg_id_str = get_twg_id_by_agent_id(self.agent_id)
+            if twg_id_str:
+                async with get_db_session_context() as db:
+                     # Get Lead ID
+                     stmt = select(TWG).where(TWG.id == twg_id_str)
+                     res = await db.execute(stmt)
+                     twg = res.scalar_one_or_none()
+                     
+                     if twg and twg.technical_lead_id:
+                         # Fetch unread ALERT/TASK notifications
+                         n_stmt = select(Notification).where(
+                             and_(
+                                 Notification.user_id == twg.technical_lead_id,
+                                 Notification.is_read == False,
+                                 Notification.type.in_([NotificationType.ALERT, NotificationType.TASK])
+                             )
+                         ).order_by(Notification.created_at.desc())
+                         
+                         n_res = await db.execute(n_stmt)
+                         notifs = n_res.scalars().all()
+                         
+                         if notifs:
+                             logger.info(f"[{self.agent_id}] Injecting {len(notifs)} pending notifications into context")
+                             context_msg = "\n\n[SYSTEM ALERT: Supervisor Notifications Pending]"
+                             for n in notifs:
+                                 context_msg += f"\n- {n.title}: {n.content}"
+                             context_msg += "\nPlease address these items if relevant to the current task."
+                             
+                             message += context_msg
+                             
+        except Exception as e:
+            logger.warning(f"[{self.agent_id}] Failed to inject context: {e}")
+        # ------------------------------------------------------------------
 
         thread_id = thread_id or self.session_id
         logger.info(f"[{self.agent_id}:{thread_id}] Received: {message[:100]}...")

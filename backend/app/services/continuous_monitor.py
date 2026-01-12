@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 
 from app.core.database import get_db_session_context
-from app.models.models import Meeting, Conflict, TWG, ConflictStatus
+from app.models.models import Meeting, Conflict, TWG, ConflictStatus, Notification, NotificationType
 from app.services.conflict_detector import ConflictDetector
 from app.services.reconciliation_service import get_reconciliation_service
 
@@ -109,13 +109,15 @@ class ContinuousMonitor:
                             reason = ""
                             severity = "low"
                             
-                            # Same Venue?
-                            if m1.location and m2.location and m1.location == m2.location:
+                            # Physical Venue Conflict? (Exclude virtual venues - unlimited capacity)
+                            if (m1.location and m2.location and 
+                                m1.location == m2.location and 
+                                m1.location.lower() not in ['virtual', 'online', 'remote']):
                                 reason = f"Venue conflict at {m1.location}"
                                 severity = "high"
                             
-                            # Same TWG? (Shouldn't happen usually but possible)
-                            elif m1.twg_id == m2.twg_id:
+                            # Same TWG Double Booking? (Check independently - applies to both physical and virtual)
+                            if m1.twg_id == m2.twg_id:
                                 reason = "Double booking for TWG"
                                 severity = "medium"
                                 
@@ -144,6 +146,8 @@ class ContinuousMonitor:
                 traceback.print_exc()
                 logger.error(f"Error in scheduling scan: {e}")
 
+
+
     async def _handle_detected_conflicts(
         self, 
         db_session: AsyncSession, 
@@ -153,7 +157,8 @@ class ContinuousMonitor:
         """
         Autonomous conflict handling.
         1. Save to DB
-        2. Trigger auto-negotiation
+        2. Notify involved TWG Leads (Feedback Loop)
+        3. Trigger auto-negotiation
         """
         try:
             # Create Conflict Record
@@ -161,13 +166,45 @@ class ContinuousMonitor:
                 conflict_type=conflict_data["conflict_type"],
                 severity=conflict_data["severity"],
                 description=conflict_data["description"],
-                agents_involved=[str(a) for a in agents_involved], # Ensure strings for JSON serialization
+                agents_involved=[str(a) for a in agents_involved],
+                conflicting_positions=conflict_data.get("conflicting_positions", {}),
                 status=ConflictStatus.DETECTED,
                 detected_at=datetime.utcnow()
             )
             db_session.add(conflict)
             await db_session.flush() # Get ID
             
+            # NOTIFICATION LOGIC (Supervisor -> TWG Feedback)
+            logger.info(f"Notifying agents for Conflict {conflict.id}")
+            for twg_id_str in agents_involved:
+                try:
+                    # Resolve TWG UUID
+                    twg_uuid = twg_id_str
+                    
+                    # Fetch TWG to get Technical Lead
+                    stmt = select(TWG).where(TWG.id == twg_uuid)
+                    result = await db_session.execute(stmt)
+                    twg = result.scalar_one_or_none()
+                    
+                    if twg and twg.technical_lead_id:
+                        # Create Notification
+                        notification = Notification(
+                            user_id=twg.technical_lead_id,
+                            type=NotificationType.ALERT,
+                            title="Supervisor Insight: Conflict Detected",
+                            content=f"The Supervisor has detected a {conflict.conflict_type} that affects your TWG: {conflict.description}",
+                            link=f"/conflicts/{conflict.id}",
+                            is_read=False,
+                            created_at=datetime.utcnow()
+                        )
+                        db_session.add(notification)
+                        logger.info(f"Notification queued for TWG {twg.name} (Lead: {twg.technical_lead_id})")
+                    else:
+                        logger.warning(f"Could not notify TWG {twg_id_str}: Lead not found")
+                        
+                except Exception as ex:
+                    logger.error(f"Failed to notify agent {twg_id_str}: {ex}")
+
             logger.info(f"Triggering auto-negotiation for Conflict {conflict.id}")
             
             # Trigger Auto-Negotiation

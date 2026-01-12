@@ -27,7 +27,6 @@ AGENT_TO_PILLAR_MAP = {
     "minerals": TWGPillar.critical_minerals_industrialization,
     "digital": TWGPillar.digital_economy_transformation,
     "protocol": TWGPillar.protocol_logistics,
-    "resource": TWGPillar.resource_mobilization,
     "resource_mobilization": TWGPillar.resource_mobilization
 }
 

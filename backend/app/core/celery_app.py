@@ -9,8 +9,20 @@ else:
 celery_app = Celery("martin_worker", broker=broker_url)
 
 celery_app.conf.task_routes = {
-    "backend.app.services.tasks.send_meeting_reminders": "periodic",
-    "backend.app.services.tasks.generate_project_pdf": "formatting",
+    "app.services.tasks.send_meeting_reminders": "periodic",
+    "app.services.tasks.sync_rsvps": "periodic",
+    "app.services.tasks.generate_project_pdf": "formatting",
+}
+
+celery_app.conf.beat_schedule = {
+    "send-meeting-reminders-every-30-mins": {
+        "task": "app.services.tasks.send_meeting_reminders",
+        "schedule": 1800.0, # 30 minutes
+    },
+    "sync-rsvps-every-15-mins": {
+        "task": "app.services.tasks.sync_rsvps",
+        "schedule": 900.0, # 15 minutes
+    },
 }
 
 celery_app.conf.update(

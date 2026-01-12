@@ -125,6 +125,20 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to add supervisor refresh job: {e}")
 
+    # Add RSVP Sync Job (for Development/Standalone mode without Celery)
+    from app.services.tasks import sync_rsvps
+    try:
+        scheduler_service.scheduler.add_job(
+            sync_rsvps,
+            'interval',
+            minutes=1, # Run frequently for debugging
+            id='sync_rsvps_job',
+            replace_existing=True
+        )
+        logger.info("RSVP sync job added to scheduler (every 1 min).")
+    except Exception as e:
+        logger.error(f"Failed to add RSVP sync job: {e}")
+
 
     logger.info("--- END STARTUP DIAGNOSTICS ---")
 

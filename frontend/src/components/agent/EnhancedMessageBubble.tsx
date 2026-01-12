@@ -12,6 +12,7 @@ interface Message {
     agentName?: string;
     agentIcon?: string;
     approvalRequest?: EmailApprovalRequest;
+    suggestions?: string[];
 }
 
 interface MessageReaction {
@@ -27,6 +28,7 @@ interface EnhancedMessageBubbleProps {
     onReply?: (messageId: string) => void;
     onApprove?: (requestId: string) => void;
     onDecline?: (requestId: string) => void;
+    onSuggestionClick?: (suggestion: string) => void;
 }
 
 // Function to parse and format markdown-like text with better styling
@@ -75,12 +77,23 @@ const formatMarkdownText = (text: string): JSX.Element => {
         formattedLine = formattedLine.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">$1</a>');
 
         // Handle headers
-        if (/^#{1,3}\s/.test(line)) {
-            const level = line.match(/^#{1,3}/)?.[0].length || 1;
-            const content = line.replace(/^#{1,3}\s/, '');
-            const classes = level === 1 ? 'text-lg font-bold mb-2' : level === 2 ? 'text-base font-bold mb-1.5' : 'text-sm font-semibold mb-1';
+        if (/^\s*#{1,6}\s/.test(line)) {
+            const match = line.match(/^\s*(#{1,6})/);
+            const level = match ? match[1].length : 1;
+            const content = line.replace(/^\s*#{1,6}\s/, '');
+
+            let classes = '';
+            switch (level) {
+                case 1: classes = 'text-2xl font-bold mb-4 mt-6 border-b pb-2 border-slate-200 dark:border-slate-700'; break;
+                case 2: classes = 'text-xl font-bold mb-3 mt-5 text-slate-900 dark:text-slate-100'; break;
+                case 3: classes = 'text-lg font-bold mb-2 mt-4 text-slate-800 dark:text-slate-200'; break;
+                case 4: classes = 'text-base font-bold mb-2 mt-3'; break;
+                case 5: classes = 'text-sm font-bold mb-1 mt-2 uppercase tracking-wide text-slate-500 dark:text-slate-400'; break;
+                default: classes = 'text-sm font-bold mb-1';
+            }
+
             elements.push(
-                <div key={index} className={classes} dangerouslySetInnerHTML={{ __html: content }}></div>
+                <div key={`${index}-header`} className={classes} dangerouslySetInnerHTML={{ __html: content }}></div>
             );
             return;
         }
@@ -125,7 +138,7 @@ const formatMarkdownText = (text: string): JSX.Element => {
     return <>{elements}</>;
 };
 
-export default function EnhancedMessageBubble({ message, onReact, onCopy, onReply, onApprove, onDecline }: EnhancedMessageBubbleProps) {
+export default function EnhancedMessageBubble({ message, onReact, onCopy, onReply, onApprove, onDecline, onSuggestionClick }: EnhancedMessageBubbleProps) {
     // Debug log to trace approval rendering
     if (message.approvalRequest) {
         console.log('[BUBBLE] Rendering bubble with approval request:', message.id, message.approvalRequest);
@@ -295,6 +308,27 @@ export default function EnhancedMessageBubble({ message, onReact, onCopy, onRepl
                             )}
                         </div>
                     </div>
+
+                    {/* Suggestions */}
+                    {message.suggestions && message.suggestions.length > 0 && (
+                        <div className="flex flex-col gap-2 mt-3 animate-in fade-in slide-in-from-top-1 duration-500 delay-300">
+                            <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 pl-1">
+                                <span className="material-symbols-outlined text-[14px]">lightbulb</span>
+                                <span className="font-medium">Suggested follow-ups</span>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                                {message.suggestions.map((suggestion, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => onSuggestionClick?.(suggestion)}
+                                        className="text-left text-xs bg-white dark:bg-[#1a202c] border border-blue-200 dark:border-blue-900/50 text-slate-700 dark:text-slate-300 px-3 py-2 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-300 dark:hover:border-blue-700 hover:text-blue-700 dark:hover:text-blue-200 transition-all shadow-sm hover:shadow-md active:scale-95"
+                                    >
+                                        {suggestion}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Action buttons */}
                     {showActions && (

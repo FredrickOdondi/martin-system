@@ -46,7 +46,13 @@ class SupervisorAPIAdapter:
             raise gi
         except Exception as e:
             logger.error(f"[ADAPTER] Error in chat_with_tools: {e}")
+            logger.error(f"[ADAPTER] Error in chat_with_tools: {e}")
             return f"I apologize, but I encountered an error: {str(e)}"
+
+    async def stream_chat_events(self, message: str, twg_id: str = None):
+        """Stream events from the underlying graph."""
+        async for event in self.supervisor.stream_chat(message, twg_id=twg_id):
+            yield event
 
     async def resume_chat(self, thread_id: str, resume_value: dict) -> str:
         """
