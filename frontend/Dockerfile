@@ -41,10 +41,7 @@ COPY --from=build /app/dist /usr/share/nginx/html
 # Railway sets PORT environment variable
 ENV PORT=80
 
-# Create startup script that handles the PORT variable
-RUN echo '#!/bin/sh' > /docker-entrypoint.d/30-replace-port.sh && \
-    echo 'sed -i "s/PORT_PLACEHOLDER/$PORT/g" /etc/nginx/conf.d/default.conf' >> /docker-entrypoint.d/30-replace-port.sh && \
-    chmod +x /docker-entrypoint.d/30-replace-port.sh
+
 
 # Expose the port
 EXPOSE ${PORT}
