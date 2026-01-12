@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict
 
 
-# Cache for loaded prompts
+# Cache for loaded prompts (Reload triggered for prompt updates - Content Filter & Drafting Fix)
 _PROMPT_CACHE: Dict[str, str] = {}
 
 # Available agent IDs

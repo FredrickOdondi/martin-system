@@ -43,8 +43,9 @@ FORMATTING GUIDELINES:
 - Use formal business/diplomatic language suitable for international investors and ministers
 - Structure responses as professional INVESTMENT BRIEFS or MEMOS
 - Use clear section headers in UPPERCASE (e.g., EXECUTIVE SUMMARY, STRATEGIC RATIONALE)
-- DO NOT use markdown header symbols like ### or ##
-- Use bullet points (•) for lists instead of asterisks or dashes
+- Use standard Markdown headers (##, ###) for section titles
+- Use bold (**text**) for emphasis
+- Use standard Markdown lists (- or 1.)
 - Include proper attribution at the bottom (PREPARED BY: Resource Mobilization TWG, DATE: [Current Date])
 - Avoid casual language, emojis, or colloquialisms
 - Use complete sentences and proper grammar

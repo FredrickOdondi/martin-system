@@ -199,13 +199,15 @@ async def send_email(
             "subject": subject,
             "message": f"Email draft created (Request ID: {approval_request.request_id}). Please review and approve before sending.",
             "draft": {
+                "draft_id": approval_request.draft.draft_id,  # REQUIRED for modifications validation
                 "to": to_list,
                 "cc": cc_list,
                 "bcc": bcc_list,
                 "subject": subject,
                 "body": message,
                 "html_body": html_body,
-                "attachments": attachments
+                "attachments": attachments,
+                "created_at": approval_request.draft.created_at.isoformat() if approval_request.draft.created_at else None
             },
             "preview": {
                 "to": ", ".join(to_list),
@@ -365,5 +367,17 @@ EMAIL_TOOLS = [
             "pillar_name": "Optional TWG pillar name for branding (e.g., 'Energy', 'Agriculture')"
         },
         "coroutine": send_email
+    },
+    {
+        "name": "create_email_draft",
+        "description": "Create an email draft for human approval (Alias for send_email). Use this when you want to explicitly state you are drafting.",
+        "parameters": {
+            "to": "Recipient email address(es) - string or list",
+            "subject": "Email subject line",
+            "message": "Plain text email body",
+            "html_body": "Optional HTML formatted email body",
+            "pillar_name": "Optional TWG pillar name for branding"
+        },
+        "coroutine": create_email_draft
     }
 ]

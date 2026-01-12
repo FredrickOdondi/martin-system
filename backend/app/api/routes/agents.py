@@ -6,12 +6,13 @@ import uuid
 import asyncio
 import json
 import logging
+from langgraph.errors import GraphInterrupt
 
 logger = logging.getLogger(__name__)
 
 from app.api.deps import get_current_active_user
 from app.core.database import get_db
-from app.models.models import User
+from app.models.models import User, UserRole
 from app.schemas.schemas import AgentChatRequest, AgentChatResponse, AgentTaskRequest, AgentStatus
 from app.schemas.chat_messages import (
     EnhancedChatRequest,
@@ -72,7 +73,7 @@ def has_twg_access(user: User, twg_id: uuid.UUID) -> bool:
 
 # Command and Mention Handlers (Phase 2)
 
-async def handle_command(supervisor: SupervisorWithTools, parsed: dict, original_message: str) -> str:
+async def handle_command(supervisor: SupervisorWithTools, parsed: dict, original_message: str, twg_id: str = None, thread_id: str = None) -> str:
     """Handle slash command execution."""
     command = parsed["command"]
     params = parsed["parameters"]
@@ -81,7 +82,7 @@ async def handle_command(supervisor: SupervisorWithTools, parsed: dict, original
     # Map commands to supervisor methods
     if command == "/search":
         query = params.get("query", clean_query)
-        return await supervisor.chat_with_tools(f"Search the knowledge base for: {query}")
+        return await supervisor.chat_with_tools(f"Search the knowledge base for: {query}", twg_id=twg_id, thread_id=thread_id)
 
     elif command == "/email":
         # Check if it's a send or search operation
@@ -93,38 +94,40 @@ async def handle_command(supervisor: SupervisorWithTools, parsed: dict, original
             cc = params.get("cc")
             return await supervisor.chat_with_tools(
                 f"Send an email to {to} with subject '{subject}' and message: {body}" +
-                (f" and CC {cc}" if cc else "")
+                (f" and CC {cc}" if cc else ""),
+                twg_id=twg_id,
+                thread_id=thread_id
             )
         else:
             # Search emails
             search_term = params.get("search", clean_query)
-            return await supervisor.chat_with_tools(f"Search my emails for: {search_term}")
+            return await supervisor.chat_with_tools(f"Search my emails for: {search_term}", twg_id=twg_id, thread_id=thread_id)
 
     elif command == "/schedule":
-        return await supervisor.chat_with_tools(f"Help me with scheduling: {clean_query}")
+        return await supervisor.chat_with_tools(f"Help me with scheduling: {clean_query}", twg_id=twg_id, thread_id=thread_id)
 
     elif command == "/draft":
         doc_type = params.get("type", "document")
         topic = params.get("topic", clean_query)
-        return await supervisor.chat_with_tools(f"Draft a {doc_type} about: {topic}")
+        return await supervisor.chat_with_tools(f"Draft a {doc_type} about: {topic}", twg_id=twg_id, thread_id=thread_id)
 
     elif command == "/analyze":
         target = params.get("target", clean_query)
-        return await supervisor.chat_with_tools(f"Analyze: {target}")
+        return await supervisor.chat_with_tools(f"Analyze: {target}", twg_id=twg_id, thread_id=thread_id)
 
     elif command == "/broadcast":
         message = params.get("message", clean_query)
-        return await supervisor.chat_with_tools(f"Broadcast this message to all TWGs: {message}")
+        return await supervisor.chat_with_tools(f"Broadcast this message to all TWGs: {message}", twg_id=twg_id, thread_id=thread_id)
 
     elif command == "/summarize":
         target = params.get("target", clean_query)
-        return await supervisor.chat_with_tools(f"Summarize: {target}")
+        return await supervisor.chat_with_tools(f"Summarize: {target}", twg_id=twg_id, thread_id=thread_id)
 
     else:
         return f"Command {command} recognized but handler not implemented yet. Query: {clean_query}"
 
 
-async def handle_mention(supervisor: SupervisorWithTools, parsed: dict) -> str:
+async def handle_mention(supervisor: SupervisorWithTools, parsed: dict, twg_id: str = None, thread_id: str = None) -> str:
     """Handle @mention routing to specific agents."""
     agent_ids = parsed["agent_mentions"]
     clean_query = parsed["clean_query"]
@@ -140,11 +143,15 @@ async def handle_mention(supervisor: SupervisorWithTools, parsed: dict) -> str:
     if len(agent_ids) == 1:
         agent_id = agent_ids[0]
         return await supervisor.chat_with_tools(
-            f"[ROUTING TO {agent_id.upper()} TWG AGENT] {clean_query}"
+            f"[ROUTING TO {agent_id.upper()} TWG AGENT] {clean_query}",
+            twg_id=twg_id,
+            thread_id=thread_id
         )
     else:
         return await supervisor.chat_with_tools(
-            f"[ROUTING TO MULTIPLE AGENTS: {', '.join(agent_ids)}] {clean_query}"
+            f"[ROUTING TO MULTIPLE AGENTS: {', '.join(agent_ids)}] {clean_query}",
+            twg_id=twg_id,
+            thread_id=thread_id
         )
 
 
@@ -170,7 +177,7 @@ async def chat_with_martin(
             # Admins always get Supervisor access with full permissions
             supervisor = get_supervisor()
             twg_context = str(chat_in.twg_id) if chat_in.twg_id else None
-            response_text = await supervisor.chat_with_tools(chat_in.message, twg_id=twg_context)
+            response_text = await supervisor.chat_with_tools(chat_in.message, twg_id=twg_context, thread_id=str(conv_id))
             agent_id = "supervisor_v1"
             
         elif current_user.role in [UserRole.TWG_FACILITATOR, UserRole.TWG_MEMBER]:
@@ -193,7 +200,8 @@ async def chat_with_martin(
             supervisor = get_supervisor()
             response_text = await supervisor.chat_with_tools(
                 chat_in.message,
-                twg_id=str(chat_in.twg_id)
+                twg_id=str(chat_in.twg_id),
+                thread_id=str(conv_id)
             )
             agent_id = f"twg_{chat_in.twg_id}_agent"
             
@@ -339,22 +347,27 @@ async def enhanced_chat(
         # Parse message for commands and mentions (Phase 2)
         parsed = command_parser.parse_message(chat_in.message)
 
+        # SECURITY: Strict RBAC for Mentions
+        if current_user.role != UserRole.ADMIN and parsed["type"] in [MessageParseType.MENTION, MessageParseType.MIXED]:
+             if parsed["type"] == MessageParseType.MENTION:
+                 parsed["type"] = MessageParseType.NATURAL
+
         # Handle based on parse type
         if parsed["type"] == MessageParseType.COMMAND:
             # Command execution
-            response_text = await handle_command(supervisor, parsed, chat_in.message)
+            response_text = await handle_command(supervisor, parsed, chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=str(conv_id))
             message_type = ChatMessageType.COMMAND_RESULT
         elif parsed["type"] == MessageParseType.MENTION:
             # Route to specific agent(s)
-            response_text = await handle_mention(supervisor, parsed)
+            response_text = await handle_mention(supervisor, parsed, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=str(conv_id))
             message_type = ChatMessageType.AGENT_TEXT
         elif parsed["type"] == MessageParseType.MIXED:
             # Both command and mention - prioritize command
-            response_text = await handle_command(supervisor, parsed, chat_in.message)
+            response_text = await handle_command(supervisor, parsed, chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=str(conv_id))
             message_type = ChatMessageType.COMMAND_RESULT
         else:
             # Natural language - regular chat
-            response_text = await supervisor.chat_with_tools(chat_in.message)
+            response_text = await supervisor.chat_with_tools(chat_in.message, thread_id=str(conv_id))
             message_type = ChatMessageType.AGENT_TEXT
 
         # Create the agent response message
@@ -431,17 +444,21 @@ async def stream_chat(
             # Send initial event
             yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
 
-            # Create a new supervisor instance with isolated session for this conversation
-            # This prevents conversation history accumulation causing context length errors
-            supervisor = SupervisorWithTools()
-            supervisor.supervisor.session_id = conv_id
+            # Use singleton supervisor to ensure memory persistence (MemorySaver)
+            supervisor = get_supervisor()
 
-            # Clear any existing history for this session to start fresh
-            if hasattr(supervisor.supervisor, 'supervisor_agent'):
-                supervisor.supervisor.supervisor_agent.clear_history()
 
             # Parse message for commands and mentions
             parsed = command_parser.parse_message(chat_in.message)
+
+            # SECURITY: Strict RBAC for Mentions
+            # Non-admins cannot use @mentions to switch agents. They are locked to their assigned TWG agent.
+            if current_user.role != UserRole.ADMIN and parsed["type"] in [MessageParseType.MENTION, MessageParseType.MIXED]:
+                logger.warning(f"Restricted user {current_user.id} attempted agent routing. Forcing NATURAL mode.")
+                if parsed["type"] == MessageParseType.MENTION:
+                    parsed["type"] = MessageParseType.NATURAL
+                # For MIXED, we leave it as is if it prioritizes commands, but validat command handling
+                # Logic below for MIXED uses handle_command, which is safe as it doesn't route based on mentions.
 
             # Send parsing event
             yield f"data: {json.dumps({'type': 'parsing', 'result': {'message_type': str(parsed['type']), 'command': parsed.get('command'), 'mentions': parsed.get('agent_mentions', [])}})}\n\n"
@@ -468,7 +485,7 @@ async def stream_chat(
                     yield f"data: {json.dumps({'type': 'tool_start', 'tool': 'analyzer', 'status': 'Analyzing data...'})}\n\n"
 
                 # Execute command
-                response_text = await handle_command(supervisor, parsed, chat_in.message)
+                response_text = await handle_command(supervisor, parsed, chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=conv_id)
                 message_type = ChatMessageType.COMMAND_RESULT
 
             elif parsed["type"] == MessageParseType.MENTION:
@@ -479,12 +496,12 @@ async def stream_chat(
                 yield f"data: {json.dumps({'type': 'agent_routing', 'agents': agent_ids, 'status': routing_status})}\n\n"
 
                 # Execute with mentioned agent
-                response_text = await handle_mention(supervisor, parsed)
+                response_text = await handle_mention(supervisor, parsed, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=conv_id)
                 message_type = ChatMessageType.AGENT_TEXT
 
             elif parsed["type"] == MessageParseType.MIXED:
                 yield f"data: {json.dumps({'type': 'mixed_execution', 'status': 'Processing command with agent mention...'})}\n\n"
-                response_text = await handle_command(supervisor, parsed, chat_in.message)
+                response_text = await handle_command(supervisor, parsed, chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=conv_id)
                 message_type = ChatMessageType.COMMAND_RESULT
 
             else:
@@ -497,7 +514,7 @@ async def stream_chat(
                 response_text = ""
                 
                 # Stream events from LangGraph
-                async for event in supervisor.stream_chat_events(chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None):
+                async for event in supervisor.stream_chat_events(chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=conv_id):
                     if event["type"] == "node_update":
                         node = event["node"]
                         status_msg = f"Processing step: {node}"
@@ -539,6 +556,20 @@ async def stream_chat(
             yield f"data: {json.dumps({'type': 'response', 'message': agent_message.model_dump(mode='json')})}\n\n"
 
             # Send done event
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except GraphInterrupt as gi:
+            logger.info(f"Graph interrupt caught in stream: {gi}")
+            # Extract payload (assuming first arg is the payload dict)
+            interrupt_payload = gi.args[0] if gi.args else {}
+            
+            # Use jsonable_encoder to handle UUIDs and other types
+            from fastapi.encoders import jsonable_encoder
+            safe_payload = jsonable_encoder(interrupt_payload)
+            
+            # Send interrupt event
+            yield f"data: {json.dumps({'type': 'interrupt', 'payload': safe_payload})}\n\n"
+            # End stream gracefully so client doesn't retry immediately or show error
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as e:

@@ -26,7 +26,7 @@ interface EnhancedMessageBubbleProps {
     onReact?: (messageId: string, emoji: string) => void;
     onCopy?: (content: string) => void;
     onReply?: (messageId: string) => void;
-    onApprove?: (requestId: string) => void;
+    onApprove?: (requestId: string, modifications?: any) => Promise<void> | void;
     onDecline?: (requestId: string) => void;
     onSuggestionClick?: (suggestion: string) => void;
 }
@@ -45,8 +45,8 @@ const formatMarkdownText = (text: string): JSX.Element => {
             if (inCodeBlock) {
                 // End code block
                 elements.push(
-                    <pre key={`code-${index}`} className="bg-slate-100 dark:bg-slate-800 rounded-lg p-3 my-2 overflow-x-auto">
-                        <code className="text-xs font-mono text-slate-800 dark:text-slate-200">
+                    <pre key={`code-${index}`} className="bg-slate-900 text-slate-50 rounded-lg p-4 my-3 overflow-x-auto shadow-sm border border-slate-800">
+                        <code className="text-xs font-mono">
                             {codeBlockContent.join('\n')}
                         </code>
                     </pre>
@@ -65,16 +65,16 @@ const formatMarkdownText = (text: string): JSX.Element => {
         }
 
         // Format inline code
-        let formattedLine = line.replace(/`([^`]+)`/g, '<code class="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs font-mono">$1</code>');
+        let formattedLine = line.replace(/`([^`]+)`/g, '<code class="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-xs font-mono text-blue-600 dark:text-blue-400 border border-slate-200 dark:border-slate-700">$1</code>');
 
-        // Format bold text
-        formattedLine = formattedLine.replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold">$1</strong>');
+        // Format bold text - EXTRA BOLD for emphasis
+        formattedLine = formattedLine.replace(/\*\*(.*?)\*\*/g, '<strong class="font-extrabold text-slate-900 dark:text-white tracking-wide">$1</strong>');
 
         // Format italic text
-        formattedLine = formattedLine.replace(/\*(.*?)\*/g, '<em class="italic">$1</em>');
+        formattedLine = formattedLine.replace(/\*(.*?)\*/g, '<em class="italic text-slate-700 dark:text-slate-300">$1</em>');
 
         // Format links
-        formattedLine = formattedLine.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-600 dark:text-blue-400 hover:underline" target="_blank" rel="noopener noreferrer">$1</a>');
+        formattedLine = formattedLine.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" class="text-blue-600 dark:text-blue-400 font-medium hover:underline underline-offset-2" target="_blank" rel="noopener noreferrer">$1</a>');
 
         // Handle headers
         if (/^\s*#{1,6}\s/.test(line)) {
@@ -83,11 +83,19 @@ const formatMarkdownText = (text: string): JSX.Element => {
             const content = line.replace(/^\s*#{1,6}\s/, '');
 
             let classes = '';
+            // Gradient text for H1 for "Premium" feel
             switch (level) {
-                case 1: classes = 'text-2xl font-bold mb-4 mt-6 border-b pb-2 border-slate-200 dark:border-slate-700'; break;
-                case 2: classes = 'text-xl font-bold mb-3 mt-5 text-slate-900 dark:text-slate-100'; break;
-                case 3: classes = 'text-lg font-bold mb-2 mt-4 text-slate-800 dark:text-slate-200'; break;
-                case 4: classes = 'text-base font-bold mb-2 mt-3'; break;
+                case 1:
+                    // Using inline-block so bg-clip works correctly
+                    elements.push(
+                        <div key={`${index}-header`} className="mb-4 mt-6 border-b pb-2 border-slate-200 dark:border-slate-700">
+                            <span className="text-2xl font-extrabold bg-gradient-to-r from-blue-700 to-purple-600 bg-clip-text text-transparent inline-block" dangerouslySetInnerHTML={{ __html: content }}></span>
+                        </div>
+                    );
+                    return;
+                case 2: classes = 'text-xl font-bold mb-3 mt-5 text-slate-800 dark:text-slate-100 tracking-tight'; break;
+                case 3: classes = 'text-lg font-bold mb-2 mt-4 text-slate-700 dark:text-slate-200'; break;
+                case 4: classes = 'text-base font-bold mb-2 mt-3 text-slate-600 dark:text-slate-300'; break;
                 case 5: classes = 'text-sm font-bold mb-1 mt-2 uppercase tracking-wide text-slate-500 dark:text-slate-400'; break;
                 default: classes = 'text-sm font-bold mb-1';
             }
@@ -102,9 +110,11 @@ const formatMarkdownText = (text: string): JSX.Element => {
         if (/^\d+\.\s/.test(line)) {
             const content = line.replace(/^\d+\.\s/, '');
             elements.push(
-                <div key={index} className="mb-2 pl-4 flex items-start gap-2">
-                    <span className="text-blue-600 dark:text-blue-400 font-semibold text-sm">•</span>
-                    <span dangerouslySetInnerHTML={{ __html: content }}></span>
+                <div key={index} className="mb-3 pl-4 flex items-start gap-3">
+                    <span className="flex-shrink-0 flex items-center justify-center size-5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-bold text-[10px] border border-blue-100 dark:border-blue-800 mt-0.5">
+                        {line.match(/^\d+/)?.[0]}
+                    </span>
+                    <span className="text-slate-700 dark:text-slate-300 leading-relaxed" dangerouslySetInnerHTML={{ __html: content }}></span>
                 </div>
             );
             return;
@@ -115,9 +125,9 @@ const formatMarkdownText = (text: string): JSX.Element => {
             const indent = line.search(/[-*]/);
             const content = line.replace(/^\s*[-*]\s/, '');
             elements.push(
-                <div key={index} className="mb-1.5 flex items-start gap-2" style={{ paddingLeft: `${indent * 8}px` }}>
-                    <span className="text-slate-400 text-sm mt-0.5">•</span>
-                    <span dangerouslySetInnerHTML={{ __html: content }}></span>
+                <div key={index} className="mb-2 flex items-start gap-2.5" style={{ paddingLeft: `${indent * 12}px` }}>
+                    <span className="text-blue-500 dark:text-blue-400 text-lg leading-none mt-[-2px]">•</span>
+                    <span className="text-slate-700 dark:text-slate-300 leading-relaxed" dangerouslySetInnerHTML={{ __html: content }}></span>
                 </div>
             );
             return;
@@ -125,13 +135,13 @@ const formatMarkdownText = (text: string): JSX.Element => {
 
         // Empty lines
         if (line.trim() === '') {
-            elements.push(<div key={index} className="h-2"></div>);
+            elements.push(<div key={index} className="h-3"></div>);
             return;
         }
 
         // Regular text
         elements.push(
-            <div key={index} className="mb-1" dangerouslySetInnerHTML={{ __html: formattedLine }}></div>
+            <div key={index} className="mb-1.5 text-slate-600 dark:text-slate-300 leading-7" dangerouslySetInnerHTML={{ __html: formattedLine }}></div>
         );
     });
 
@@ -147,6 +157,10 @@ export default function EnhancedMessageBubble({ message, onReact, onCopy, onRepl
     const [showActions, setShowActions] = useState(false);
     const [showReactions, setShowReactions] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editSubject, setEditSubject] = useState(message.approvalRequest?.draft.subject || '');
+    const [editBody, setEditBody] = useState(message.approvalRequest?.draft.body || '');
+    const [actionStatus, setActionStatus] = useState<'idle' | 'approving' | 'approved' | 'declining' | 'declined'>('idle');
 
     const commonReactions = ['👍', '❤️', '🎉', '🤔', '👀', '✅'];
 
@@ -241,38 +255,160 @@ export default function EnhancedMessageBubble({ message, onReact, onCopy, onRepl
                                         <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-[18px]">mail</span>
                                         <span className="text-xs font-bold text-blue-800 dark:text-blue-200">Email Draft</span>
                                     </div>
-                                    <div className="text-sm font-medium text-slate-900 dark:text-white mb-1">
-                                        {message.approvalRequest.draft.subject}
-                                    </div>
-                                    <div className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
-                                        {message.approvalRequest.draft.body}
-                                    </div>
+                                    {isEditing ? (
+                                        <div className="flex flex-col gap-3">
+                                            <input
+                                                type="text"
+                                                value={editSubject}
+                                                onChange={(e) => setEditSubject(e.target.value)}
+                                                className="w-full px-2 py-1 text-sm font-medium border border-blue-200 dark:border-blue-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                                                placeholder="Subject"
+                                            />
+                                            <textarea
+                                                value={editBody}
+                                                onChange={(e) => setEditBody(e.target.value)}
+                                                className="w-full h-32 px-2 py-1 text-xs text-slate-600 dark:text-slate-400 border border-blue-200 dark:border-blue-700 rounded bg-white dark:bg-slate-800 focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                                                placeholder="Email Body"
+                                            />
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="text-sm font-medium text-slate-900 dark:text-white mb-1">
+                                                {editSubject}
+                                            </div>
+                                            <div className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
+                                                {editBody}
+                                            </div>
+                                        </>
+                                    )}
                                 </div>
                                 <div className="flex gap-2">
-                                    {onApprove && (
-                                        <button
-                                            onClick={async () => {
-                                                const btn = document.activeElement as HTMLButtonElement;
-                                                btn.disabled = true;
-                                                btn.innerHTML = '<span class="size-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block mr-2"></span>Sending...';
-                                                await onApprove(message.approvalRequest!.request_id);
-                                                // No need to reset as message will update/disappear
-                                            }}
-                                            className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-xs font-semibold py-2 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
-                                        >
-                                            <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                                            Approve & Send
-                                        </button>
+                                    {actionStatus === 'approved' && (
+                                        <div className="flex-1 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-xs font-semibold py-2 rounded-lg flex items-center justify-center gap-2 border border-green-100 dark:border-green-900/50">
+                                            <span className="material-symbols-outlined text-[18px]">check_circle</span>
+                                            Approved & Sent
+                                        </div>
                                     )}
-                                    {onDecline && (
-                                        <button
-                                            onClick={() => onDecline(message.approvalRequest!.request_id)}
-                                            className="px-4 bg-white dark:bg-[#1a202c] border border-gray-200 dark:border-gray-700 text-red-600 dark:text-red-400 text-xs font-semibold py-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors flex items-center gap-1.5"
-                                        >
-                                            <span className="material-symbols-outlined text-[16px]">cancel</span>
-                                            Decline
-                                        </button>
+
+                                    {actionStatus === 'declined' && (
+                                        <div className="flex-1 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-xs font-semibold py-2 rounded-lg flex items-center justify-center gap-2 border border-red-100 dark:border-red-900/50">
+                                            <span className="material-symbols-outlined text-[18px]">cancel</span>
+                                            Declined
+                                        </div>
                                     )}
+
+                                    {actionStatus === 'idle' || actionStatus === 'approving' || actionStatus === 'declining' ? (
+                                        <>
+                                            {onApprove && !isEditing && (
+                                                <>
+                                                    <button
+                                                        onClick={async () => {
+                                                            setActionStatus('approving');
+                                                            try {
+                                                                await onApprove(message.approvalRequest!.request_id);
+                                                                setActionStatus('approved');
+                                                            } catch (error) {
+                                                                console.error("Error approving:", error);
+                                                                setActionStatus('idle');
+                                                            }
+                                                        }}
+                                                        disabled={actionStatus !== 'idle'}
+                                                        className="flex-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-xs font-semibold py-2 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
+                                                    >
+                                                        {actionStatus === 'approving' ? (
+                                                            <>
+                                                                <span className="size-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block"></span>
+                                                                Sending...
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <span className="material-symbols-outlined text-[16px]">check_circle</span>
+                                                                Approve & Send
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setIsEditing(true)}
+                                                        disabled={actionStatus !== 'idle'}
+                                                        className="px-3 bg-white dark:bg-[#1a202c] border border-blue-200 dark:border-blue-900/50 text-blue-600 dark:text-blue-400 text-xs font-semibold py-2 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                                                    >
+                                                        <span className="material-symbols-outlined text-[16px]">edit</span>
+                                                        Edit
+                                                    </button>
+                                                </>
+                                            )}
+                                            {onApprove && isEditing && (
+                                                <>
+                                                    <button
+                                                        onClick={async () => {
+                                                            setActionStatus('approving');
+                                                            try {
+                                                                await onApprove(message.approvalRequest!.request_id, {
+                                                                    ...message.approvalRequest!.draft,
+                                                                    subject: editSubject,
+                                                                    body: editBody
+                                                                });
+                                                                setActionStatus('approved');
+                                                                setIsEditing(false);
+                                                            } catch (error) {
+                                                                console.error("Error saving:", error);
+                                                                setActionStatus('idle');
+                                                            }
+                                                        }}
+                                                        disabled={actionStatus !== 'idle'}
+                                                        className="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 text-white text-xs font-semibold py-2 rounded-lg shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-75 disabled:cursor-not-allowed"
+                                                    >
+                                                        {actionStatus === 'approving' ? (
+                                                            <>
+                                                                <span className="size-3 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block"></span>
+                                                                Saving...
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <span className="material-symbols-outlined text-[16px]">save</span>
+                                                                Save & Send
+                                                            </>
+                                                        )}
+                                                    </button>
+                                                    <button
+                                                        onClick={() => {
+                                                            setIsEditing(false);
+                                                            setEditSubject(message.approvalRequest!.draft.subject);
+                                                            setEditBody(message.approvalRequest!.draft.body);
+                                                        }}
+                                                        disabled={actionStatus !== 'idle'}
+                                                        className="px-3 bg-white dark:bg-[#1a202c] border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-400 text-xs font-semibold py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors disabled:opacity-50"
+                                                    >
+                                                        Cancel
+                                                    </button>
+                                                </>
+                                            )}
+                                            {onDecline && !isEditing && (
+                                                <button
+                                                    onClick={async () => {
+                                                        setActionStatus('declining');
+                                                        try {
+                                                            await onDecline(message.approvalRequest!.request_id);
+                                                            setActionStatus('declined');
+                                                        } catch (error) {
+                                                            setActionStatus('idle');
+                                                        }
+                                                    }}
+                                                    disabled={actionStatus !== 'idle'}
+                                                    className="px-4 bg-white dark:bg-[#1a202c] border border-gray-200 dark:border-gray-700 text-red-600 dark:text-red-400 text-xs font-semibold py-2 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/10 transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                                                >
+                                                    {actionStatus === 'declining' ? (
+                                                        <span className="size-3 border-2 border-red-600/30 border-t-red-600 rounded-full animate-spin inline-block"></span>
+                                                    ) : (
+                                                        <>
+                                                            <span className="material-symbols-outlined text-[16px]">cancel</span>
+                                                            Decline
+                                                        </>
+                                                    )}
+                                                </button>
+                                            )}
+                                        </>
+                                    ) : null}
                                 </div>
                             </div>
                         )}

@@ -63,6 +63,7 @@ export const agentService = {
         callbacks: {
             onThinking?: (status: string) => void;
             onResponse?: (response: any) => void;
+            onInterrupt?: (payload: any) => void;
             onError?: (error: any) => void;
             onDone?: () => void;
         }
@@ -105,6 +106,8 @@ export const agentService = {
                                 callbacks.onThinking?.(data.status);
                             } else if (data.type === 'response') {
                                 callbacks.onResponse?.(data.message);
+                            } else if (data.type === 'interrupt') {
+                                callbacks.onInterrupt?.(data.payload);
                             } else if (data.type === 'done') {
                                 callbacks.onDone?.();
                             } else if (data.type === 'error') {

@@ -742,7 +742,24 @@ class LangGraphSupervisor:
                              "content": state_update["final_response"]
                         }
 
+            # CHECK FOR INTERRUPTS (After stream ends, check if it was paused)
+            snapshot = await self.compiled_graph.aget_state(config)
+            if snapshot.tasks:
+                for task in snapshot.tasks:
+                    if hasattr(task, 'interrupts') and task.interrupts:
+                        for inter in task.interrupts:
+                            # inter.value contains the actual payload
+                            interrupt_value = inter.value if hasattr(inter, 'value') else inter
+                            logger.info(f"[SUPERVISOR] Detected interrupt in state after stream: {interrupt_value}")
+                            # Import here to avoid scope issues
+                            from langgraph.errors import GraphInterrupt as GI
+                            raise GI(interrupt_value)
+
         except Exception as e:
+            # Check for GraphInterrupt by name to avoid import/scope issues or re-raise if caught
+            if type(e).__name__ == "GraphInterrupt":
+                raise e
+                
             yield {"type": "error", "error": str(e)}
 
     async def resume_chat(self, thread_id: str, resume_value: Dict) -> str:
