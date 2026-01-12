@@ -138,28 +138,34 @@ async def list_documents(
         selectinload(Document.twg)
     ).offset(skip).limit(limit)
     
-    if twg_id:
-        query = query.where(Document.twg_id == twg_id)
-        if not has_twg_access(current_user, twg_id):
-            raise HTTPException(status_code=403, detail="Access denied")
-    else:
-        # Filter visible documents based on user role and TWG membership
-        if current_user.role == UserRole.ADMIN:
-            # Admins see all documents
-            pass
+    try:
+        if twg_id:
+            query = query.where(Document.twg_id == twg_id)
+            if not has_twg_access(current_user, twg_id):
+                raise HTTPException(status_code=403, detail="Access denied")
         else:
-            # STRICT RBAC: Regular users ONLY see:
-            # 1. Documents from their assigned TWGs
-            # 2. Global Secretariat documents (twg_id is NULL)
-            # This enforces the "locked room" principle - no cross-TWG visibility
-            user_twg_ids = [twg.id for twg in current_user.twgs]
-            query = query.where(
-                (Document.twg_id.in_(user_twg_ids)) | 
-                (Document.twg_id == None)
-            )
-        
-    result = await db.execute(query)
-    return result.scalars().all()
+            # Filter visible documents based on user role and TWG membership
+            if current_user.role == UserRole.ADMIN:
+                # Admins see all documents
+                pass
+            else:
+                # STRICT RBAC: Regular users ONLY see:
+                # 1. Documents from their assigned TWGs
+                # 2. Global Secretariat documents (twg_id is NULL)
+                # This enforces the "locked room" principle - no cross-TWG visibility
+                user_twg_ids = [twg.id for twg in current_user.twgs]
+                query = query.where(
+                    (Document.twg_id.in_(user_twg_ids)) | 
+                    (Document.twg_id == None)
+                )
+            
+        result = await db.execute(query)
+        return result.scalars().all()
+    except Exception as e:
+        import traceback
+        print(f"CRITICAL ERROR in list_documents: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail="Internal Server Error listing documents")
 
 @router.get("/{doc_id}/download")
 async def download_document(
