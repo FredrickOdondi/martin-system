@@ -1806,10 +1806,29 @@ async def submit_minutes_for_approval(
         
     print(f"DEBUG: Committing status update to: {db_meeting.minutes.status}")
     try:
-        await db.commit()
-        print("DEBUG: Commit successful")
+        # Flush first to catch any SQL errors before commit
+        print("DEBUG: Flushing changes...")
+        await db.flush()
+        print("DEBUG: Flush successful, now committing...")
+        
+        # Add timeout to prevent indefinite hanging
+        import asyncio
+        try:
+            await asyncio.wait_for(db.commit(), timeout=5.0)
+            print("DEBUG: Commit successful")
+        except asyncio.TimeoutError:
+            print("DEBUG: Commit timed out after 5 seconds!")
+            await db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail="Database commit timed out. There may be a lock or connection issue."
+            )
+            
         await db.refresh(db_meeting.minutes)
         print("DEBUG: Refresh successful")
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
         import traceback
         import sys
