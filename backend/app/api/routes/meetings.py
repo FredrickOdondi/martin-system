@@ -1750,39 +1750,44 @@ async def submit_minutes_for_approval(
     
     # Clear rejection info on resubmission
     if db_meeting.minutes.rejection_reason:
-        # Optionally archive it or just clear it. Here we clear to show it's a fresh attempt.
         db_meeting.minutes.rejected_at = None
+        db_meeting.minutes.rejection_reason = None
         
     await db.commit()
     await db.refresh(db_meeting.minutes)
 
     # --- Notification Logic ---
-    from app.models.models import Notification, NotificationType
-    
-    # Notify ALL Admins and Secretariat Leads
-    result = await db.execute(select(User).where(User.role.in_([UserRole.ADMIN, UserRole.SECRETARIAT_LEAD])))
-    reviewers = result.scalars().all()
-    
-    # If no high-level reviewers, fallback to TWG Technical Lead
-    if not reviewers:
-        if db_meeting.twg and db_meeting.twg.technical_lead_id:
-             reviewer = await db.execute(select(User).where(User.id == db_meeting.twg.technical_lead_id))
-             user = reviewer.scalar_one_or_none()
-             if user:
-                 reviewers.append(user)
+    try:
+        from app.models.models import Notification, NotificationType
+        
+        # Notify ALL Admins and Secretariat Leads
+        result = await db.execute(select(User).where(User.role.in_([UserRole.ADMIN, UserRole.SECRETARIAT_LEAD])))
+        reviewers = result.scalars().all()
+        
+        # If no high-level reviewers, fallback to TWG Technical Lead
+        if not reviewers:
+            if db_meeting.twg and db_meeting.twg.technical_lead_id:
+                reviewer = await db.execute(select(User).where(User.id == db_meeting.twg.technical_lead_id))
+                user = reviewer.scalar_one_or_none()
+                if user:
+                    reviewers.append(user)
 
-    # Create notifications
-    if reviewers:
-        for reviewer in reviewers:
-            notification = Notification(
-                user_id=reviewer.id,
-                type=NotificationType.TASK,
-                title="Minutes Approval Required",
-                content=f"Minutes for '{db_meeting.title}' submitted by {current_user.full_name}. Please review and approve.",
-                link=f"/meetings/{meeting_id}"
-            )
-            db.add(notification)
-        await db.commit()
+        # Create notifications
+        if reviewers:
+            for reviewer in reviewers:
+                notification = Notification(
+                    user_id=reviewer.id,
+                    type=NotificationType.TASK,
+                    title="Minutes Approval Required",
+                    content=f"Minutes for '{db_meeting.title}' submitted by {current_user.full_name}. Please review and approve.",
+                    link=f"/meetings/{meeting_id}"
+                )
+                db.add(notification)
+            await db.commit()
+    except Exception as e:
+        logger.error(f"Failed to send approval notifications: {e}")
+        # Non-blocking, proceed
+
     
     return {
         "message": "Minutes submitted for approval",
