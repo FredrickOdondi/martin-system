@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 
 from app.core.database import get_db_session_context
-from app.models.models import Meeting, Conflict, TWG, ConflictStatus, Notification, NotificationType
+from app.models.models import Meeting, Conflict, TWG, ConflictStatus, Notification, NotificationType, Document
 from app.services.conflict_detector import ConflictDetector
 from app.services.reconciliation_service import get_reconciliation_service
 
