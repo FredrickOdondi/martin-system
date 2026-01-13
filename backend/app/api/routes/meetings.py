@@ -1259,6 +1259,7 @@ async def add_participants(
     new_participants = []
     
     # 1. Identify emails that need lookup (no user_id provided)
+    print(f"DEBUG: add_participants payload: {participants}")
     emails_to_lookup = [
         p.email.lower() for p in participants 
         if not p.user_id and p.email
@@ -1773,14 +1774,22 @@ async def submit_minutes_for_approval(
     if not db_meeting.minutes:
         raise HTTPException(status_code=400, detail="No minutes to submit")
     
-    if db_meeting.minutes.status not in [MinutesStatus.DRAFT, MinutesStatus.REVIEW]:
+    # Get current status safely (could be string or Enum due to schema relaxation)
+    current_status = db_meeting.minutes.status
+    if hasattr(current_status, 'value'):
+        current_status_val = current_status.value
+    else:
+        current_status_val = str(current_status)
+
+    if current_status_val not in [MinutesStatus.DRAFT.value, MinutesStatus.REVIEW.value, "draft", "review"]:
         raise HTTPException(
             status_code=400, 
-            detail=f"Minutes must be in DRAFT or REVIEW status to submit. Current: {db_meeting.minutes.status.value}"
+            detail=f"Minutes must be in DRAFT or REVIEW status to submit. Current: {current_status_val}"
         )
     
     # Update status
-    db_meeting.minutes.status = MinutesStatus.PENDING_APPROVAL
+    # Use the Enum value "pending_approval" string to be safe against mixed types
+    db_meeting.minutes.status = MinutesStatus.PENDING_APPROVAL.value
     
     # Clear rejection info on resubmission
     if db_meeting.minutes.rejection_reason:
