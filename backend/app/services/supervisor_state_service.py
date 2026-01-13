@@ -17,7 +17,7 @@ from sqlalchemy.orm import selectinload
 from collections import defaultdict
 
 from app.models.models import (
-    TWG, Meeting, Document, Project, Conflict, User,
+    TWG, Meeting, Document, Project, Conflict, User, Dependency,
     MeetingStatus, ProjectStatus, ConflictStatus
 )
 from app.schemas.supervisor import (
@@ -227,7 +227,37 @@ class SupervisorGlobalState:
             projects=projects,
             twg_summaries=twg_summaries,
             active_conflicts=conflict_snapshots,
-            dependencies=[],  # TODO: Implement dependency tracking
+        # Fetch cross-TWG dependencies
+        dependencies_result = await db.execute(
+            select(Dependency).options(
+                selectinload(Dependency.source_twg),
+                selectinload(Dependency.target_twg)
+            ).order_by(Dependency.created_at.desc())
+        )
+        all_dependencies = dependencies_result.scalars().all()
+        
+        # Build dependency snapshots
+        dependency_snapshots = []
+        for dep in all_dependencies:
+            dependency_snapshots.append(DependencySnapshot(
+                id=dep.id,
+                source_twg_id=dep.source_twg_id,
+                source_twg_name=dep.source_twg.name if dep.source_twg else "Unknown",
+                target_twg_id=dep.target_twg_id,
+                target_twg_name=dep.target_twg.name if dep.target_twg else "Unknown",
+                description=dep.description,
+                status=dep.status.value if hasattr(dep.status, 'value') else str(dep.status),
+                created_at=dep.created_at
+            ))
+
+        # Build state snapshot
+        self._state = SupervisorStateSnapshot(
+            calendar=calendar,
+            documents=documents,
+            projects=projects,
+            twg_summaries=twg_summaries,
+            active_conflicts=conflict_snapshots,
+            dependencies=dependency_snapshots,
             last_refresh=datetime.now(UTC),
             total_twgs=len(twgs),
             total_meetings=len(all_meetings),

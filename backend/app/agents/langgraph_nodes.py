@@ -51,6 +51,41 @@ async def route_query_node(state: AgentState) -> AgentState:
             state["delegation_type"] = "rbac_failure" 
             return state
     
+    
+    # --- 0. EXPLICIT ROUTING PREFIX (from @mentions) ---
+    import re
+    
+    # Check for single agent routing: [ROUTING TO ENERGY TWG AGENT] query
+    single_route_match = re.search(r"\[ROUTING TO ([A-Z_]+) TWG AGENT\] (.*)", query)
+    if single_route_match:
+        agent_name = single_route_match.group(1).lower()
+        clean_q = single_route_match.group(2)
+        
+        # specific fix for 'resource_mobilization' which might appear as 'RESOURCE_MOBILIZATION'
+        if agent_name == "resource_mobilization": 
+             pass # correct
+        
+        logger.info(f"[ROUTE] Explicit Single Routing detected: {agent_name}")
+        state["relevant_agents"] = [agent_name]
+        state["delegation_type"] = "single"
+        state["requires_synthesis"] = False
+        state["query"] = clean_q # Update query to remove routing instruction
+        return state
+
+    # Check for multiple agent routing: [ROUTING TO MULTIPLE AGENTS: energy, minerals] query
+    multi_route_match = re.search(r"\[ROUTING TO MULTIPLE AGENTS: (.*?)\] (.*)", query)
+    if multi_route_match:
+        agents_str = multi_route_match.group(1)
+        clean_q = multi_route_match.group(2)
+        agent_ids = [a.strip().lower() for a in agents_str.split(",")]
+        
+        logger.info(f"[ROUTE] Explicit Multi Routing detected: {agent_ids}")
+        state["relevant_agents"] = agent_ids
+        state["delegation_type"] = "multiple"
+        state["requires_synthesis"] = True
+        state["query"] = clean_q
+        return state
+
     relevant = []
     
     # --- 1. LLM INTENT PARSING ---
