@@ -912,8 +912,14 @@ async def approve_and_send_invite(
         import traceback
         error_trace = traceback.format_exc()
         print(f"CRITICAL ERROR: Failed to send invitations for meeting {meeting_id}:\n{error_trace}")
-        # We raise 500 so frontend sees it, but the log above will help debug
-        raise HTTPException(status_code=500, detail=f"Failed to send invitations: {str(e)}")
+        
+        # Return partial success/warning instead of 500 crash
+        # This allows the UI to show the specific error message
+        return {
+            "status": "warning",
+            "message": f"Invites failed to send: {str(e)}",
+            "emails_sent": 0
+        }
 
     
     # Log Audit
