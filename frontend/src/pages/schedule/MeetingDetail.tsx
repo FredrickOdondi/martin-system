@@ -175,7 +175,13 @@ export default function MeetingDetail() {
             setIsEditingAgenda(true)  // Switch to edit mode to allow modifications
         } catch (error: any) {
             console.error("Failed to generate agenda", error)
-            alert(error?.response?.data?.detail || "Failed to generate agenda")
+            let errorMessage = "Failed to generate agenda."
+            if (error.response) {
+                errorMessage = error.response.data?.detail || `Server error: ${error.response.status}`
+            } else if (error.request) {
+                errorMessage = "Network error: Could not connect to the server."
+            }
+            alert(errorMessage)
         } finally {
             setIsGeneratingAgenda(false)
         }
@@ -192,7 +198,13 @@ export default function MeetingDetail() {
             setMinutesStatus('draft')  // Generated content starts as draft
         } catch (error: any) {
             console.error("Failed to generate minutes", error)
-            alert(error?.response?.data?.detail || "Failed to generate minutes")
+            let errorMessage = "Failed to generate minutes."
+            if (error.response) {
+                errorMessage = error.response.data?.detail || `Server error: ${error.response.status}`
+            } else if (error.request) {
+                errorMessage = "Network error: Could not connect to the server."
+            }
+            alert(errorMessage)
         } finally {
             setIsGeneratingMinutes(false)
         }
@@ -217,7 +229,16 @@ export default function MeetingDetail() {
             alert("Minutes submitted! Secretariat Lead has been notified for approval.")
         } catch (error: any) {
             console.error("Failed to submit for approval", error)
-            alert(error?.response?.data?.detail || "Failed to submit for approval")
+            let errorMessage = "Failed to submit for approval."
+
+            if (error.response) {
+                errorMessage = error.response.data?.detail || `Server error: ${error.response.status}`
+            } else if (error.request) {
+                errorMessage = "Network error: Could not connect to the server. Please check your internet connection."
+            } else {
+                errorMessage = error.message || "An unexpected error occurred."
+            }
+            alert(errorMessage)
         } finally {
             setIsSubmittingForApproval(false)
         }
