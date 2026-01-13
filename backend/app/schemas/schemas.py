@@ -157,6 +157,7 @@ class TWGRead(TWGBase):
 
 # --- Document Schemas ---
 
+class DocumentBase(SchemaBase):
     twg_id: Optional[uuid.UUID] = None
     file_name: str
     file_type: str
