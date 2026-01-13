@@ -242,8 +242,15 @@ async def update_meeting(
     for key, value in update_data.items():
         setattr(db_meeting, key, value)
         
-    await db.commit()
-    await db.refresh(db_meeting)
+    try:
+        await db.commit()
+        await db.refresh(db_meeting)
+    except Exception as e:
+        import traceback
+        print(f"DEBUG: Update Meeting Failed: {e}")
+        print(traceback.format_exc())
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error during update: {str(e)}")
     return db_meeting
 
 @router.post("/{meeting_id}/minutes", response_model=MinutesRead)
@@ -1788,8 +1795,8 @@ async def submit_minutes_for_approval(
         )
     
     # Update status
-    # Use the Enum value "pending_approval" string to be safe against mixed types
-    db_meeting.minutes.status = MinutesStatus.PENDING_APPROVAL.value
+    # Use the Enum object explicitly for SQLAlchemy
+    db_meeting.minutes.status = MinutesStatus.PENDING_APPROVAL
     
     # Clear rejection info on resubmission
     if db_meeting.minutes.rejection_reason:
