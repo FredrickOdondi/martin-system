@@ -1804,38 +1804,73 @@ async def submit_minutes_for_approval(
         db_meeting.minutes.rejected_at = None
         db_meeting.minutes.rejection_reason = None
         
-    print(f"DEBUG: Committing status update to: {db_meeting.minutes.status}")
+    print(f"DEBUG: Committing status update to: {db_meeting.minutes.status}", flush=True)
+    
+    # Debug: Check object state
     try:
-        # 1. Set a short lock timeout for this transaction to fail fast if locked
-        await db.execute(text("SET lock_timeout = '2s'"))
+        from sqlalchemy import inspect
+        insp = inspect(db_meeting.minutes)
+        print(f"DEBUG: Minutes object state: transient={insp.transient}, pending={insp.pending}, persistent={insp.persistent}, detached={insp.detached}", flush=True)
+    except Exception as e:
+        print(f"DEBUG: Failed to inspect object: {e}", flush=True)
+
+    try:
+        # 1. Set a short lock timeout
+        try:
+            await db.execute(text("SET lock_timeout = '2s'"))
+        except Exception as e:
+            print(f"DEBUG: Failed to set lock_timeout: {type(e).__name__}: {e}", flush=True)
+            # Potentially unrecoverable if DB is unhappy, but let's try to proceed or re-raise
+            # If we assume this is the cause, we should re-raise
+            raise e
         
-        # 2. Flush first
-        print("DEBUG: Flushing changes...")
-        await db.flush()
-        print("DEBUG: Flush successful, now committing...")
-        
+        # 2. Flush first - WRAPPED
+        print("DEBUG: Flushing changes...", flush=True)
+        try:
+            await db.flush()
+            print("DEBUG: Flush successful, now committing...", flush=True)
+        except Exception as e:
+            print(f"DEBUG: FATAL ERROR DURING FLUSH: {type(e).__name__}: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            await db.rollback()
+            raise HTTPException(status_code=500, detail=f"Database Flush Error: {str(e)}")
+
         # 3. Commit with timeout safety
         import asyncio
         try:
             await asyncio.wait_for(db.commit(), timeout=5.0)
-            print("DEBUG: Commit successful")
+            print("DEBUG: Commit successful", flush=True)
         except asyncio.TimeoutError:
-            print("DEBUG: Commit timed out!")
+            print("DEBUG: Commit timed out!", flush=True)
             await db.rollback()
-            raise HTTPException(status_code=503, detail="Database is busy. Please try again.")
+            raise HTTPException(status_code=503, detail="Database is busy (timeout). Please try again.")
+        except Exception as e:
+            print(f"DEBUG: FATAL ERROR DURING COMMIT: {type(e).__name__}: {e}", flush=True)
+            await db.rollback()
+            raise HTTPException(status_code=500, detail=f"Database Commit Error: {str(e)}")
             
         await db.refresh(db_meeting.minutes)
-        print("DEBUG: Refresh successful")
+        print("DEBUG: Refresh successful", flush=True)
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        # Check for lock timeout error
+        # Check for lock timeout error in broader scope
         error_str = str(e).lower()
+        print(f"DEBUG: Outer Exception Caught: {type(e).__name__}: {e}", flush=True)
+        
         if "lock" in error_str or "timeout" in error_str:
-            print(f"DEBUG: Lock acquisition failed: {e}")
+            print(f"DEBUG: Lock acquisition failed (caught in outer): {e}", flush=True)
             await db.rollback()
             raise HTTPException(
                 status_code=503, 
                 detail="System is busy processing this meeting. Please wait 5 seconds and try again."
             )
+        
+        import traceback
+        traceback.print_exc()
+        raise e
         
         import traceback
         import sys
