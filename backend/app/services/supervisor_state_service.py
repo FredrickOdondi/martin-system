@@ -221,12 +221,7 @@ class SupervisorGlobalState:
             )
         
         # Build state snapshot
-        self._state = SupervisorStateSnapshot(
-            calendar=calendar,
-            documents=documents,
-            projects=projects,
-            twg_summaries=twg_summaries,
-            active_conflicts=conflict_snapshots,
+
         # Fetch cross-TWG dependencies
         dependencies_result = await db.execute(
             select(Dependency).options(
