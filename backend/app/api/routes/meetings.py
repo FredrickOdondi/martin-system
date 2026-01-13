@@ -1781,6 +1781,7 @@ async def submit_minutes_for_approval(
     if not db_meeting.minutes:
         raise HTTPException(status_code=400, detail="No minutes to submit")
     
+    print("DEBUG: Checking current status")
     # Get current status safely (could be string or Enum due to schema relaxation)
     current_status = db_meeting.minutes.status
     if hasattr(current_status, 'value'):
@@ -1803,9 +1804,12 @@ async def submit_minutes_for_approval(
         db_meeting.minutes.rejected_at = None
         db_meeting.minutes.rejection_reason = None
         
+    print(f"DEBUG: Committing status update to: {db_meeting.minutes.status}")
     try:
         await db.commit()
+        print("DEBUG: Commit successful")
         await db.refresh(db_meeting.minutes)
+        print("DEBUG: Refresh successful")
     except Exception as e:
         import traceback
         logger.error(f"DB Commit Failed during minutes submission: {e}")
@@ -1813,7 +1817,7 @@ async def submit_minutes_for_approval(
         raise HTTPException(status_code=500, detail=f"Database error during submission: {str(e)}")
 
     # --- Notification Logic ---
-
+    print("DEBUG: Starting notification logic")
     try:
         from app.models.models import Notification, NotificationType
         
