@@ -57,9 +57,9 @@ async def list_action_items(
     if twg_id:
          query = query.where(ActionItem.twg_id == twg_id)
          # Access check
-         if current_user.role != UserRole.ADMIN and not has_twg_access(current_user, twg_id):
+         if current_user.role not in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD] and not has_twg_access(current_user, twg_id):
               raise HTTPException(status_code=403, detail="Access denied to this TWG's items")
-    elif not mine_only and current_user.role != UserRole.ADMIN:
+    elif not mine_only and current_user.role not in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
         # If not filtering by "mine" and not admin, must limit to TWGs user is in
         user_twg_ids = [twg.id for twg in current_user.twgs]
         query = query.where(ActionItem.twg_id.in_(user_twg_ids))
@@ -87,7 +87,7 @@ async def update_action_item_status(
         
     # Permission check
     is_owner = db_item.owner_id == current_user.id
-    is_facilitator = current_user.role in [UserRole.TWG_FACILITATOR, UserRole.ADMIN] and has_twg_access(current_user, db_item.twg_id)
+    is_facilitator = current_user.role in [UserRole.TWG_FACILITATOR, UserRole.ADMIN, UserRole.SECRETARIAT_LEAD] and has_twg_access(current_user, db_item.twg_id)
     
     if not (is_owner or is_facilitator):
         raise HTTPException(status_code=403, detail="Not authorized to update this item")

@@ -47,7 +47,8 @@ const AuditLogs: React.FC = () => {
         return JSON.stringify(details, null, 2);
     };
 
-    if (user?.role !== 'admin') {
+    const allowedRoles = ['admin', 'secretariat_lead'];
+    if (!allowedRoles.includes(user?.role || '')) {
         return (
             <div className="p-8">
                 <Card className="bg-red-50 border-red-200">

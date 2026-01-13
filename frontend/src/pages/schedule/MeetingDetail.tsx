@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { useSelector } from 'react-redux'
+import { RootState } from '../../store'
 import { meetings, actionItems } from '../../services/api'
 import { Card, Badge } from '../../components/ui'
 import MeetingSidebar from './components/MeetingSidebar'
@@ -17,6 +19,7 @@ export default function MeetingDetail() {
     const { id: meetingId } = useParams<{ id: string }>()
     const navigate = useNavigate()
     const location = useLocation()
+    const user = useSelector((state: RootState) => state.auth.user)
     const [meeting, setMeeting] = useState<any>(null)
     const [activeTab, setActiveTab] = useState<TabType>('minutes')
     const [loading, setLoading] = useState(true)
@@ -211,7 +214,7 @@ export default function MeetingDetail() {
         try {
             const res = await meetings.submitMinutesForApproval(meetingId)
             setMinutesStatus(res.data.status)
-            alert("Minutes submitted for approval!")
+            alert("Minutes submitted! Secretariat Lead has been notified for approval.")
         } catch (error: any) {
             console.error("Failed to submit for approval", error)
             alert(error?.response?.data?.detail || "Failed to submit for approval")
@@ -234,6 +237,55 @@ export default function MeetingDetail() {
             setIsApprovingMinutes(false)
         }
     }
+
+    const handleDownloadPdf = async () => {
+        if (!meetingId) return
+        try {
+            const response = await meetings.downloadMinutesPdf(meetingId)
+            // Create blob URL and trigger download
+            const blob = new Blob([response.data], { type: 'application/pdf' })
+            const url = window.URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            // Get filename from Content-Disposition header or use default
+            const contentDisposition = response.headers['content-disposition']
+            let filename = 'Minutes.pdf'
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename=(.+)/)
+                if (filenameMatch) filename = filenameMatch[1]
+            }
+            link.setAttribute('download', filename)
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            window.URL.revokeObjectURL(url)
+        } catch (error: any) {
+            console.error("Failed to download PDF", error)
+            alert(error?.response?.data?.detail || "Failed to download PDF")
+        }
+    }
+
+    const [showRejectModal, setShowRejectModal] = useState(false)
+    const [rejectReason, setRejectReason] = useState('')
+    const [isRejectingMinutes, setIsRejectingMinutes] = useState(false)
+
+    const handleRejectMinutes = async () => {
+        if (!meetingId || !rejectReason.trim() || isRejectingMinutes) return
+        setIsRejectingMinutes(true)
+        try {
+            const res = await meetings.rejectMinutes(meetingId, rejectReason)
+            setMinutesStatus(res.data.status)
+            setShowRejectModal(false)
+            setRejectReason('')
+            alert("Minutes rejected and sent back for revision")
+        } catch (error: any) {
+            console.error("Failed to reject minutes", error)
+            alert(error?.response?.data?.detail || "Failed to reject minutes")
+        } finally {
+            setIsRejectingMinutes(false)
+        }
+    }
+
 
     const handleAddGuest = async () => {
         if (!meetingId || !guestEmail) return
@@ -605,6 +657,44 @@ export default function MeetingDetail() {
                     isApproving={isSendingInvites}
                 />
 
+                {/* Reject Minutes Modal */}
+                {showRejectModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6">
+                            <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-4 flex items-center gap-2">
+                                <span className="text-2xl">❌</span> Reject Minutes
+                            </h3>
+                            <p className="text-sm text-slate-500 mb-4">
+                                Please provide a reason for rejection. The facilitator will be notified and the minutes will be sent back for revision.
+                            </p>
+                            <textarea
+                                className="w-full h-32 p-4 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-900 dark:text-white focus:ring-2 focus:ring-red-500 outline-none resize-none"
+                                placeholder="Reason for rejection..."
+                                value={rejectReason}
+                                onChange={(e) => setRejectReason(e.target.value)}
+                            />
+                            <div className="flex justify-end gap-3 mt-4">
+                                <button
+                                    onClick={() => {
+                                        setShowRejectModal(false)
+                                        setRejectReason('')
+                                    }}
+                                    className="btn-secondary"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    onClick={handleRejectMinutes}
+                                    disabled={!rejectReason.trim() || isRejectingMinutes}
+                                    className="btn-primary bg-red-600 hover:bg-red-700 border-red-600 disabled:opacity-50"
+                                >
+                                    {isRejectingMinutes ? '⏳ Rejecting...' : 'Confirm Rejection'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* Header */}
                 <div className="px-8 py-6 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50">
                     <div className="flex items-start justify-between mb-4">
@@ -953,16 +1043,18 @@ export default function MeetingDetail() {
                                                                 {/* Status Badge */}
                                                                 <span className={`px-2 py-1 text-xs font-bold rounded-full ${minutesStatus === 'approved' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
                                                                     minutesStatus === 'pending_approval' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                                                                        'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                                                        minutesStatus === 'review' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                                                                            'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
                                                                     }`}>
                                                                     {minutesStatus === 'approved' ? '✓ Approved' :
                                                                         minutesStatus === 'pending_approval' ? '⏳ Pending Approval' :
-                                                                            '📝 Draft'}
+                                                                            minutesStatus === 'review' ? '🔄 Needs Revision' :
+                                                                                '📝 Draft'}
                                                                 </span>
                                                             </div>
                                                             <div className="flex gap-2">
-                                                                {/* Show Submit for Approval if DRAFT */}
-                                                                {minutesStatus === 'draft' && minutesContent && (
+                                                                {/* Show Submit for Approval if DRAFT or REVIEW */}
+                                                                {(minutesStatus === 'draft' || minutesStatus === 'review') && minutesContent && (
                                                                     <button
                                                                         onClick={handleSubmitForApproval}
                                                                         disabled={isSubmittingForApproval}
@@ -971,26 +1063,44 @@ export default function MeetingDetail() {
                                                                         {isSubmittingForApproval ? '⏳ Submitting...' : '📤 Submit for Approval'}
                                                                     </button>
                                                                 )}
-                                                                {/* Show Approve button if PENDING_APPROVAL */}
+                                                                {/* Show Approve/Reject buttons ONLY if Secretariat Lead (or Admin) */}
                                                                 {minutesStatus === 'pending_approval' && (
+                                                                    <>
+                                                                        {['secretariat_lead', 'admin'].includes(user?.role || '') ? (
+                                                                            <>
+                                                                                <button
+                                                                                    onClick={handleApproveMinutes}
+                                                                                    disabled={isApprovingMinutes}
+                                                                                    className="btn-primary text-sm flex items-center gap-1 disabled:opacity-50"
+                                                                                >
+                                                                                    {isApprovingMinutes ? '⏳ Approving...' : '✅ Approve & Send'}
+                                                                                </button>
+                                                                                <button
+                                                                                    onClick={() => setShowRejectModal(true)}
+                                                                                    className="btn-secondary text-sm flex items-center gap-1 border-red-500 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30"
+                                                                                >
+                                                                                    ❌ Reject
+                                                                                </button>
+                                                                            </>
+                                                                        ) : (
+                                                                            <span className="text-sm text-slate-500 italic bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                                                                                <span>📩</span> Approval Notification Sent to Secretariat
+                                                                            </span>
+                                                                        )}
+                                                                    </>
+                                                                )}
+                                                                {/* Download PDF button - always available when minutes exist */}
+                                                                {minutesContent && (
                                                                     <button
-                                                                        onClick={handleApproveMinutes}
-                                                                        disabled={isApprovingMinutes}
-                                                                        className="btn-primary text-sm flex items-center gap-1 disabled:opacity-50"
+                                                                        onClick={handleDownloadPdf}
+                                                                        className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                                                                        title="Download as PDF"
                                                                     >
-                                                                        {isApprovingMinutes ? '⏳ Approving...' : '✅ Approve & Send'}
+                                                                        <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                                                        </svg>
                                                                     </button>
                                                                 )}
-                                                                <button className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
-                                                                    <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
-                                                                    </svg>
-                                                                </button>
-                                                                <button className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
-                                                                    <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
-                                                                    </svg>
-                                                                </button>
                                                             </div>
                                                         </div>
                                                         <Card className="p-8">

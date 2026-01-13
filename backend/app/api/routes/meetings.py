@@ -125,15 +125,16 @@ async def list_meetings(
         if not has_twg_access(current_user, twg_id):
              raise HTTPException(status_code=403, detail="Access denied to this TWG")
         query = query.where(Meeting.twg_id == twg_id)
-    elif current_user.role != UserRole.ADMIN:
+    elif current_user.role not in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
         # Get IDs of TWGs user belongs to
         user_twg_ids = [twg.id for twg in current_user.twgs]
         query = query.where(Meeting.twg_id.in_(user_twg_ids))
         
     query = query.options(
-        selectinload(Meeting.participants),
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user), # Fix for 500 error
         selectinload(Meeting.twg),
-        selectinload(Meeting.documents)
+        selectinload(Meeting.documents).selectinload(Document.uploaded_by),
+        selectinload(Meeting.documents).selectinload(Document.twg)
     )
         
     result = await db.execute(query)
@@ -149,7 +150,7 @@ async def get_meeting(
     Get meeting details.
     """
     query = select(Meeting).where(Meeting.id == meeting_id).options(
-        selectinload(Meeting.participants),
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
         selectinload(Meeting.agenda),
         selectinload(Meeting.minutes),
         selectinload(Meeting.twg),
@@ -1246,12 +1247,29 @@ async def add_participants(
 
     new_participants = []
     
+    # 1. Identify emails that need lookup (no user_id provided)
+    emails_to_lookup = [
+        p.email.lower() for p in participants 
+        if not p.user_id and p.email
+    ]
+    
+    # 2. Batch query users
+    email_to_userid_map = {}
+    if emails_to_lookup:
+        res = await db.execute(select(User).where(User.email.in_(emails_to_lookup)))
+        found_users = res.scalars().all()
+        for u in found_users:
+            email_to_userid_map[u.email.lower()] = u.id
+
     for p_in in participants:
-         # logic to check duplicates could go here
-         
+         # Determine User ID: Provided > Looked Up > None
+         final_user_id = p_in.user_id
+         if not final_user_id and p_in.email:
+             final_user_id = email_to_userid_map.get(p_in.email.lower())
+
          db_p = MeetingParticipant(
              meeting_id=meeting_id,
-             user_id=p_in.user_id,
+             user_id=final_user_id,
              email=p_in.email,
              name=p_in.name,
              rsvp_status=RsvpStatus.PENDING
@@ -1721,13 +1739,50 @@ async def submit_minutes_for_approval(
     if not db_meeting.minutes:
         raise HTTPException(status_code=400, detail="No minutes to submit")
     
-    if db_meeting.minutes.status != MinutesStatus.DRAFT:
-        raise HTTPException(status_code=400, detail=f"Minutes must be in DRAFT status to submit. Current: {db_meeting.minutes.status.value}")
+    if db_meeting.minutes.status not in [MinutesStatus.DRAFT, MinutesStatus.REVIEW]:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Minutes must be in DRAFT or REVIEW status to submit. Current: {db_meeting.minutes.status.value}"
+        )
     
     # Update status
     db_meeting.minutes.status = MinutesStatus.PENDING_APPROVAL
+    
+    # Clear rejection info on resubmission
+    if db_meeting.minutes.rejection_reason:
+        # Optionally archive it or just clear it. Here we clear to show it's a fresh attempt.
+        db_meeting.minutes.rejected_at = None
+        
     await db.commit()
     await db.refresh(db_meeting.minutes)
+
+    # --- Notification Logic ---
+    from app.models.models import Notification, NotificationType
+    
+    # Notify ALL Admins and Secretariat Leads
+    result = await db.execute(select(User).where(User.role.in_([UserRole.ADMIN, UserRole.SECRETARIAT_LEAD])))
+    reviewers = result.scalars().all()
+    
+    # If no high-level reviewers, fallback to TWG Technical Lead
+    if not reviewers:
+        if db_meeting.twg and db_meeting.twg.technical_lead_id:
+             reviewer = await db.execute(select(User).where(User.id == db_meeting.twg.technical_lead_id))
+             user = reviewer.scalar_one_or_none()
+             if user:
+                 reviewers.append(user)
+
+    # Create notifications
+    if reviewers:
+        for reviewer in reviewers:
+            notification = Notification(
+                user_id=reviewer.id,
+                type=NotificationType.TASK,
+                title="Minutes Approval Required",
+                content=f"Minutes for '{db_meeting.title}' submitted by {current_user.full_name}. Please review and approve.",
+                link=f"/meetings/{meeting_id}"
+            )
+            db.add(notification)
+        await db.commit()
     
     return {
         "message": "Minutes submitted for approval",
@@ -1765,6 +1820,13 @@ async def approve_minutes(
     
     if not has_twg_access(current_user, db_meeting.twg_id):
         raise HTTPException(status_code=403, detail="Access denied")
+        
+    # Enforce Secretariat Lead (or Admin) approval
+    if current_user.role not in [UserRole.SECRETARIAT_LEAD, UserRole.ADMIN]:
+        raise HTTPException(
+            status_code=403, 
+            detail="Only Secretariat Leads can approve minutes. Please submit for approval instead."
+        )
     
     if not db_meeting.minutes:
         raise HTTPException(status_code=400, detail="No minutes to approve")
@@ -1820,37 +1882,50 @@ async def approve_minutes(
         print(f"KB Indexing Failed: {e}")
 
     # 3. Send Emails to Participants
-    if pdf_bytes:
+    recipients = set()
+    
+    for p in db_meeting.participants:
+        # 1. Registered User Email
+        if p.user and p.user.email:
+            recipients.add(p.user.email)
+        # 2. Guest Email (stored directly on participant record)
+        elif p.email:
+            recipients.add(p.email)
+            
+    recipient_list = list(recipients)
+    
+    if pdf_bytes and recipient_list:
         try:
-            recipients = [p.user.email for p in db_meeting.participants if p.user and p.user.email]
-            if recipients:
-                 email_context = {
-                     "recipient_name": "Colleague", 
-                     "meeting_title": db_meeting.title,
-                     "date_str": db_meeting.scheduled_at.strftime('%Y-%m-%d') if db_meeting.scheduled_at else "TBD",
-                     "pillar_name": pillar_display,
-                     "dashboard_url": f"{settings.FRONTEND_URL}/meetings/{db_meeting.id}"
-                 }
-                 await email_service.send_minutes_published_email(
-                     to_emails=recipients,
-                     template_context=email_context,
-                     pdf_content=pdf_bytes,
-                     pdf_filename=f"Minutes_{db_meeting.title.replace(' ', '_')}.pdf"
-                 )
+             email_context = {
+                 "recipient_name": "Colleague", 
+                 "meeting_title": db_meeting.title,
+                 "date_str": db_meeting.scheduled_at.strftime('%Y-%m-%d') if db_meeting.scheduled_at else "TBD",
+                 "pillar_name": pillar_display,
+                 "dashboard_url": f"{settings.FRONTEND_URL}/meetings/{db_meeting.id}"
+             }
+             await email_service.send_minutes_published_email(
+                 to_emails=recipient_list,
+                 template_context=email_context,
+                 pdf_content=pdf_bytes,
+                 pdf_filename="minutes.pdf"
+             )
         except Exception as e:
             print(f"Email Sending Failed: {e}")
+            # Non-blocking
 
-    # 4. Audit Log
-    # 4. Audit Log
+    # --- Audit Log ---
+    from app.services.audit_service import audit_service
+    
     await audit_service.log_activity(
-        db=db,
+        db,
         user_id=current_user.id,
         action="MEETING_MINUTES_APPROVED",
         resource_type="meeting",
         resource_id=meeting_id,
         details={
             "meeting_title": db_meeting.title,
-            "actions": "generated_pdf, sent_email, indexed_kb"
+            "actions": "generated_pdf, sent_email, indexed_kb",
+            "recipients": recipient_list  # Explicitly log who got it
         },
         ip_address=request.client.host if request.client else None
     )
@@ -1861,6 +1936,186 @@ async def approve_minutes(
         "workflows_triggered": ["pdf", "email", "audit", "kb_indexing"] 
     }
 
+
+@router.get("/{meeting_id}/minutes/pdf")
+async def download_minutes_pdf(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Download meeting minutes as PDF.
+    Available for APPROVED or FINAL status only.
+    """
+    from fastapi.responses import Response
+    from app.services.pdf_service import pdf_service
+    
+    # Get meeting with minutes and TWG
+    result = await db.execute(
+        select(Meeting)
+        .options(selectinload(Meeting.minutes), selectinload(Meeting.twg))
+        .where(Meeting.id == meeting_id)
+    )
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    if not db_meeting.minutes:
+        raise HTTPException(status_code=404, detail="No minutes found for this meeting")
+    
+    # Allow download for APPROVED and FINAL status (also DRAFT for preview)
+    allowed_statuses = [MinutesStatus.APPROVED, MinutesStatus.FINAL, MinutesStatus.DRAFT, MinutesStatus.PENDING_APPROVAL]
+    if db_meeting.minutes.status not in allowed_statuses:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Minutes must be in APPROVED, FINAL, DRAFT, or PENDING_APPROVAL status. Current: {db_meeting.minutes.status.value}"
+        )
+    
+    # Generate PDF
+    pillar_display = db_meeting.twg.pillar.value.replace("_", " ").title() if db_meeting.twg else "General"
+    pdf_context = {
+        "pillar_name": pillar_display,
+        "meeting_title": db_meeting.title,
+        "meeting_date": db_meeting.scheduled_at.strftime('%Y-%m-%d') if db_meeting.scheduled_at else "TBD",
+        "meeting_time": db_meeting.scheduled_at.strftime('%H:%M') if db_meeting.scheduled_at else "",
+        "location": db_meeting.location or "Virtual",
+    }
+    
+    try:
+        pdf_bytes = pdf_service.generate_minutes_pdf(
+            minutes_markdown=db_meeting.minutes.content,
+            template_context=pdf_context
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
+    
+    # Create safe filename
+    safe_title = "".join(c if c.isalnum() or c in " -_" else "_" for c in db_meeting.title)[:50]
+    filename = f"Minutes_{safe_title}.pdf"
+    
+    # Add watermark for non-approved minutes
+    status_label = ""
+    if db_meeting.minutes.status == MinutesStatus.DRAFT:
+        status_label = "DRAFT_"
+    elif db_meeting.minutes.status == MinutesStatus.PENDING_APPROVAL:
+        status_label = "PENDING_"
+    
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename={status_label}{filename}"
+        }
+    )
+
+
+@router.post("/{meeting_id}/minutes/reject")
+async def reject_minutes(
+    meeting_id: uuid.UUID,
+    request: Request,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Reject minutes and send back for revision.
+    Changes status from PENDING_APPROVAL to REVIEW.
+    Stores rejection reason and notifies the TWG lead.
+    """
+    from datetime import datetime
+    from app.models.models import Notification, NotificationType
+    
+    # Parse body
+    body = await request.json()
+    rejection_reason = body.get("reason", "No reason provided")
+    suggested_changes = body.get("suggested_changes", "")
+    
+    # Get meeting and minutes
+    result = await db.execute(
+        select(Meeting)
+        .options(
+            selectinload(Meeting.minutes),
+            selectinload(Meeting.twg).selectinload(TWG.technical_lead)
+        )
+        .where(Meeting.id == meeting_id)
+    )
+    db_meeting = result.scalar_one_or_none()
+    
+    if not db_meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+    
+    if not has_twg_access(current_user, db_meeting.twg_id):
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    # Enforce Secretariat Lead (or Admin) rejection
+    if current_user.role not in [UserRole.SECRETARIAT_LEAD, UserRole.ADMIN]:
+        raise HTTPException(
+            status_code=403, 
+            detail="Only Secretariat Leads can reject minutes. Please contact support if you need to revert status."
+        )
+    
+    if not db_meeting.minutes:
+        raise HTTPException(status_code=400, detail="No minutes to reject")
+    
+    if db_meeting.minutes.status != MinutesStatus.PENDING_APPROVAL:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Minutes must be PENDING_APPROVAL to reject. Current: {db_meeting.minutes.status.value}"
+        )
+    
+    # Update status to REVIEW
+    db_meeting.minutes.status = MinutesStatus.REVIEW
+    
+    # Store rejection reason in key_decisions field (or add metadata)
+    # We'll prepend a rejection note to the key_decisions field
+    rejection_note = f"[REJECTION - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}]\nReason: {rejection_reason}"
+    if suggested_changes:
+        rejection_note += f"\nSuggested Changes: {suggested_changes}"
+    rejection_note += "\n---\n"
+    
+    if db_meeting.minutes.key_decisions:
+        db_meeting.minutes.key_decisions = rejection_note + db_meeting.minutes.key_decisions
+    else:
+        db_meeting.minutes.key_decisions = rejection_note
+    
+    await db.commit()
+    await db.refresh(db_meeting.minutes)
+    
+    # Create notification for TWG lead
+    if db_meeting.twg and db_meeting.twg.technical_lead:
+        notification = Notification(
+            user_id=db_meeting.twg.technical_lead.id,
+            type=NotificationType.ALERT,
+            title="Minutes Rejected",
+            content=f"Minutes for '{db_meeting.title}' were rejected. Reason: {rejection_reason}",
+            link=f"/meetings/{meeting_id}"
+        )
+        db.add(notification)
+        await db.commit()
+    
+    # Audit log
+    await audit_service.log_activity(
+        db=db,
+        user_id=current_user.id,
+        action="MEETING_MINUTES_REJECTED",
+        resource_type="meeting",
+        resource_id=meeting_id,
+        details={
+            "meeting_title": db_meeting.title,
+            "reason": rejection_reason,
+            "suggested_changes": suggested_changes
+        },
+        ip_address=request.client.host if request.client else None
+    )
+    
+    return {
+        "message": "Minutes rejected and sent back for revision",
+        "status": db_meeting.minutes.status.value,
+        "reason": rejection_reason
+    }
 
 
 # ==================== ACTION ITEMS ENDPOINTS ====================

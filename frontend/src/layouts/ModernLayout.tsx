@@ -61,7 +61,7 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
         };
     }, [token, dispatch]);
 
-    const isAdmin = user?.role === UserRole.ADMIN;
+    const isAdmin = user?.role === UserRole.ADMIN || user?.role === UserRole.SECRETARIAT_LEAD;
     const isFacilitator = user?.role === UserRole.FACILITATOR || user?.role === UserRole.SECRETARIAT_LEAD || isAdmin;
 
     const isActive = (path: string) => location.pathname === path;
@@ -243,7 +243,7 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
                                 <div>
                                     {!isSidebarCollapsed && (
                                         <div className="text-xs font-bold text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider mb-3 px-3 transition-opacity duration-300">
-                                            Admin
+                                            Management
                                         </div>
                                     )}
                                     <div className="space-y-1">

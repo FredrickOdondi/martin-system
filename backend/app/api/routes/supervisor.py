@@ -27,11 +27,11 @@ router = APIRouter(prefix="/supervisor", tags=["supervisor"])
 
 
 def require_admin(current_user: User = Depends(get_current_active_user)) -> User:
-    """Dependency to require admin role"""
-    if current_user.role != UserRole.ADMIN:
+    """Dependency to require admin role or Secretariat Lead"""
+    if current_user.role not in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
         raise HTTPException(
             status_code=403,
-            detail="Admin access required for supervisor state"
+            detail="Admin/Secretariat access required for supervisor state"
         )
     return current_user
 
@@ -140,7 +140,7 @@ async def get_twg_summary(
     await state_service.refresh_state(db)
     
     # RBAC: Check if user has access to this TWG
-    is_admin = current_user.role == UserRole.ADMIN
+    is_admin = current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]
     user_twg_ids = [twg.id for twg in current_user.twgs]
     
     if not is_admin and twg_id not in user_twg_ids:
