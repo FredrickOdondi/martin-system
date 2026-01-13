@@ -2419,19 +2419,26 @@ async def upload_meeting_document(
         raise HTTPException(status_code=403, detail="Access denied")
     
     upload_dir = "uploads/meetings"
-    os.makedirs(upload_dir, exist_ok=True)
-    
-    file_extension = os.path.splitext(file.filename)[1]
-    unique_filename = f"{uuid.uuid4()}{file_extension}"
-    file_path = os.path.join(upload_dir, unique_filename)
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    file_size = os.path.getsize(file_path)
+    try:
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        file_extension = os.path.splitext(file.filename)[1]
+        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        file_path = os.path.join(upload_dir, unique_filename)
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        file_size = os.path.getsize(file_path)
+    except Exception as e:
+        import traceback
+        print(f"File Upload Error: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Failed to save file: {str(e)}")
     
     db_document = Document(
         twg_id=db_meeting.twg_id,
+        meeting_id=meeting_id, # Link to meeting!
         file_name=file.filename,
         file_path=file_path,
         file_type=file.content_type or "application/octet-stream",
