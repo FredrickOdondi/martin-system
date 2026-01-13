@@ -157,11 +157,10 @@ class TWGRead(TWGBase):
 
 # --- Document Schemas ---
 
-class DocumentBase(SchemaBase):
     twg_id: Optional[uuid.UUID] = None
     file_name: str
     file_type: str
-    stage: DocumentStage = DocumentStage.FINAL
+    stage: str = "final" # Relaxed from DocumentStage
     is_confidential: bool = False
     metadata_json: Optional[dict] = None
 
@@ -275,7 +274,7 @@ class AgendaRead(AgendaBase):
 class MinutesBase(SchemaBase):
     content: str
     key_decisions: Optional[str] = None
-    status: MinutesStatus = MinutesStatus.DRAFT
+    status: str = "draft" # Relaxed from MinutesStatus
 
 class MinutesCreate(MinutesBase):
     meeting_id: uuid.UUID
