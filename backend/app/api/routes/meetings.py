@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request, WebSocket
 from app.services.audit_service import audit_service
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from typing import List, Optional
 import uuid
 
@@ -1806,30 +1806,39 @@ async def submit_minutes_for_approval(
         
     print(f"DEBUG: Committing status update to: {db_meeting.minutes.status}")
     try:
-        # Flush first to catch any SQL errors before commit
+        # 1. Set a short lock timeout for this transaction to fail fast if locked
+        await db.execute(text("SET lock_timeout = '2s'"))
+        
+        # 2. Flush first
         print("DEBUG: Flushing changes...")
         await db.flush()
         print("DEBUG: Flush successful, now committing...")
         
-        # Add timeout to prevent indefinite hanging
+        # 3. Commit with timeout safety
         import asyncio
         try:
             await asyncio.wait_for(db.commit(), timeout=5.0)
             print("DEBUG: Commit successful")
         except asyncio.TimeoutError:
-            print("DEBUG: Commit timed out after 5 seconds!")
+            print("DEBUG: Commit timed out!")
             await db.rollback()
-            raise HTTPException(
-                status_code=500,
-                detail="Database commit timed out. There may be a lock or connection issue."
-            )
+            raise HTTPException(status_code=503, detail="Database is busy. Please try again.")
             
         await db.refresh(db_meeting.minutes)
         print("DEBUG: Refresh successful")
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
     except Exception as e:
+        # Check for lock timeout error
+        error_str = str(e).lower()
+        if "lock" in error_str or "timeout" in error_str:
+            print(f"DEBUG: Lock acquisition failed: {e}")
+            await db.rollback()
+            raise HTTPException(
+                status_code=503, 
+                detail="System is busy processing this meeting. Please wait 5 seconds and try again."
+            )
+        
+        import traceback
+        import sys
         import traceback
         import sys
         error_details = {

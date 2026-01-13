@@ -13,6 +13,7 @@ import uuid
 from sqlalchemy.orm import selectinload
 from app.core.database import get_db
 from app.models.models import User, UserRole, TWG
+from app.core.config import settings
 from app.schemas.auth import UserResponse, UserUpdate
 from app.api.deps import require_admin
 from app.schemas.user_invite import UserInvite, UserInviteResponse
@@ -217,20 +218,14 @@ async def invite_user(
     await db.commit()
     await db.refresh(user)
     
-    # TODO: Send invitation email with temporary password
-    # For now, just return the password (admin must communicate it)
     # Send invitation email
     invite_sent = False
     if invite_data.send_email:
         try:
             from app.services.email_service import email_service
-            # Construct login URL (assuming frontend is on the same domain or configured)
-            # We can use a setting for FRONTEND_URL if available, otherwise guess
-            # For now, we'll try to infer it or use a placeholder if not set
-            login_url = "https://frontend-production-1abb.up.railway.app/" # Default to prod URL for now or use settings
             
-            # Use settings if available
-            # login_url = settings.FRONTEND_URL if hasattr(settings, 'FRONTEND_URL') else login_url
+            # Use configured frontend URL
+            login_url = settings.FRONTEND_URL
 
             await email_service.send_user_invite(
                 to_email=user.email,
@@ -243,7 +238,6 @@ async def invite_user(
         except Exception as e:
             # Log error but don't fail the request
             print(f"Failed to send invite email: {e}")
-            # We could raise a warning here or just return invite_sent=False
             pass
     
     return UserInviteResponse(
