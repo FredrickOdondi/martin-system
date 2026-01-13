@@ -39,11 +39,11 @@ class RsvpStatus(str, enum.Enum):
     DECLINED = "declined"
 
 class MinutesStatus(str, enum.Enum):
-    DRAFT = "draft"
-    PENDING_APPROVAL = "pending_approval"
-    REVIEW = "review"
-    APPROVED = "approved"
-    FINAL = "final"
+    DRAFT = "DRAFT"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
+    REVIEW = "REVIEW"
+    APPROVED = "APPROVED"
+    FINAL = "FINAL"
 
 class ActionItemStatus(str, enum.Enum):
     PENDING = "pending"
