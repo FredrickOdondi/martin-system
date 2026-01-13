@@ -149,6 +149,7 @@ async def get_meeting(
     """
     Get meeting details.
     """
+    print(f"DEBUG: get_meeting called for {meeting_id}")
     query = select(Meeting).where(Meeting.id == meeting_id).options(
         selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
         selectinload(Meeting.agenda),
@@ -158,6 +159,10 @@ async def get_meeting(
     )
     result = await db.execute(query)
     db_meeting = result.scalar_one_or_none()
+    print(f"DEBUG: get_meeting loaded: {db_meeting is not None}")
+    if db_meeting:
+        print(f"DEBUG: minutes loaded: {db_meeting.minutes}")
+        print(f"DEBUG: documents count: {len(db_meeting.documents)}")
     if not db_meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
     
@@ -1738,16 +1743,25 @@ async def submit_minutes_for_approval(
     Submit minutes for approval. Changes status from DRAFT to PENDING_APPROVAL.
     Human oversight gate: Nothing is finalized until explicitly approved.
     """
+    print(f"DEBUG: submit_minutes called for {meeting_id}")
     # Get meeting and minutes
-    result = await db.execute(
-        select(Meeting)
-        .options(
-            selectinload(Meeting.minutes),
-            selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
-            selectinload(Meeting.twg)
+    try:
+        result = await db.execute(
+            select(Meeting)
+            .options(
+                selectinload(Meeting.minutes),
+                selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+                selectinload(Meeting.twg)
+            )
+            .where(Meeting.id == meeting_id)
         )
-        .where(Meeting.id == meeting_id)
-    )
+    except Exception as e:
+        import traceback
+        print(f"DEBUG: DB Load Failed: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"DB Load Failed: {e}")
+        
+    print(f"DEBUG: submit_minutes query executed")
     db_meeting = result.scalar_one_or_none()
     
     if not db_meeting:
