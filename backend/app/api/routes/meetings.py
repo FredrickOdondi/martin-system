@@ -1812,9 +1812,29 @@ async def submit_minutes_for_approval(
         print("DEBUG: Refresh successful")
     except Exception as e:
         import traceback
+        import sys
+        error_details = {
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "traceback": traceback.format_exc(),
+            "minutes_id": str(db_meeting.minutes.id) if db_meeting.minutes else None,
+            "current_status_type": type(db_meeting.minutes.status).__name__ if db_meeting.minutes else None,
+            "current_status_value": str(db_meeting.minutes.status) if db_meeting.minutes else None
+        }
+        print(f"DEBUG: DB Commit Failed - Full Error Details:")
+        print(f"  Type: {error_details['error_type']}")
+        print(f"  Message: {error_details['error_message']}")
+        print(f"  Status Type: {error_details['current_status_type']}")
+        print(f"  Status Value: {error_details['current_status_value']}")
+        print(f"  Traceback:\n{error_details['traceback']}")
         logger.error(f"DB Commit Failed during minutes submission: {e}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Database error during submission: {str(e)}")
+        # Rollback to clean state
+        await db.rollback()
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Database error during submission: {error_details['error_type']} - {error_details['error_message']}"
+        )
 
     # --- Notification Logic ---
     print("DEBUG: Starting notification logic")
