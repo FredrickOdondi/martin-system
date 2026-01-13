@@ -285,10 +285,16 @@ class MinutesUpdate(SchemaBase):
     key_decisions: Optional[str] = None
     status: Optional[MinutesStatus] = None
 
+class MinutesRejectionRequest(SchemaBase):
+    reason: str
+    suggested_changes: Optional[str] = None
+
 class MinutesRead(MinutesBase):
     id: uuid.UUID
     meeting_id: uuid.UUID
     created_at: datetime
+    rejection_reason: Optional[str] = None
+    rejected_at: Optional[datetime] = None
 
 # --- Action Item Schemas ---
 

@@ -54,8 +54,8 @@ async def get_autonomous_conflict_log(
     """
     from app.models.models import Conflict, ConflictStatus, UserRole
     
-    # Check admin
-    if current_user.role != UserRole.ADMIN:
+    # Check admin or secretariat lead
+    if current_user.role not in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
         raise HTTPException(status_code=403, detail="Not authorized")
         
     cutoff = datetime.datetime.utcnow() - datetime.timedelta(days=days)
@@ -91,17 +91,17 @@ async def get_dashboard_stats(
     """
     Get aggregated statistics for the Command Center dashboard.
     """
-    # Scope by TWG if not admin
+    # Scope by TWG if not admin or secretariat lead
     from app.models.models import UserRole
-    is_admin = current_user.role == UserRole.ADMIN
-    user_twg_ids = [t.id for t in current_user.twgs] if not is_admin else []
+    is_universal_access = current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]
+    user_twg_ids = [t.id for t in current_user.twgs] if not is_universal_access else []
 
     # 1. Meeting Stats
     q_total = select(func.count(Meeting.id))
     q_completed = select(func.count(Meeting.id)).where(Meeting.status == MeetingStatus.COMPLETED)
     q_upcoming = select(func.count(Meeting.id)).where(Meeting.status == MeetingStatus.SCHEDULED)
     
-    if not is_admin:
+    if not is_universal_access:
         q_total = q_total.where(Meeting.twg_id.in_(user_twg_ids))
         q_completed = q_completed.where(Meeting.twg_id.in_(user_twg_ids))
         q_upcoming = q_upcoming.where(Meeting.twg_id.in_(user_twg_ids))
@@ -130,7 +130,7 @@ async def get_dashboard_stats(
     q_items_comp = select(func.count(ActionItem.id)).where(ActionItem.status == ActionItemStatus.COMPLETED)
     q_items_pend = select(func.count(ActionItem.id)).where(ActionItem.status == ActionItemStatus.PENDING)
     
-    if not is_admin:
+    if not is_universal_access:
         # Action Items linked to Meetings linked to TWGs
         # Or ActionItems have twg_id? Let's check model. 
         # ActionItem has meeting_id. Meeting has twg_id.
@@ -150,7 +150,7 @@ async def get_dashboard_stats(
     
     # 3. Project / Pipeline Stats
     q_projects = select(Project)
-    if not is_admin:
+    if not is_universal_access:
         q_projects = q_projects.where(Project.twg_id.in_(user_twg_ids))
         
     projects_res = await db.execute(q_projects)
@@ -170,7 +170,7 @@ async def get_dashboard_stats(
             selectinload(TWG.meetings)
         )
     
-    if not is_admin:
+    if not is_universal_access:
         q_twgs = q_twgs.where(TWG.id.in_(user_twg_ids))
         
     twgs_res = await db.execute(q_twgs)
@@ -245,11 +245,11 @@ async def get_global_timeline(
     # Fetch upcoming meetings and project deadlines
     # Fetch upcoming meetings and project deadlines
     from app.models.models import UserRole
-    is_admin = current_user.role == UserRole.ADMIN
-    user_twg_ids = [t.id for t in current_user.twgs] if not is_admin else []
+    is_universal_access = current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]
+    user_twg_ids = [t.id for t in current_user.twgs] if not is_universal_access else []
     
     q_meetings = select(Meeting).options(selectinload(Meeting.twg)).where(Meeting.scheduled_at >= datetime.datetime.utcnow())
-    if not is_admin:
+    if not is_universal_access:
         q_meetings = q_meetings.where(Meeting.twg_id.in_(user_twg_ids))
         
     meetings_res = await db.execute(
@@ -390,9 +390,9 @@ async def propose_conflict_resolution(
     from app.services.reconciliation_service import get_reconciliation_service
     import uuid
     
-    is_admin = current_user.role == UserRole.ADMIN
-    if not is_admin:
-        raise HTTPException(status_code=403, detail="Only admins can propose resolutions")
+    is_allowed = current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]
+    if not is_allowed:
+        raise HTTPException(status_code=403, detail="Only admins/secretariat can propose resolutions")
     
     result = await db.execute(select(Conflict).where(Conflict.id == uuid.UUID(conflict_id)))
     conflict = result.scalar_one_or_none()
@@ -423,9 +423,9 @@ async def auto_negotiate_conflict(
     from app.services.reconciliation_service import get_reconciliation_service
     import uuid
     
-    is_admin = current_user.role == UserRole.ADMIN
-    if not is_admin:
-        raise HTTPException(status_code=403, detail="Only admins can trigger auto-negotiation")
+    is_allowed = current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]
+    if not is_allowed:
+        raise HTTPException(status_code=403, detail="Only admins/secretariat can trigger auto-negotiation")
     
     result = await db.execute(select(Conflict).where(Conflict.id == uuid.UUID(conflict_id)))
     conflict = result.scalar_one_or_none()
@@ -459,9 +459,9 @@ async def generate_weekly_packet(
     from app.models.models import UserRole, TWG
     from app.services.agent_service import AgentService
     
-    is_admin = current_user.role == UserRole.ADMIN
-    if not is_admin:
-        raise HTTPException(status_code=403, detail="Only admins can generate weekly packet")
+    is_allowed = current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]
+    if not is_allowed:
+        raise HTTPException(status_code=403, detail="Only admins/secretariat can generate weekly packet")
     
     # Calculate week boundaries
     today = datetime.datetime.utcnow()
@@ -543,9 +543,9 @@ async def force_reconciliation(
     import uuid
     from collections import defaultdict
     
-    is_admin = current_user.role == UserRole.ADMIN
-    if not is_admin:
-        raise HTTPException(status_code=403, detail="Only admins can force reconciliation")
+    is_allowed = current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]
+    if not is_allowed:
+        raise HTTPException(status_code=403, detail="Only admins/secretariat can force reconciliation")
     
     detected_conflicts = []
     auto_resolved = []

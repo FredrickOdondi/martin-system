@@ -71,15 +71,22 @@ export default function NotificationCenter() {
     };
 
     const formatTime = (dateString: string) => {
-        const date = new Date(dateString);
+        // Force UTC interpretation if no timezone info is present
+        // Backend sends naive UTC strings (e.g., "2023-01-01T12:00:00")
+        // Browser defaults to local time for these, so we append 'Z' to treat as UTC
+        const dateStr = dateString.endsWith('Z') || dateString.includes('+') ? dateString : `${dateString}Z`;
+        const date = new Date(dateStr);
         const now = new Date();
+
+        // Calculate difference in milliseconds
         const diffMs = now.getTime() - date.getTime();
         const diffMins = Math.floor(diffMs / 60000);
         const diffHours = Math.floor(diffMins / 60);
         const diffDays = Math.floor(diffHours / 24);
 
-        if (diffMins < 60) return `${diffMins} mins ago`;
-        if (diffHours < 24) return `${diffHours} hours ago`;
+        if (diffMins < 1) return 'Just now';
+        if (diffMins < 60) return `${diffMins} min${diffMins !== 1 ? 's' : ''} ago`;
+        if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
         if (diffDays === 1) return 'Yesterday';
         return date.toLocaleDateString();
     };

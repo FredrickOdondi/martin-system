@@ -152,8 +152,8 @@ async def list_documents(
                 raise HTTPException(status_code=403, detail="Access denied")
         else:
             # Filter visible documents based on user role and TWG membership
-            if current_user.role == UserRole.ADMIN:
-                # Admins see all documents
+            if current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
+                # Admins and Secretariat Leads see all documents
                 pass
             else:
                 # STRICT RBAC: Regular users ONLY see:
@@ -298,8 +298,8 @@ async def search_documents_content(
 
     # If no TWG specified, we could search across all user's TWGs
     # But for now, require twg_id or admin (simpler)
-    if not twg_id and current_user.role != UserRole.ADMIN:
-        raise HTTPException(status_code=400, detail="twg_id is required for non-admin search")
+    if not twg_id and current_user.role not in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
+        raise HTTPException(status_code=400, detail="twg_id is required for non-admin/secretariat search")
 
     results = kb.search(query=query, namespace=namespace, top_k=limit)
     return results

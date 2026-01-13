@@ -107,6 +107,9 @@ export const meetings = {
     generateMinutes: (id: string) => api.post(`/meetings/${id}/generate-minutes`),
     submitMinutesForApproval: (id: string) => api.post(`/meetings/${id}/minutes/submit-for-approval`),
     approveMinutes: (id: string) => api.post(`/meetings/${id}/minutes/approve`),
+    rejectMinutes: (id: string, reason: string, suggestedChanges?: string) =>
+        api.post(`/meetings/${id}/minutes/reject`, { reason, suggested_changes: suggestedChanges }),
+    downloadMinutesPdf: (id: string) => api.get(`/meetings/${id}/minutes/pdf`, { responseType: 'blob' }),
 
     getActionItems: (id: string) => api.get(`/meetings/${id}/action-items`),
     createActionItem: (id: string, data: any) => api.post(`/meetings/${id}/action-items`, data),

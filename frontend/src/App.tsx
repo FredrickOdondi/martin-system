@@ -127,22 +127,22 @@ function App() {
 
                 {/* Admin Routes */}
                 <Route path="/settings" element={
-                    <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                    <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]}>
                         <Settings />
                     </ProtectedRoute>
                 } />
                 <Route path="/admin/team" element={
-                    <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                    <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]}>
                         <TeamManagement />
                     </ProtectedRoute>
                 } />
                 <Route path="/admin/control-tower" element={
-                    <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                    <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]}>
                         <ControlTower />
                     </ProtectedRoute>
                 } />
                 <Route path="/admin/logs" element={
-                    <ProtectedRoute allowedRoles={[UserRole.ADMIN]}>
+                    <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]}>
                         <AuditLogs />
                     </ProtectedRoute>
                 } />

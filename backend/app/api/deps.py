@@ -112,7 +112,7 @@ def require_role(*allowed_roles: UserRole):
 
 
 # Convenience dependencies for specific roles
-require_admin = require_role(UserRole.ADMIN)
+require_admin = require_role(UserRole.ADMIN, UserRole.SECRETARIAT_LEAD)
 require_facilitator = require_role(UserRole.ADMIN, UserRole.TWG_FACILITATOR, UserRole.SECRETARIAT_LEAD)
 
 
@@ -138,8 +138,8 @@ async def require_twg_access(
     Raises:
         HTTPException: If user doesn't have access
     """
-    # Admins have access to everything
-    if current_user.role == UserRole.ADMIN:
+    # Admins and Secretariat Leads have access to everything
+    if current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
         return current_user
     
     # Check if user is member of the TWG
@@ -165,8 +165,8 @@ def has_twg_access(user: User, twg_id: uuid.UUID) -> bool:
     Returns:
         True if user has access, False otherwise
     """
-    # Admins have access to everything
-    if user.role == UserRole.ADMIN:
+    # Admins and Secretariat Leads have access to everything
+    if user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
         return True
     
     # Check if user is member of the TWG

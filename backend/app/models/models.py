@@ -304,6 +304,8 @@ class Minutes(Base):
     content: Mapped[str] = mapped_column(Text) # Markdown or HTML
     key_decisions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[MinutesStatus] = mapped_column(Enum(MinutesStatus), default=MinutesStatus.DRAFT)
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     
     # Relationships
