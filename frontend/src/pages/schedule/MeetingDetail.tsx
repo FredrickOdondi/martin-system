@@ -31,7 +31,7 @@ export default function MeetingDetail() {
 
     // Minutes State
     const [minutesContent, setMinutesContent] = useState('')
-    const [minutesStatus, setMinutesStatus] = useState<string>('draft')
+    const [minutesStatus, setMinutesStatus] = useState<string>('DRAFT')
     const [isGeneratingMinutes, setIsGeneratingMinutes] = useState(false)
     const [isSubmittingForApproval, setIsSubmittingForApproval] = useState(false)
     const [isApprovingMinutes, setIsApprovingMinutes] = useState(false)
@@ -120,14 +120,14 @@ export default function MeetingDetail() {
             try {
                 const minutesRes = await meetings.getMinutes(meetingId)
                 setMinutesContent(minutesRes.data.content || '')
-                setMinutesStatus(minutesRes.data.status || 'draft')
+                setMinutesStatus(minutesRes.data.status || 'DRAFT')
                 if (minutesRes.data.content) {
                     setIsTranscriptExpanded(false)
                 }
             } catch (e) {
                 console.log("No minutes yet")
                 setMinutesContent('')
-                setMinutesStatus('draft')
+                setMinutesStatus('DRAFT')
             }
 
             // Load action items
@@ -193,9 +193,9 @@ export default function MeetingDetail() {
         try {
             const res = await meetings.generateMinutes(meetingId)
             setMinutesContent(res.data.content)
-            setMinutesStatus('draft')
+            setMinutesStatus('DRAFT')
             setIsTranscriptExpanded(false)
-            setMinutesStatus('draft')  // Generated content starts as draft
+            setMinutesStatus('DRAFT')  // Generated content starts as draft
         } catch (error: any) {
             console.error("Failed to generate minutes", error)
             let errorMessage = "Failed to generate minutes."
@@ -794,11 +794,16 @@ export default function MeetingDetail() {
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                                 </svg>
-                                <span>Minutes Pending Approval</span>
+                                <span>
+                                    {minutesStatus === 'APPROVED' ? 'Minutes Approved' :
+                                        minutesStatus === 'PENDING_APPROVAL' ? 'Minutes Pending Approval' :
+                                            minutesStatus === 'REVIEW' ? 'Minutes Need Revision' :
+                                                minutesContent ? 'Minutes in Draft' : 'Minutes Not Started'}
+                                </span>
                             </div>
                         </div>
                         <div className="flex gap-3">
-                            {meeting?.status === 'scheduled' && (
+                            {['scheduled', 'SCHEDULED'].includes(meeting?.status) && (
                                 <>
                                     <button onClick={handleNotifyUpdate} className="btn-secondary text-sm flex items-center gap-2 border-yellow-500 text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/30">
                                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -834,7 +839,7 @@ export default function MeetingDetail() {
                                 </svg>
                                 Join Live Session
                             </button>
-                            {minutesStatus === 'pending_approval' && (
+                            {minutesStatus === 'PENDING_APPROVAL' && (
                                 <button onClick={handleApproveMinutes} className="btn-primary text-sm flex items-center gap-2">
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -999,7 +1004,7 @@ export default function MeetingDetail() {
                                                                                 const res = await meetings.uploadRecording(meetingId, formData);
                                                                                 setMinutesContent(res.data.content);
                                                                                 setTranscript(res.data.transcript || 'Transcript updated from audio.'); // Would need to re-fetch meeting to get full transcript if not returned in minutes, but let's assume standard flow
-                                                                                setMinutesStatus('draft'); // Or res.data.status
+                                                                                setMinutesStatus('DRAFT'); // Or res.data.status
                                                                                 await loadMeetingDetails(); // Refresh everything
                                                                                 setStatusModal({ isOpen: true, type: 'success', title: 'Success', message: 'Audio transcribed and minutes generated!' });
                                                                             } catch (error: any) {
@@ -1062,20 +1067,20 @@ export default function MeetingDetail() {
                                                             <div className="flex items-center gap-3">
                                                                 <h2 className="text-xl font-bold text-slate-900 dark:text-white">Meeting Minutes</h2>
                                                                 {/* Status Badge */}
-                                                                <span className={`px-2 py-1 text-xs font-bold rounded-full ${minutesStatus === 'approved' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
-                                                                    minutesStatus === 'pending_approval' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                                                                        minutesStatus === 'review' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
+                                                                <span className={`px-2 py-1 text-xs font-bold rounded-full ${minutesStatus === 'APPROVED' ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400' :
+                                                                    minutesStatus === 'PENDING_APPROVAL' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                                                        minutesStatus === 'REVIEW' ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400' :
                                                                             'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
                                                                     }`}>
-                                                                    {minutesStatus === 'approved' ? '✓ Approved' :
-                                                                        minutesStatus === 'pending_approval' ? '⏳ Pending Approval' :
-                                                                            minutesStatus === 'review' ? '🔄 Needs Revision' :
+                                                                    {minutesStatus === 'APPROVED' ? '✓ Approved' :
+                                                                        minutesStatus === 'PENDING_APPROVAL' ? '⏳ Pending Approval' :
+                                                                            minutesStatus === 'REVIEW' ? '🔄 Needs Revision' :
                                                                                 '📝 Draft'}
                                                                 </span>
                                                             </div>
                                                             <div className="flex gap-2">
                                                                 {/* Show Submit for Approval if DRAFT or REVIEW */}
-                                                                {(minutesStatus === 'draft' || minutesStatus === 'review') && minutesContent && (
+                                                                {(minutesStatus === 'DRAFT' || minutesStatus === 'REVIEW') && minutesContent && (
                                                                     <button
                                                                         onClick={handleSubmitForApproval}
                                                                         disabled={isSubmittingForApproval}
@@ -1085,7 +1090,7 @@ export default function MeetingDetail() {
                                                                     </button>
                                                                 )}
                                                                 {/* Show Approve/Reject buttons ONLY if Secretariat Lead (or Admin) */}
-                                                                {minutesStatus === 'pending_approval' && (
+                                                                {minutesStatus === 'PENDING_APPROVAL' && (
                                                                     <>
                                                                         {['secretariat_lead', 'admin'].includes(user?.role || '') ? (
                                                                             <>
