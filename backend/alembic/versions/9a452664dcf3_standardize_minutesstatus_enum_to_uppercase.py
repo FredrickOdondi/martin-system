@@ -22,29 +22,29 @@ def upgrade() -> None:
     """
     Standardize minutesstatus enum to all UPPERCASE values.
     
-    Current state:
-    - DRAFT, REVIEW, APPROVED, FINAL (uppercase - original)
-    - pending_approval, review (lowercase - added later)
+    Current DB state (from direct query):
+    - DRAFT, REVIEW, APPROVED, FINAL (uppercase - original values)
+    - pending_approval, review (lowercase - added by previous migration)
     
     Target state:
     - All UPPERCASE: DRAFT, REVIEW, APPROVED, FINAL, PENDING_APPROVAL
     
-    PostgreSQL doesn't allow renaming enum values directly, so we need to:
-    1. Add new uppercase values
-    2. Update existing rows to use new values
-    3. (Cannot remove old values without recreating enum, leave them as unused)
+    Strategy:
+    1. Add PENDING_APPROVAL (uppercase) if not exists
+    2. Update rows using lowercase 'pending_approval' to uppercase 'PENDING_APPROVAL'
+       Using text cast for WHERE clause since 'pending_approval' IS a valid enum value
     """
     
     # 1. Add PENDING_APPROVAL (uppercase) if not exists
     op.execute("ALTER TYPE minutesstatus ADD VALUE IF NOT EXISTS 'PENDING_APPROVAL'")
     
-    # 2. Update any rows using lowercase values to uppercase
-    # Note: We commit after ADD VALUE, then update rows
-    op.execute("UPDATE minutes SET status = 'DRAFT' WHERE status = 'draft'")
-    op.execute("UPDATE minutes SET status = 'REVIEW' WHERE status = 'review'")
-    op.execute("UPDATE minutes SET status = 'APPROVED' WHERE status = 'approved'")
-    op.execute("UPDATE minutes SET status = 'FINAL' WHERE status = 'final'")
+    # 2. Update rows that use the lowercase 'pending_approval' (which IS a valid enum value)
+    # The lowercase 'pending_approval' exists in the DB, so we can query it directly
     op.execute("UPDATE minutes SET status = 'PENDING_APPROVAL' WHERE status = 'pending_approval'")
+    
+    # Note: We do NOT update DRAFT, REVIEW, APPROVED, FINAL because:
+    # - The DB only has uppercase versions of these
+    # - There are no lowercase 'draft', 'review', etc. in the DB to convert
 
 
 def downgrade() -> None:
