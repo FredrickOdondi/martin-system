@@ -1852,7 +1852,7 @@ async def submit_minutes_for_approval(
     
     return {
         "message": "Minutes submitted for approval",
-        "status": db_meeting.minutes.status.value,
+        "status": db_meeting.minutes.status.value if hasattr(db_meeting.minutes.status, 'value') else str(db_meeting.minutes.status),
         "meeting_id": str(meeting_id),
         "approved_by": current_user.full_name
     }
@@ -1897,8 +1897,10 @@ async def approve_minutes(
     if not db_meeting.minutes:
         raise HTTPException(status_code=400, detail="No minutes to approve")
     
-    if db_meeting.minutes.status != MinutesStatus.PENDING_APPROVAL:
-        raise HTTPException(status_code=400, detail=f"Minutes must be PENDING_APPROVAL to approve. Current: {db_meeting.minutes.status.value}")
+    # Handle both Enum and string status values (PostgreSQL vs SQLite difference)
+    current_status_val = db_meeting.minutes.status.value if hasattr(db_meeting.minutes.status, 'value') else str(db_meeting.minutes.status)
+    if current_status_val != MinutesStatus.PENDING_APPROVAL.value:
+        raise HTTPException(status_code=400, detail=f"Minutes must be PENDING_APPROVAL to approve. Current: {current_status_val}")
     
     # Approve
     db_meeting.minutes.status = MinutesStatus.APPROVED
@@ -1998,7 +2000,7 @@ async def approve_minutes(
     
     return {
         "message": "Minutes approved and published",
-        "status": db_meeting.minutes.status.value,
+        "status": db_meeting.minutes.status.value if hasattr(db_meeting.minutes.status, 'value') else str(db_meeting.minutes.status),
         "workflows_triggered": ["pdf", "email", "audit", "kb_indexing"] 
     }
 
@@ -2034,11 +2036,12 @@ async def download_minutes_pdf(
         raise HTTPException(status_code=404, detail="No minutes found for this meeting")
     
     # Allow download for APPROVED and FINAL status (also DRAFT for preview)
-    allowed_statuses = [MinutesStatus.APPROVED, MinutesStatus.FINAL, MinutesStatus.DRAFT, MinutesStatus.PENDING_APPROVAL]
-    if db_meeting.minutes.status not in allowed_statuses:
+    allowed_status_values = [MinutesStatus.APPROVED.value, MinutesStatus.FINAL.value, MinutesStatus.DRAFT.value, MinutesStatus.PENDING_APPROVAL.value]
+    current_pdf_status = db_meeting.minutes.status.value if hasattr(db_meeting.minutes.status, 'value') else str(db_meeting.minutes.status)
+    if current_pdf_status not in allowed_status_values:
         raise HTTPException(
             status_code=400, 
-            detail=f"Minutes must be in APPROVED, FINAL, DRAFT, or PENDING_APPROVAL status. Current: {db_meeting.minutes.status.value}"
+            detail=f"Minutes must be in APPROVED, FINAL, DRAFT, or PENDING_APPROVAL status. Current: {current_pdf_status}"
         )
     
     # Generate PDF
@@ -2065,9 +2068,10 @@ async def download_minutes_pdf(
     
     # Add watermark for non-approved minutes
     status_label = ""
-    if db_meeting.minutes.status == MinutesStatus.DRAFT:
+    pdf_status_check = db_meeting.minutes.status.value if hasattr(db_meeting.minutes.status, 'value') else str(db_meeting.minutes.status)
+    if pdf_status_check == MinutesStatus.DRAFT.value:
         status_label = "DRAFT_"
-    elif db_meeting.minutes.status == MinutesStatus.PENDING_APPROVAL:
+    elif pdf_status_check == MinutesStatus.PENDING_APPROVAL.value:
         status_label = "PENDING_"
     
     return Response(
@@ -2126,10 +2130,12 @@ async def reject_minutes(
     if not db_meeting.minutes:
         raise HTTPException(status_code=400, detail="No minutes to reject")
     
-    if db_meeting.minutes.status != MinutesStatus.PENDING_APPROVAL:
+    # Handle both Enum and string status values (PostgreSQL vs SQLite difference)
+    current_reject_status = db_meeting.minutes.status.value if hasattr(db_meeting.minutes.status, 'value') else str(db_meeting.minutes.status)
+    if current_reject_status != MinutesStatus.PENDING_APPROVAL.value:
         raise HTTPException(
             status_code=400, 
-            detail=f"Minutes must be PENDING_APPROVAL to reject. Current: {db_meeting.minutes.status.value}"
+            detail=f"Minutes must be PENDING_APPROVAL to reject. Current: {current_reject_status}"
         )
     
     # Update status to REVIEW
@@ -2179,7 +2185,7 @@ async def reject_minutes(
     
     return {
         "message": "Minutes rejected and sent back for revision",
-        "status": db_meeting.minutes.status.value,
+        "status": db_meeting.minutes.status.value if hasattr(db_meeting.minutes.status, 'value') else str(db_meeting.minutes.status),
         "reason": rejection_reason
     }
 
