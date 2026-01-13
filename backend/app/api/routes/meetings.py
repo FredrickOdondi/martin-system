@@ -1267,11 +1267,25 @@ async def add_participants(
         for u in found_users:
             email_to_userid_map[u.email.lower()] = u.id
 
+    # 3. Check for EXISTING participants to avoid duplicates
+    existing_query = select(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting_id)
+    existing_res = await db.execute(existing_query)
+    existing_participants = existing_res.scalars().all()
+    
+    existing_user_ids = {p.user_id for p in existing_participants if p.user_id}
+    existing_emails = {p.email.lower() for p in existing_participants if p.email}
+
     for p_in in participants:
          # Determine User ID: Provided > Looked Up > None
          final_user_id = p_in.user_id
          if not final_user_id and p_in.email:
              final_user_id = email_to_userid_map.get(p_in.email.lower())
+
+         # Check Duplicates
+         if final_user_id and final_user_id in existing_user_ids:
+             continue # Skip
+         if p_in.email and p_in.email.lower() in existing_emails:
+             continue # Skip
 
          db_p = MeetingParticipant(
              meeting_id=meeting_id,
@@ -1759,10 +1773,17 @@ async def submit_minutes_for_approval(
         db_meeting.minutes.rejected_at = None
         db_meeting.minutes.rejection_reason = None
         
-    await db.commit()
-    await db.refresh(db_meeting.minutes)
+    try:
+        await db.commit()
+        await db.refresh(db_meeting.minutes)
+    except Exception as e:
+        import traceback
+        logger.error(f"DB Commit Failed during minutes submission: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Database error during submission: {str(e)}")
 
     # --- Notification Logic ---
+
     try:
         from app.models.models import Notification, NotificationType
         
