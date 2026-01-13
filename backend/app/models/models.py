@@ -117,7 +117,7 @@ class MeetingParticipant(Base):
     meeting_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("meetings.id", ondelete="CASCADE"))
     user_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     
-    rsvp_status: Mapped[RsvpStatus] = mapped_column(Enum(RsvpStatus), default=RsvpStatus.PENDING)
+    rsvp_status: Mapped[RsvpStatus] = mapped_column(Enum(RsvpStatus, values_callable=lambda x: [e.value for e in x]), default=RsvpStatus.PENDING)
     attended: Mapped[bool] = mapped_column(Boolean, default=False)
     
     name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -137,7 +137,7 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255))
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255))
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole), default=UserRole.TWG_MEMBER)
+    role: Mapped[UserRole] = mapped_column(Enum(UserRole, values_callable=lambda x: [e.value for e in x]), default=UserRole.TWG_MEMBER)
     organization: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_login: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -243,7 +243,7 @@ class Dependency(Base):
     target_twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id"))
     
     description: Mapped[str] = mapped_column(Text)
-    status: Mapped[DependencyStatus] = mapped_column(Enum(DependencyStatus), default=DependencyStatus.PENDING)
+    status: Mapped[DependencyStatus] = mapped_column(Enum(DependencyStatus, values_callable=lambda x: [e.value for e in x]), default=DependencyStatus.PENDING)
     
     # Optional links to blocking artifacts
     blocking_meeting_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("meetings.id"), nullable=True)
@@ -268,7 +268,7 @@ class Meeting(Base):
     scheduled_at: Mapped[datetime] = mapped_column(DateTime)
     duration_minutes: Mapped[int] = mapped_column(default=60)
     location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    status: Mapped[MeetingStatus] = mapped_column(Enum(MeetingStatus), default=MeetingStatus.SCHEDULED)
+    status: Mapped[MeetingStatus] = mapped_column(Enum(MeetingStatus, values_callable=lambda x: [e.value for e in x]), default=MeetingStatus.SCHEDULED)
     meeting_type: Mapped[str] = mapped_column(String(50), default="virtual") # virtual, in-person
     transcript: Mapped[Optional[str]] = mapped_column(Text, nullable=True) # Text or link to transcript
     video_link: Mapped[Optional[str]] = mapped_column(String(512), nullable=True) # Google Meet / Zoom link
@@ -303,7 +303,7 @@ class Minutes(Base):
     meeting_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("meetings.id"), unique=True)
     content: Mapped[str] = mapped_column(Text) # Markdown or HTML
     key_decisions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[MinutesStatus] = mapped_column(Enum(MinutesStatus), default=MinutesStatus.DRAFT)
+    status: Mapped[MinutesStatus] = mapped_column(Enum(MinutesStatus, values_callable=lambda x: [e.value for e in x]), default=MinutesStatus.DRAFT)
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -321,8 +321,8 @@ class ActionItem(Base):
     description: Mapped[str] = mapped_column(Text)
     owner_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
     due_date: Mapped[datetime] = mapped_column(DateTime)
-    status: Mapped[ActionItemStatus] = mapped_column(Enum(ActionItemStatus), default=ActionItemStatus.PENDING)
-    priority: Mapped[ActionItemPriority] = mapped_column(Enum(ActionItemPriority), default=ActionItemPriority.MEDIUM)
+    status: Mapped[ActionItemStatus] = mapped_column(Enum(ActionItemStatus, values_callable=lambda x: [e.value for e in x]), default=ActionItemStatus.PENDING)
+    priority: Mapped[ActionItemPriority] = mapped_column(Enum(ActionItemPriority, values_callable=lambda x: [e.value for e in x]), default=ActionItemPriority.MEDIUM)
     
     # Relationships
     twg: Mapped["TWG"] = relationship(back_populates="action_items")
@@ -340,7 +340,7 @@ class Project(Base):
     investment_size: Mapped[Decimal] = mapped_column(Numeric(15, 2))
     currency: Mapped[str] = mapped_column(String(10), default="USD")
     readiness_score: Mapped[float] = mapped_column(Float, default=0.0)
-    status: Mapped[ProjectStatus] = mapped_column(Enum(ProjectStatus), default=ProjectStatus.IDENTIFIED)
+    status: Mapped[ProjectStatus] = mapped_column(Enum(ProjectStatus, values_callable=lambda x: [e.value for e in x]), default=ProjectStatus.IDENTIFIED)
     investment_memo_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("documents.id"), nullable=True)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     
