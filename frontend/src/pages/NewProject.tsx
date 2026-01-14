@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import api from '../services/api';
 
 const NewProject: React.FC = () => {
   const navigate = useNavigate();
@@ -95,15 +96,7 @@ const NewProject: React.FC = () => {
       let twgId = null;
 
       try {
-        const twgsResponse = await axios.get(
-          'http://localhost:8000/api/v1/twgs/',
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-            },
-            timeout: 10000,
-          }
-        );
+        const twgsResponse = await api.get('/twgs/');
 
         console.log('Available TWGs:', twgsResponse.data);
 
@@ -168,17 +161,9 @@ const NewProject: React.FC = () => {
 
       console.log('Creating project with data:', projectData);
 
-      const response = await axios.post(
-        'http://localhost:8000/api/v1/projects/',
-        projectData,
-        {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 30000, // 30 second timeout
-        }
-      );
+      const response = await api.post('/projects/', projectData, {
+        timeout: 30000 // 30 second timeout
+      });
 
       console.log('Project created successfully:', response.data);
 
