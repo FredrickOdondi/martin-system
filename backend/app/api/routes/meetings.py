@@ -6,13 +6,14 @@ from typing import List, Optional
 import uuid
 
 from app.core.database import get_db
-from app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesStatus, MeetingParticipant, RsvpStatus, ActionItem, TWG, Document, MeetingStatus
+from app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesStatus, MeetingParticipant, RsvpStatus, ActionItem, TWG, Document, MeetingStatus, MeetingDependency, DependencyType
 from app.schemas.schemas import (
     MeetingCreate, MeetingRead, MeetingUpdate,
     MinutesCreate, MinutesUpdate, MinutesRead,
     AgendaCreate, AgendaRead, AgendaUpdate,
     MeetingParticipantRead, MeetingParticipantUpdate, MeetingParticipantCreate,
-    MeetingCancel, MeetingUpdateNotification
+    MeetingCancel, MeetingUpdateNotification,
+    MeetingDependencyRead, DependencyType as DependencyTypeSchema
 )
 from app.api.deps import get_current_active_user, require_facilitator, require_twg_access, has_twg_access
 from app.services.email_service import email_service
@@ -134,7 +135,9 @@ async def list_meetings(
         selectinload(Meeting.participants).selectinload(MeetingParticipant.user), # Fix for 500 error
         selectinload(Meeting.twg),
         selectinload(Meeting.documents).selectinload(Document.uploaded_by),
-        selectinload(Meeting.documents).selectinload(Document.twg)
+        selectinload(Meeting.documents).selectinload(Document.twg),
+        selectinload(Meeting.successors),
+        selectinload(Meeting.predecessors)
     )
         
     result = await db.execute(query)
@@ -155,16 +158,21 @@ async def get_meeting(
         selectinload(Meeting.agenda),
         selectinload(Meeting.minutes),
         selectinload(Meeting.twg),
-        selectinload(Meeting.documents)
+        selectinload(Meeting.documents),
+        selectinload(Meeting.successors).selectinload(MeetingDependency.target_meeting),
+        selectinload(Meeting.predecessors).selectinload(MeetingDependency.source_meeting)
     )
     result = await db.execute(query)
     db_meeting = result.scalar_one_or_none()
-    print(f"DEBUG: get_meeting loaded: {db_meeting is not None}")
-    if db_meeting:
-        print(f"DEBUG: minutes loaded: {db_meeting.minutes}")
-        print(f"DEBUG: documents count: {len(db_meeting.documents)}")
+    
     if not db_meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
+
+    # Map titles for UI
+    for s in db_meeting.successors:
+        s.target_meeting_title = s.target_meeting.title
+    for p in db_meeting.predecessors:
+        p.source_meeting_title = p.source_meeting.title
     
     # Check access
     if not has_twg_access(current_user, db_meeting.twg_id):

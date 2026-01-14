@@ -1,6 +1,7 @@
 from pydantic import BaseModel, EmailStr, Field, ConfigDict
 from datetime import datetime
 from typing import List, Optional, Any
+from decimal import Decimal
 import uuid
 import enum
 
@@ -52,6 +53,9 @@ class ActionItemPriority(str, enum.Enum):
 class ProjectStatus(str, enum.Enum):
     IDENTIFIED = "identified"
     VETTING = "vetting"
+    DUE_DILIGENCE = "due_diligence"
+    FINANCING = "financing"
+    DEAL_ROOM = "deal_room"
     BANKABLE = "bankable"
     PRESENTED = "presented"
 
@@ -88,6 +92,12 @@ class ConflictStatus(str, enum.Enum):
     ESCALATED = "escalated"
     RESOLVED = "resolved"
     DISMISSED = "dismissed"
+
+class DependencyType(str, enum.Enum):
+    FINISH_TO_START = "finish_to_start"
+    START_TO_START = "start_to_start"
+    FINISH_TO_FINISH = "finish_to_finish"
+    START_TO_FINISH = "start_to_finish"
 
 # --- Base Schema ---
 
@@ -246,12 +256,36 @@ class MeetingParticipantCreate(SchemaBase):
 class MeetingParticipantUpdate(SchemaBase):
     rsvp_status: Optional[RsvpStatus] = None
 
+class DependencySource(str, enum.Enum):
+    TWG_PACKET = "twg_packet"
+    AI_INFERRED = "ai_inferred"
+    MANUAL = "manual"
+
+class MeetingDependencyRead(SchemaBase):
+    id: uuid.UUID
+    source_meeting_id: uuid.UUID
+    target_meeting_id: uuid.UUID
+    dependency_type: DependencyType
+    lag_minutes: int
+    
+    # Source Tracking
+    source_type: DependencySource = DependencySource.MANUAL
+    confidence_score: float = 1.0
+    created_by_agent: Optional[str] = None
+    
+    # Optional names for UI display
+    source_meeting_title: Optional[str] = None
+    target_meeting_title: Optional[str] = None
+
 class MeetingRead(MeetingBase):
     id: uuid.UUID
     video_link: Optional[str] = None
     twg: Optional["TWGBase"] = None
     participants: List[MeetingParticipantRead] = []
     documents: List["DocumentRead"] = []
+    # Optional: only populated when fetching a single meeting with eager loading
+    successors: Optional[List[MeetingDependencyRead]] = None
+    predecessors: Optional[List[MeetingDependencyRead]] = None
 
 # --- Agenda Schemas ---
 
@@ -323,6 +357,8 @@ class ProjectBase(SchemaBase):
     investment_size: float
     currency: str = "USD"
     readiness_score: float = 0.0
+    afcen_score: Optional[Decimal] = None
+    strategic_alignment_score: Optional[Decimal] = None
     status: ProjectStatus = ProjectStatus.IDENTIFIED
     investment_memo_id: Optional[uuid.UUID] = None
     metadata_json: Optional[dict] = None
@@ -429,6 +465,12 @@ class ConflictRead(ConflictBase):
     id: uuid.UUID
     detected_at: datetime
     resolved_at: Optional[datetime] = None
+
+class ManualConflictResolution(BaseModel):
+    resolution_type: str # "reschedule" or "cancel"
+    meeting_id: uuid.UUID
+    new_time: Optional[datetime] = None
+    reason: Optional[str] = "Manual Resolution by Secretariat"
 
 # --- Weekly Packet Schemas ---
 

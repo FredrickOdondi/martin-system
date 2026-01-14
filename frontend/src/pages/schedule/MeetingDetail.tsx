@@ -13,7 +13,7 @@ import StatusModal from '../../components/modals/StatusModal'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 
-type TabType = 'agenda' | 'minutes' | 'participants' | 'documents'
+type TabType = 'agenda' | 'minutes' | 'participants' | 'documents' | 'schedule'
 
 export default function MeetingDetail() {
     const { id: meetingId } = useParams<{ id: string }>()
@@ -857,7 +857,8 @@ export default function MeetingDetail() {
                         { id: 'agenda', label: 'Agenda' },
                         { id: 'minutes', label: 'Minutes & Decisions' },
                         { id: 'participants', label: 'Participants' },
-                        { id: 'documents', label: 'Documents' }
+                        { id: 'documents', label: 'Documents' },
+                        { id: 'schedule', label: 'Schedule Integrity' }
                     ].map(tab => (
                         <button
                             key={tab.id}
@@ -1457,6 +1458,196 @@ export default function MeetingDetail() {
                                                     ))}
                                                 </div>
                                             )}
+                                        </div>
+                                    )}
+
+                                    {/* SCHEDULE INTEGRITY TAB */}
+                                    {activeTab === 'schedule' && (
+                                        <div className="max-w-4xl space-y-8">
+                                            {/* Header */}
+                                            <div>
+                                                <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-2 flex items-center gap-2">
+                                                    <span className="material-symbols-outlined text-indigo-600">radar</span>
+                                                    Schedule Integrity
+                                                </h2>
+                                                <p className="text-sm text-slate-500">
+                                                    Real-time view of scheduling conflicts and logical dependencies for this meeting.
+                                                </p>
+                                            </div>
+
+                                            {/* Conflict Status Section */}
+                                            <div className="space-y-4">
+                                                <h3 className="text-sm font-black uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                                                    <span className="w-2 h-2 rounded-full bg-red-500"></span>
+                                                    Scheduling Conflicts
+                                                </h3>
+                                                {detectedConflicts.length === 0 ? (
+                                                    <Card className="p-6 border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-900/10">
+                                                        <div className="flex items-center gap-4">
+                                                            <div className="w-12 h-12 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600">
+                                                                <span className="material-symbols-outlined text-2xl">check_circle</span>
+                                                            </div>
+                                                            <div>
+                                                                <div className="font-bold text-green-800 dark:text-green-300">No Conflicts Detected</div>
+                                                                <div className="text-sm text-green-600 dark:text-green-400">This meeting has no scheduling overlaps or participant clashes.</div>
+                                                            </div>
+                                                            <button
+                                                                onClick={async () => {
+                                                                    if (!meetingId) return;
+                                                                    setIsCheckingConflicts(true);
+                                                                    try {
+                                                                        const res = await meetings.conflictCheck(meetingId);
+                                                                        setDetectedConflicts(res.data.conflicts || []);
+                                                                    } catch (e) {
+                                                                        console.error('Conflict check failed', e);
+                                                                    } finally {
+                                                                        setIsCheckingConflicts(false);
+                                                                    }
+                                                                }}
+                                                                disabled={isCheckingConflicts}
+                                                                className="ml-auto btn-secondary text-sm flex items-center gap-2"
+                                                            >
+                                                                {isCheckingConflicts ? (
+                                                                    <><span className="animate-spin">⏳</span> Checking...</>
+                                                                ) : (
+                                                                    <>🔍 Re-check</>)}
+                                                            </button>
+                                                        </div>
+                                                    </Card>
+                                                ) : (
+                                                    <div className="space-y-3">
+                                                        {detectedConflicts.map((conflict: any, idx: number) => (
+                                                            <Card key={idx} className="p-4 border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/10">
+                                                                <div className="flex items-center gap-4">
+                                                                    <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600">
+                                                                        <span className="material-symbols-outlined">warning</span>
+                                                                    </div>
+                                                                    <div className="flex-1">
+                                                                        <div className="font-bold text-red-800 dark:text-red-300">
+                                                                            {conflict.type === 'participant' ? 'Participant Clash' :
+                                                                                conflict.type === 'room' ? 'Room Double-Booking' : 'Time Overlap'}
+                                                                        </div>
+                                                                        <div className="text-sm text-red-600 dark:text-red-400">
+                                                                            {conflict.description || conflict.message || `Conflicts with: ${conflict.conflicting_meeting_title || 'Unknown'}`}
+                                                                        </div>
+                                                                    </div>
+                                                                    {conflict.conflicting_meeting_id && (
+                                                                        <button
+                                                                            onClick={() => navigate(`/meetings/${conflict.conflicting_meeting_id}`)}
+                                                                            className="btn-secondary text-xs"
+                                                                        >
+                                                                            View Conflict
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+                                                            </Card>
+                                                        ))}
+                                                        <button
+                                                            onClick={async () => {
+                                                                if (!meetingId) return;
+                                                                setIsCheckingConflicts(true);
+                                                                try {
+                                                                    const res = await meetings.conflictCheck(meetingId);
+                                                                    setDetectedConflicts(res.data.conflicts || []);
+                                                                } catch (e) {
+                                                                    console.error('Conflict check failed', e);
+                                                                } finally {
+                                                                    setIsCheckingConflicts(false);
+                                                                }
+                                                            }}
+                                                            disabled={isCheckingConflicts}
+                                                            className="btn-secondary text-sm w-full justify-center flex items-center gap-2"
+                                                        >
+                                                            {isCheckingConflicts ? (
+                                                                <><span className="animate-spin">⏳</span> Checking...</>
+                                                            ) : (
+                                                                <>🔍 Re-check Conflicts</>)}
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Predecessors */}
+                                            <div className="space-y-4">
+                                                <h3 className="text-sm font-black uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                                                    <span className="w-2 h-2 rounded-full bg-blue-500"></span>
+                                                    Predecessors (Required Before)
+                                                </h3>
+                                                {!meeting?.predecessors?.length ? (
+                                                    <div className="p-6 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-center text-slate-400 italic text-sm">
+                                                        No prerequisites defined for this meeting.
+                                                    </div>
+                                                ) : (
+                                                    <div className="grid gap-3">
+                                                        {meeting?.predecessors?.map((dep: any) => (
+                                                            <Card
+                                                                key={dep.id}
+                                                                className="p-4 hover:border-blue-400 transition-all cursor-pointer group"
+                                                                onClick={() => navigate(`/meetings/${dep.source_meeting_id}`)}
+                                                            >
+                                                                <div className="flex items-center justify-between">
+                                                                    <div className="flex items-center gap-4">
+                                                                        <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
+                                                                            <span className="material-symbols-outlined">event_available</span>
+                                                                        </div>
+                                                                        <div>
+                                                                            <div className="font-bold text-slate-900 dark:text-white group-hover:text-blue-600 transition-colors">
+                                                                                {dep.source_meeting_title}
+                                                                            </div>
+                                                                            <div className="text-xs text-slate-500">
+                                                                                Type: <span className="font-mono text-blue-600 font-bold">{dep.dependency_type}</span>
+                                                                                {dep.lag_minutes > 0 && ` • Lag: ${dep.lag_minutes}m`}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <span className="material-symbols-outlined text-slate-300 group-hover:text-blue-400 transition-colors">arrow_forward</span>
+                                                                </div>
+                                                            </Card>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Successors */}
+                                            <div className="space-y-4">
+                                                <h3 className="text-sm font-black uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                                                    <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                                                    Successors (Depends on this)
+                                                </h3>
+                                                {!meeting?.successors?.length ? (
+                                                    <div className="p-6 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-center text-slate-400 italic text-sm">
+                                                        No future meetings currently depend on this session.
+                                                    </div>
+                                                ) : (
+                                                    <div className="grid gap-3">
+                                                        {meeting?.successors?.map((dep: any) => (
+                                                            <Card
+                                                                key={dep.id}
+                                                                className="p-4 hover:border-purple-400 transition-all cursor-pointer group"
+                                                                onClick={() => navigate(`/meetings/${dep.target_meeting_id}`)}
+                                                            >
+                                                                <div className="flex items-center justify-between">
+                                                                    <div className="flex items-center gap-4">
+                                                                        <div className="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600">
+                                                                            <span className="material-symbols-outlined">forward_to_inbox</span>
+                                                                        </div>
+                                                                        <div>
+                                                                            <div className="font-bold text-slate-900 dark:text-white group-hover:text-purple-600 transition-colors">
+                                                                                {dep.target_meeting_title}
+                                                                            </div>
+                                                                            <div className="text-xs text-slate-500">
+                                                                                Type: <span className="font-mono text-purple-600 font-bold">{dep.dependency_type}</span>
+                                                                                {dep.lag_minutes > 0 && ` • Lag: ${dep.lag_minutes}m`}
+                                                                            </div>
+                                                                        </div>
+                                                                    </div>
+                                                                    <span className="material-symbols-outlined text-slate-300 group-hover:text-purple-400 transition-colors">arrow_forward</span>
+                                                                </div>
+                                                            </Card>
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
                                     )}
                                 </>

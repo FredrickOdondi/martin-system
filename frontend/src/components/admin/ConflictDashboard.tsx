@@ -1,7 +1,8 @@
 import { Card, Badge } from '../../components/ui';
 
 import { useEffect, useState } from 'react';
-import { getConflicts, ConflictAlert, getDashboardStats, forceReconciliation, ReconciliationResult, generateWeeklyPacket, autoNegotiateConflict, dismissConflict } from '../../services/dashboardService';
+import { getConflicts, ConflictAlert, getDashboardStats, forceReconciliation, ReconciliationResult, generateWeeklyPacket, autoNegotiateConflict, dismissConflict, resolveConflictManually } from '../../services/dashboardService';
+import ManualResolutionModal from '../modals/ManualResolutionModal';
 
 export default function ConflictDashboard() {
     const [stats, setStats] = useState<any>(null);
@@ -10,6 +11,7 @@ export default function ConflictDashboard() {
     const [reconciliationResult, setReconciliationResult] = useState<ReconciliationResult | null>(null);
     const [negotiationLog, setNegotiationLog] = useState<any>(null);
     const [showNegotiationModal, setShowNegotiationModal] = useState(false);
+    const [showResolutionModal, setShowResolutionModal] = useState(false);
     const [showHistoryModal, setShowHistoryModal] = useState(false);
     const [historyConflicts, setHistoryConflicts] = useState<ConflictAlert[]>([]);
 
@@ -21,6 +23,21 @@ export default function ConflictDashboard() {
             setShowHistoryModal(true);
         } catch (error) {
             console.error("Failed to load history", error);
+        }
+    };
+
+    const handleManualResolve = async (type: string, meetingId: string, newTime?: string, reason?: string) => {
+        if (!activeConflict) return;
+        try {
+            await resolveConflictManually(activeConflict.id, type, meetingId, newTime, reason);
+            // Refresh
+            const updatedConflicts = await getConflicts();
+            setConflicts(updatedConflicts);
+            // Re-fetch stats
+            const statsData = await getDashboardStats();
+            setStats(statsData);
+        } catch (error) {
+            console.error("Manual resolution failed", error);
         }
     };
 
@@ -306,27 +323,37 @@ export default function ConflictDashboard() {
                                         </div>
 
                                         <div className="flex items-center gap-3">
-                                            <button
-                                                onClick={async () => {
-                                                    if (!activeConflict) return;
-                                                    try {
-                                                        setLoading(true);
-                                                        const result = await autoNegotiateConflict(activeConflict.id);
-                                                        setNegotiationLog(result);
-                                                        setShowNegotiationModal(true);
-                                                        // Refresh conflicts list
-                                                        const newConflicts = await getConflicts();
-                                                        setConflicts(newConflicts);
-                                                    } catch (error) {
-                                                        console.error('Auto-negotiation failed', error);
-                                                    } finally {
-                                                        setLoading(false);
-                                                    }
-                                                }}
-                                                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-blue-500/20 active:scale-95"
-                                            >
-                                                Initiate Auto-Negotiation
-                                            </button>
+                                            {activeConflict.status === 'escalated' ? (
+                                                <button
+                                                    onClick={() => setShowResolutionModal(true)}
+                                                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-red-500/20 active:scale-95 flex items-center gap-2"
+                                                >
+                                                    <span className="material-symbols-outlined text-[16px]">gavel</span>
+                                                    Resolve Manually
+                                                </button>
+                                            ) : (
+                                                <button
+                                                    onClick={async () => {
+                                                        if (!activeConflict) return;
+                                                        try {
+                                                            setLoading(true);
+                                                            const result = await autoNegotiateConflict(activeConflict.id);
+                                                            setNegotiationLog(result);
+                                                            setShowNegotiationModal(true);
+                                                            // Refresh conflicts list
+                                                            const newConflicts = await getConflicts();
+                                                            setConflicts(newConflicts);
+                                                        } catch (error) {
+                                                            console.error('Auto-negotiation failed', error);
+                                                        } finally {
+                                                            setLoading(false);
+                                                        }
+                                                    }}
+                                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold transition-colors shadow-lg shadow-blue-500/20 active:scale-95"
+                                                >
+                                                    Initiate Auto-Negotiation
+                                                </button>
+                                            )}
                                             <button
                                                 onClick={async () => {
                                                     if (!activeConflict) return;
@@ -404,27 +431,58 @@ export default function ConflictDashboard() {
                             </button>
                         </div>
                         <div className="p-6 overflow-y-auto max-h-[60vh] space-y-4">
-                            {negotiationLog.proposal && (
+                            {(negotiationLog.winning_proposal || negotiationLog.proposal) && (
                                 <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4">
-                                    <h3 className="text-sm font-bold text-blue-600 uppercase tracking-wider mb-2">Supervisor Proposal</h3>
-                                    <p className="text-slate-700 dark:text-slate-300 font-medium">{negotiationLog.proposal.action}</p>
-                                    {negotiationLog.proposal.rationale && <p className="text-sm text-slate-500 mt-2 italic">"{negotiationLog.proposal.rationale}"</p>}
+                                    <h3 className="text-sm font-bold text-blue-600 uppercase tracking-wider mb-2">Resolved Resolution</h3>
+                                    <p className="text-slate-700 dark:text-slate-300 font-medium">
+                                        {(negotiationLog.winning_proposal || negotiationLog.proposal).action}
+                                    </p>
+                                    {(negotiationLog.winning_proposal || negotiationLog.proposal).rationale && (
+                                        <p className="text-sm text-slate-500 mt-2 italic">
+                                            "{(negotiationLog.winning_proposal || negotiationLog.proposal).rationale}"
+                                        </p>
+                                    )}
                                 </div>
                             )}
-                            {negotiationLog.approvals && (
+
+                            {(negotiationLog.votes || negotiationLog.approvals) && (
                                 <div>
-                                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Agent Votes</h3>
+                                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Agent Positions</h3>
                                     <div className="grid grid-cols-2 gap-3">
-                                        {Object.entries(negotiationLog.approvals).map(([agent, approved]) => (
-                                            <div key={agent} className={`p-3 rounded-lg flex items-center gap-3 ${approved ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'}`}>
-                                                <span className={`material-symbols-outlined ${approved ? 'text-emerald-500' : 'text-red-500'}`}>{approved ? 'check_circle' : 'cancel'}</span>
-                                                <div>
-                                                    <p className="font-bold text-slate-700 text-sm">{agent}</p>
-                                                    <p className="text-xs text-slate-500">{approved ? 'Approved' : 'Rejected'}</p>
+                                        {Object.entries(negotiationLog.votes || negotiationLog.approvals).map(([agent, voterData]: [string, any]) => {
+                                            // Handle both old boolean format and new object format
+                                            const isApproved = typeof voterData === 'boolean'
+                                                ? voterData
+                                                : (voterData.choice === negotiationLog.winning_proposal?.id);
+
+                                            return (
+                                                <div key={agent} className={`p-3 rounded-lg flex items-center gap-3 ${isApproved ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'}`}>
+                                                    <span className={`material-symbols-outlined ${isApproved ? 'text-emerald-500' : 'text-red-500'}`}>
+                                                        {isApproved ? 'check_circle' : 'cancel'}
+                                                    </span>
+                                                    <div>
+                                                        <p className="font-bold text-slate-700 text-sm">{agent}</p>
+                                                        <p className="text-xs text-slate-500 line-clamp-1">
+                                                            {typeof voterData === 'object' ? voterData.reason : (isApproved ? 'Approved' : 'Rejected')}
+                                                        </p>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        ))}
+                                            );
+                                        })}
                                     </div>
+                                </div>
+                            )}
+
+                            {/* Fallback if it was escalated but we have proposals */}
+                            {negotiationLog.negotiation_result === 'escalated_to_human' && negotiationLog.proposals_considered && (
+                                <div className="space-y-3">
+                                    <h3 className="text-sm font-bold text-amber-600 uppercase tracking-wider">Unresolved Options (Escalated)</h3>
+                                    {negotiationLog.proposals_considered.map((opt: any) => (
+                                        <div key={opt.id} className="p-3 border border-slate-200 dark:border-slate-700 rounded-lg text-xs">
+                                            <span className="font-bold">{opt.action}</span>
+                                            <p className="text-slate-500 mt-1">{opt.rationale}</p>
+                                        </div>
+                                    ))}
                                 </div>
                             )}
                         </div>
@@ -499,6 +557,13 @@ export default function ConflictDashboard() {
                     </div>
                 </div>
             )}
+            {/* Manual Resolution Modal */}
+            <ManualResolutionModal
+                isOpen={showResolutionModal}
+                conflict={activeConflict}
+                onClose={() => setShowResolutionModal(false)}
+                onResolve={handleManualResolve}
+            />
         </>
     );
 }

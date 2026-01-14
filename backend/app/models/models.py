@@ -60,6 +60,9 @@ class ActionItemPriority(str, enum.Enum):
 class ProjectStatus(str, enum.Enum):
     IDENTIFIED = "identified"
     VETTING = "vetting"
+    DUE_DILIGENCE = "due_diligence"
+    FINANCING = "financing"
+    DEAL_ROOM = "deal_room"
     BANKABLE = "bankable"
     PRESENTED = "presented"
 
@@ -77,7 +80,9 @@ class ConflictType(str, enum.Enum):
     RESOURCE_CONSTRAINT = "resource_constraint"
     POLICY_MISALIGNMENT = "policy_misalignment"
     DEPENDENCY_BLOCKER = "dependency_blocker"
-    VIP_AVAILABILITY = "vip_availability" # New
+    VIP_AVAILABILITY = "vip_availability" 
+    PROJECT_DEPENDENCY_CONFLICT = "project_dependency_conflict"
+    DUPLICATE_PROJECT_CONFLICT = "duplicate_project_conflict"
 
 class ConflictSeverity(str, enum.Enum):
     LOW = "low"
@@ -104,6 +109,15 @@ class InvestorMatchStatus(str, enum.Enum):
     NEGOTIATING = "negotiating"
     COMMITTED = "committed"
 
+class DependencyType(str, enum.Enum):
+    FINISH_TO_START = "finish_to_start"
+    START_TO_START = "start_to_start"
+
+class DependencySource(str, enum.Enum):
+    TWG_PACKET = "twg_packet"
+    AI_INFERRED = "ai_inferred"
+    MANUAL = "manual"
+
 # --- Association Tables ---
 
 twg_members = Table(
@@ -114,6 +128,28 @@ twg_members = Table(
     Column("joined_at", DateTime, default=datetime.utcnow),
     extend_existing=True
 )
+
+class MeetingDependency(Base):
+    __tablename__ = "meeting_dependencies"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    source_meeting_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("meetings.id", ondelete="CASCADE"))
+    target_meeting_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("meetings.id", ondelete="CASCADE"))
+    
+    dependency_type: Mapped[DependencyType] = mapped_column(Enum(DependencyType), default=DependencyType.FINISH_TO_START)
+    lag_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    
+    # Source Tracking
+    source_type: Mapped[DependencySource] = mapped_column(Enum(DependencySource), default=DependencySource.MANUAL)
+    confidence_score: Mapped[float] = mapped_column(Float, default=1.0)
+    created_by_agent: Mapped[Optional[str]] = mapped_column(String(100), nullable=True) # e.g. "EnergyAgent"
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    source_meeting: Mapped["Meeting"] = relationship("Meeting", foreign_keys=[source_meeting_id], back_populates="successors")
+    target_meeting: Mapped["Meeting"] = relationship("Meeting", foreign_keys=[target_meeting_id], back_populates="predecessors")
 
 # MeetingParticipant Class (Association Object)
 class MeetingParticipant(Base):
@@ -290,6 +326,20 @@ class Meeting(Base):
     action_items: Mapped[List["ActionItem"]] = relationship(back_populates="meeting")
     documents: Mapped[List["Document"]] = relationship(back_populates="meeting")
 
+    # Dependency Graph Relationships
+    successors: Mapped[List["MeetingDependency"]] = relationship(
+        "MeetingDependency", 
+        foreign_keys="[MeetingDependency.source_meeting_id]", 
+        back_populates="source_meeting",
+        cascade="all, delete-orphan"
+    )
+    predecessors: Mapped[List["MeetingDependency"]] = relationship(
+        "MeetingDependency", 
+        foreign_keys="[MeetingDependency.target_meeting_id]", 
+        back_populates="target_meeting",
+        cascade="all, delete-orphan"
+    )
+
 class Agenda(Base):
     __tablename__ = "agendas"
     __table_args__ = {'extend_existing': True}
@@ -438,6 +488,7 @@ class Conflict(Base):
     description: Mapped[str] = mapped_column(Text)
     agents_involved: Mapped[List[str]] = mapped_column(JSON) # List of agent names
     conflicting_positions: Mapped[dict] = mapped_column(JSON) # Key: agent name, Value: position description
+    metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True) # New field for extra context
     
     status: Mapped[ConflictStatus] = mapped_column(Enum(ConflictStatus), default=ConflictStatus.DETECTED)
     resolution_log: Mapped[Optional[List[dict]]] = mapped_column(JSON, nullable=True) # History of negotiation
