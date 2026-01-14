@@ -5,7 +5,7 @@ import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import Input from '../../components/ui/Input';
 import api from '../../services/api';
-import { PageHeader } from '@ant-design/pro-layout'; // This might also fail if pro-layout is not installed. Checking package.json... it is NOT installed. I will remove this too.
+import api from '../../services/api';
 
 interface Conflict {
     id: string;
