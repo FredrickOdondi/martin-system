@@ -1574,8 +1574,9 @@ export default function MeetingDetail() {
                                                     Predecessors (Required Before)
                                                 </h3>
                                                 {!meeting?.predecessors?.length ? (
-                                                    <div className="p-6 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-center text-slate-400 italic text-sm">
-                                                        No prerequisites defined for this meeting.
+                                                    <div className="p-6 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-center text-slate-400 text-sm">
+                                                        <span className="block mb-1">No prerequisites defined.</span>
+                                                        <span className="text-xs opacity-70">Dependencies are automatically detected from TWG Weekly Packets.</span>
                                                     </div>
                                                 ) : (
                                                     <div className="grid gap-3">
@@ -1597,6 +1598,9 @@ export default function MeetingDetail() {
                                                                             <div className="text-xs text-slate-500">
                                                                                 Type: <span className="font-mono text-blue-600 font-bold">{dep.dependency_type}</span>
                                                                                 {dep.lag_minutes > 0 && ` • Lag: ${dep.lag_minutes}m`}
+                                                                                <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-500">
+                                                                                    {dep.source_type || 'MANUAL'}
+                                                                                </span>
                                                                             </div>
                                                                         </div>
                                                                     </div>
@@ -1615,8 +1619,9 @@ export default function MeetingDetail() {
                                                     Successors (Depends on this)
                                                 </h3>
                                                 {!meeting?.successors?.length ? (
-                                                    <div className="p-6 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-center text-slate-400 italic text-sm">
-                                                        No future meetings currently depend on this session.
+                                                    <div className="p-6 border-2 border-dashed border-slate-200 dark:border-slate-800 rounded-xl text-center text-slate-400 text-sm">
+                                                        <span className="block mb-1">No successors detected.</span>
+                                                        <span className="text-xs opacity-70">Future dependencies are automatically identified from weekly packets.</span>
                                                     </div>
                                                 ) : (
                                                     <div className="grid gap-3">
