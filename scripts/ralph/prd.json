@@ -6,7 +6,7 @@
             "title": "Deal Pipeline Data Model Updates",
             "description": "Extend the database schema to support the full Deal Pipeline architecture.\n\nRequirements:\n1. Update `Project` model in `backend/app/models/models.py`:\n   - Add columns: `pillar` (Enum/String), `lead_country` (String), `afcen_score` (Decimal), `strategic_alignment_score` (Decimal), `assigned_agent` (String).\n2. Create new `Investor` model:\n   - Fields: `name`, `sector_preferences` (JSON), `ticket_size_min`, `ticket_size_max`, `geographic_focus` (JSON), `investment_instruments` (JSON).\n3. Create new `ProjectInvestorMatch` model:\n   - Fields: `project_id` (FK), `investor_id` (FK), `match_score` (Decimal), `status` (Enum: DETECTED, CONTACTED, INTERESTED, NEGOTIATING, COMMITTED), `meeting_scheduled` (Boolean), `notes` (Text).\n4. Generate and run Alembic migration (`alembic revision --autogenerate -m 'deal_pipeline_models'`).\n\nAcceptance Criteria:\n- Models exist and migration applies successfully.\n- `Project` table has all new fields.",
             "priority": "high",
-            "passes": false
+            "passes": true
         },
         {
             "id": "DEAL-002",
