@@ -5,7 +5,7 @@ import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import Input from '../../components/ui/Input';
 import api from '../../services/api';
-import api from '../../services/api';
+
 
 interface Conflict {
     id: string;

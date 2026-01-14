@@ -28,7 +28,7 @@ def upgrade() -> None:
     
     # Create DependencySource Enum if not exists
     dependency_source = sa.Enum('TWG_PACKET', 'AI_INFERRED', 'MANUAL', name='dependencysource')
-    if not 'dependencysource' in [t.name for t in inspector.get_enums('public')]:  # Basic check, postgres specific usually but works via alembic inspect?
+    if not 'dependencysource' in [t['name'] for t in inspector.get_enums('public')]:  # Basic check, postgres specific usually but works via alembic inspect?
         # Actually safest to try/except creation or just create it if we are creating the table
         # But wait, create() might fail if exists. 
         # For Postgres, we can stick to previous logic for Enum creation which threw error if not exists.
