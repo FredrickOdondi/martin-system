@@ -97,6 +97,13 @@ class DependencyStatus(str, enum.Enum):
     SATISFIED = "satisfied"
     BLOCKED = "blocked"
 
+class InvestorMatchStatus(str, enum.Enum):
+    DETECTED = "detected"
+    CONTACTED = "contacted"
+    INTERESTED = "interested"
+    NEGOTIATING = "negotiating"
+    COMMITTED = "committed"
+
 # --- Association Tables ---
 
 twg_members = Table(
@@ -344,9 +351,17 @@ class Project(Base):
     investment_memo_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("documents.id"), nullable=True)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     
+    # Deal Pipeline fields
+    pillar: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    lead_country: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    afcen_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    strategic_alignment_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    assigned_agent: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    
     # Relationships
     twg: Mapped["TWG"] = relationship(back_populates="projects")
     investment_memo: Mapped[Optional["Document"]] = relationship(foreign_keys=[investment_memo_id])
+    investor_matches: Mapped[List["ProjectInvestorMatch"]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
 class Document(Base):
     __tablename__ = "documents"
@@ -452,3 +467,51 @@ class WeeklyPacket(Base):
 
     # Relationships
     twg: Mapped["TWG"] = relationship("TWG")
+
+
+class Investor(Base):
+    """
+    Investor entity for the Deal Pipeline.
+    Tracks investor preferences and criteria for project matching.
+    """
+    __tablename__ = "investors"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(255))
+    sector_preferences: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    ticket_size_min: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    ticket_size_max: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), nullable=True)
+    geographic_focus: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    investment_instruments: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    project_matches: Mapped[List["ProjectInvestorMatch"]] = relationship(back_populates="investor", cascade="all, delete-orphan")
+
+
+class ProjectInvestorMatch(Base):
+    """
+    Match between a Project and an Investor.
+    Tracks match score and status through the deal flow.
+    """
+    __tablename__ = "project_investor_matches"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("projects.id", ondelete="CASCADE"))
+    investor_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("investors.id", ondelete="CASCADE"))
+    
+    match_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
+    status: Mapped[InvestorMatchStatus] = mapped_column(Enum(InvestorMatchStatus), default=InvestorMatchStatus.DETECTED)
+    meeting_scheduled: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    project: Mapped["Project"] = relationship(back_populates="investor_matches")
+    investor: Mapped["Investor"] = relationship(back_populates="project_matches")

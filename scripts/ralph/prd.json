@@ -1,0 +1,40 @@
+{
+    "branchName": "ralph/deal-pipeline-implementation",
+    "stories": [
+        {
+            "id": "DEAL-001",
+            "title": "Deal Pipeline Data Model Updates",
+            "description": "Extend the database schema to support the full Deal Pipeline architecture.\n\nRequirements:\n1. Update `Project` model in `backend/app/models/models.py`:\n   - Add columns: `pillar` (Enum/String), `lead_country` (String), `afcen_score` (Decimal), `strategic_alignment_score` (Decimal), `assigned_agent` (String).\n2. Create new `Investor` model:\n   - Fields: `name`, `sector_preferences` (JSON), `ticket_size_min`, `ticket_size_max`, `geographic_focus` (JSON), `investment_instruments` (JSON).\n3. Create new `ProjectInvestorMatch` model:\n   - Fields: `project_id` (FK), `investor_id` (FK), `match_score` (Decimal), `status` (Enum: DETECTED, CONTACTED, INTERESTED, NEGOTIATING, COMMITTED), `meeting_scheduled` (Boolean), `notes` (Text).\n4. Generate and run Alembic migration (`alembic revision --autogenerate -m 'deal_pipeline_models'`).\n\nAcceptance Criteria:\n- Models exist and migration applies successfully.\n- `Project` table has all new fields.",
+            "priority": "high",
+            "passes": false
+        },
+        {
+            "id": "DEAL-002",
+            "title": "Advanced Project Pipeline Logic & Scoring",
+            "description": "Enhance `ProjectPipelineService` to include AfCEN scoring and automated stage triggers.\n\nRequirements:\n1. Implement `calculate_afcen_score(project)` method:\n   - Algorithm: Composite of `readiness_score` (40%), `strategic_alignment` (30%), `regional_impact` (derived/mocked, 30%).\n2. Implement `ingest_project_proposal(data)` method:\n   - Auto-create Project entry from `data`.\n   - Assign `afcen_score` (initial calculation).\n   - Tag by pillar.\n3. Update `advance_project_stage` logic:\n   - When entering 'FINANCING', automatically trigger Investor Matching (call placeholder service).\n\nAcceptance Criteria:\n- `calculate_afcen_score` returns 0-10 score based on inputs.\n- Ingesting a proposal creates a full DB record with initial score.\n- Stage transitions invoke correct downstream hooks.",
+            "priority": "high",
+            "passes": false
+        },
+        {
+            "id": "DEAL-003",
+            "title": "Investor Matching Engine",
+            "description": "Create `backend/app/services/investor_matching_service.py` to match projects with investors.\n\nRequirements:\n1. Define `InvestorMatchingService` class.\n2. Implement `match_investors(project_id)` method:\n   - Retrieve Project and all Investors.\n   - Logic: Match on `sector` AND `ticket_size` (project investment within investor range).\n   - Calculate `match_score` (0-100%).\n   - Create/Update `ProjectInvestorMatch` records.\n3. Implement `get_matches_for_project(project_id)`.\n\nAcceptance Criteria:\n- Matching algorithm correctly identifies investors whose criteria match the project.\n- Match records are persisted to DB.",
+            "priority": "high",
+            "passes": false
+        },
+        {
+            "id": "DEAL-004",
+            "title": "Deal Pipeline API & Dashboard Endpoints",
+            "description": "Create API routes to expose the Deal Pipeline to the frontend.\n\nRequirements:\n1. Create `backend/app/api/routes/pipeline.py`.\n2. Implement endpoints:\n   - `GET /api/v1/pipeline`: List projects with filters (stage, pillar).\n   - `GET /api/v1/pipeline/{id}`: Detailed view (include matches).\n   - `POST /api/v1/pipeline/advance`: Move stage.\n   - `POST /api/v1/matching/run`: Trigger matching manually.\n   - `GET /api/v1/deal-room/flagship`: Return top N projects by AfCEN score.\n3. Register router in `backend/app/main.py`.\n\nAcceptance Criteria:\n- All endpoints return 200 OK with correct data structures.\n- Dashboard can fetch list of 'Flagship' projects.",
+            "priority": "medium",
+            "passes": false
+        },
+        {
+            "id": "DEAL-005",
+            "title": "Agent Orchestration & Protocol Handoffs",
+            "description": "Implement cross-agent workflow logic in Supervisor/Coordinator services.\n\nRequirements:\n1. Update `ProjectPipelineService` or `SupervisorStateService` to handle `stage_changed` events:\n   - If `status == INTERESTED` (Match), auto-create scheduling task for Protocol Agent.\n   - If `status == DUE_DILIGENCE`, auto-create task for Resource Mobilization Agent (refine existing logic).\n2. Implement `_notify_agent(agent_name, message)` helper if not exists (use BroadcastService).\n\nAcceptance Criteria:\n- Simulating a match interaction creates a traceable task for the Protocol Agent.",
+            "priority": "medium",
+            "passes": false
+        }
+    ]
+}

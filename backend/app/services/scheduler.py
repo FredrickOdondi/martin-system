@@ -1,6 +1,12 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
 from app.jobs.reminder_jobs import send_upcoming_meeting_reminders, check_missing_minutes
+from app.jobs.scheduled_tasks import (
+    weekly_declaration_update,
+    weekly_progress_report,
+    setup_event_listeners,
+)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -33,6 +39,27 @@ class SchedulerService:
             id="drive_transcript_poll",
             replace_existing=True
         )
+        
+        # Weekly Declaration Update - Every Monday at 06:00 UTC
+        self.scheduler.add_job(
+            weekly_declaration_update,
+            trigger=CronTrigger(day_of_week='mon', hour=6, minute=0),
+            id="weekly_declaration_update",
+            replace_existing=True
+        )
+        logger.info("Weekly declaration update job scheduled (Mondays 06:00 UTC)")
+        
+        # Weekly Progress Report - Every Sunday at 18:00 UTC
+        self.scheduler.add_job(
+            weekly_progress_report,
+            trigger=CronTrigger(day_of_week='sun', hour=18, minute=0),
+            id="weekly_progress_report",
+            replace_existing=True
+        )
+        logger.info("Weekly progress report job scheduled (Sundays 18:00 UTC)")
+        
+        # Initialize event listeners for phase completion events
+        setup_event_listeners()
         
         self.scheduler.start()
         logger.info("APScheduler started")
