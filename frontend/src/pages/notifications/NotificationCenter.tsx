@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../hooks/useRedux';
+import { Link } from 'react-router-dom';
 
 import * as notificationService from '../../services/notificationService';
 import { NotificationType } from '../../services/notificationService';
@@ -243,25 +244,34 @@ export default function NotificationCenter() {
                                     </p>
                                 </div>
 
-                                {selectedNotification.link && (
-                                    <div className="mt-12 bg-gray-50 dark:bg-[#2d3748]/50 rounded-2xl p-6 border border-[#e7ebf3] dark:border-[#4a5568] flex items-center justify-between group">
-                                        <div className="flex items-center gap-4">
-                                            <div className="size-12 rounded-xl bg-white dark:bg-[#1a202c] flex items-center justify-center text-[#1152d4] border border-[#e7ebf3] dark:border-[#2d3748] shadow-sm">
-                                                <span className="material-symbols-outlined">link</span>
-                                            </div>
-                                            <div>
-                                                <p className="text-xs font-black text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider">Related Action</p>
-                                                <p className="text-sm font-bold text-[#0d121b] dark:text-white">View linked resource</p>
-                                            </div>
+                                <div className="mt-12 bg-gray-50 dark:bg-[#2d3748]/50 rounded-2xl p-6 border border-[#e7ebf3] dark:border-[#4a5568] flex items-center justify-between group">
+                                    <div className="flex items-center gap-4">
+                                        <div className="size-12 rounded-xl bg-white dark:bg-[#1a202c] flex items-center justify-center text-[#1152d4] border border-[#e7ebf3] dark:border-[#2d3748] shadow-sm">
+                                            <span className="material-symbols-outlined">link</span>
                                         </div>
+                                        <div>
+                                            <p className="text-xs font-black text-[#4c669a] dark:text-[#a0aec0] uppercase tracking-wider">Related Action</p>
+                                            <p className="text-sm font-bold text-[#0d121b] dark:text-white">View linked resource</p>
+                                        </div>
+                                    </div>
+                                    {selectedNotification.link && selectedNotification.link.startsWith('http') ? (
                                         <a
                                             href={selectedNotification.link}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
                                             className="px-6 py-2.5 bg-[#1152d4] hover:bg-[#0d3ea8] text-white text-sm font-bold rounded-xl transition-all shadow-md active:scale-95"
                                         >
                                             Go to Detail
                                         </a>
-                                    </div>
-                                )}
+                                    ) : (
+                                        <Link
+                                            to={selectedNotification.link || '#'}
+                                            className="px-6 py-2.5 bg-[#1152d4] hover:bg-[#0d3ea8] text-white text-sm font-bold rounded-xl transition-all shadow-md active:scale-95"
+                                        >
+                                            Go to Detail
+                                        </Link>
+                                    )}
+                                </div>
                             </div>
 
                             <div className="p-8 border-t border-[#e7ebf3] dark:border-[#2d3748] bg-gray-50/50 dark:bg-[#1a202c]/50 flex items-center justify-between">

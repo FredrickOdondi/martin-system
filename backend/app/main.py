@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
-from app.api.routes import twgs, meetings, auth, projects, action_items, documents, audit, agents, dashboard, users, notifications, supervisor, debug
+from app.api.routes import twgs, meetings, auth, projects, action_items, documents, audit, agents, dashboard, users, notifications, supervisor, debug, pipeline, conflicts
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -66,21 +66,23 @@ async def startup_event():
     logger.info("--- STARTUP DIAGNOSTICS ---")
     
     # Run Database Migrations
-    # Run Database Migrations
-    try:
-        logger.info("Running database migrations...")
-        if os.path.exists("alembic.ini"):
-            alembic_cfg = Config("alembic.ini")
-            # Run upgrade head in a separate thread to avoid asyncio loop conflict
-            # because env.py calls asyncio.run()
-            import asyncio
-            await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
-            logger.info("Database migrations completed successfully!")
-        else:
-            logger.warning("alembic.ini not found! Skipping migrations.")
-    except Exception as e:
-        logger.error(f"Migration failed: {e}")
-        # Continue startup
+    # TEMPORARILY DISABLED: asyncio event loop conflict
+    # TODO: Run migrations manually with: alembic upgrade head
+    logger.info("Skipping automatic migrations (run manually: alembic upgrade head)")
+    # try:
+    #     logger.info("Running database migrations...")
+    #     if os.path.exists("alembic.ini"):
+    #         alembic_cfg = Config("alembic.ini")
+    #         # Run upgrade head in a separate thread to avoid asyncio loop conflict
+    #         # because env.py calls asyncio.run()
+    #         import asyncio
+    #         await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
+    #         logger.info("Database migrations completed successfully!")
+    #     else:
+    #         logger.warning("alembic.ini not found! Skipping migrations.")
+    # except Exception as e:
+    #     logger.error(f"Migration failed: {e}")
+    #     # Continue startup
     
     logger.info(f"API_V1_STR: {settings.API_V1_STR}")
     logger.info(f"CORS_ORIGINS: {cors_origins}")
@@ -170,6 +172,8 @@ app.include_router(users.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(notifications.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(supervisor.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(debug.router, prefix=f"{settings.API_V1_STR}")
+app.include_router(pipeline.router, prefix=f"{settings.API_V1_STR}")
+app.include_router(conflicts.router, prefix=f"{settings.API_V1_STR}")
 
 @app.get("/")
 async def root():

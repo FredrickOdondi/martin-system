@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from app.core.ws_manager import ws_manager
 from app.utils.security import verify_token
 
-from app.schemas.schemas import ConflictRead
+from app.schemas.schemas import ConflictRead, ManualConflictResolution
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -82,6 +82,73 @@ async def get_autonomous_conflict_log(
         },
         "conflicts": conflicts
     }
+
+@router.post("/conflicts/{conflict_id}/manual-resolve")
+async def manual_resolve_conflict(
+    conflict_id: str,
+    resolution: ManualConflictResolution,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Manually resolve an escalated conflict by rescheduling or cancelling a meeting.
+    Restricted to Admins and Secretariat Leads.
+    """
+    from app.models.models import Conflict, ConflictStatus, UserRole
+    
+    # 1. Check Permissions
+    if current_user.role not in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
+        raise HTTPException(status_code=403, detail="Only Secretariat can manually force resolution.")
+        
+    # 2. Get Conflict
+    result = await db.execute(select(Conflict).where(Conflict.id == conflict_id))
+    conflict = result.scalars().first()
+    if not conflict:
+        raise HTTPException(status_code=404, detail="Conflict not found")
+        
+    # 3. Get Meeting to change
+    m_result = await db.execute(select(Meeting).where(Meeting.id == resolution.meeting_id))
+    meeting = m_result.scalars().first()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Target meeting not found")
+        
+    # 4. Apply Resolution
+    log_entry = {
+        "timestamp": str(datetime.datetime.utcnow()),
+        "actor": "human_secretariat",
+        "action": resolution.resolution_type,
+        "meeting_id": str(resolution.meeting_id),
+        "reason": resolution.reason
+    }
+    
+    if resolution.resolution_type == "cancel":
+        meeting.status = MeetingStatus.CANCELLED
+        log_entry["details"] = "Meeting cancelled manually."
+        
+    elif resolution.resolution_type == "reschedule":
+        if not resolution.new_time:
+            raise HTTPException(status_code=400, detail="New time is required for rescheduling.")
+        old_time = meeting.scheduled_at
+        meeting.scheduled_at = resolution.new_time
+        log_entry["details"] = f"Rescheduled from {old_time} to {resolution.new_time}"
+        
+    else:
+        raise HTTPException(status_code=400, detail="Invalid resolution type")
+        
+    # 5. Update Conflict Status
+    conflict.status = ConflictStatus.RESOLVED
+    conflict.human_action_required = False
+    conflict.resolved_at = datetime.datetime.utcnow()
+    
+    # Update log safely
+    current_log = list(conflict.resolution_log) if conflict.resolution_log else []
+    current_log.append(log_entry)
+    conflict.resolution_log = current_log
+    
+    await db.commit()
+    await db.refresh(conflict)
+    
+    return {"status": "success", "conflict_status": conflict.status}
 
 @router.get("/stats", response_model=Dict[str, Any])
 async def get_dashboard_stats(
@@ -614,7 +681,12 @@ async def force_reconciliation(
                     severity=ConflictSeverity.HIGH,
                     status=ConflictStatus.DETECTED,
                     agents_involved=[m.twg.name if m.twg else "Unknown" for m in slot_meetings],
-                    conflicting_positions={m.title: f"Scheduled at {slot}" for m in slot_meetings},
+                    conflicting_positions={
+                        "meeting_1": str(slot_meetings[0].id),
+                        "meeting_2": str(slot_meetings[1].id),
+                        slot_meetings[0].title: f"Scheduled at {slot}",
+                        slot_meetings[1].title: f"Scheduled at {slot}"
+                    },
                     detected_at=datetime.datetime.utcnow()
                 )
                 db.add(new_conflict)
@@ -658,7 +730,12 @@ async def force_reconciliation(
                             severity=ConflictSeverity.HIGH,
                             status=ConflictStatus.DETECTED,
                             agents_involved=[b1["twg_id"] or "Unknown", b2["twg_id"] or "Unknown"],
-                            conflicting_positions={b1["title"]: venue, b2["title"]: venue},
+                            conflicting_positions={
+                                "meeting_1": b1["meeting_id"],
+                                "meeting_2": b2["meeting_id"],
+                                b1["title"]: venue, 
+                                b2["title"]: venue
+                            },
                             detected_at=datetime.datetime.utcnow()
                         )
                         db.add(new_conflict)
@@ -698,7 +775,12 @@ async def force_reconciliation(
                             severity=ConflictSeverity.HIGH,
                             status=ConflictStatus.DETECTED,
                             agents_involved=[email],
-                            conflicting_positions={b1["title"]: "Conflict", b2["title"]: "Conflict"},
+                            conflicting_positions={
+                                "meeting_1": b1["meeting_id"],
+                                "meeting_2": b2["meeting_id"],
+                                b1["title"]: "Conflict",
+                                b2["title"]: "Conflict"
+                            },
                             detected_at=datetime.datetime.utcnow()
                         )
                         db.add(new_conflict)

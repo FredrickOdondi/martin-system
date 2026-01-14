@@ -20,6 +20,11 @@ from app.models.models import Document
 from app.core.database import get_db_session_context
 from sqlalchemy import select, and_, or_
 from datetime import timedelta
+import math
+
+from app.models.models import Project, Conflict, ConflictType, ConflictSeverity, ConflictStatus, Conflict
+from app.core.knowledge_base import get_knowledge_base
+from app.services.llm_service import get_llm_service
 
 
 class ConflictDetector:
@@ -547,3 +552,178 @@ If no conflicts, respond with: NO CONFLICT
             self._conflict_history.extend(conflicts)
             
         return conflicts
+
+    async def detect_project_dependency_conflicts(self, db: Any) -> List[Conflict]:
+        """
+        Scans project descriptions for dependency indicators using LLM semantic analysis.
+        """
+        # Get active projects
+        result = await db.execute(select(Project).where(Project.status.not_in(["completed", "cancelled"])))
+        projects = result.scalars().all()
+        
+        conflicts = []
+        llm = get_llm_service()
+        
+        # Compare each project pair
+        # Limit to recent/relevant pairs to avoid N^2 explosion in prod (or batch)
+        # For prototype, we do N^2 but with simple checks first
+        
+        for i, project_a in enumerate(projects):
+            for project_b in projects[i+1:]:
+                # Only check if in different pillars/TWGs or explicitly requested
+                if project_a.id == project_b.id:
+                    continue
+                
+                # Ask LLM to analyze dependency
+                prompt = f"""
+                Analyze if Project A depends on Project B:
+                
+                PROJECT A:
+                Name: {project_a.name}
+                Description: {project_a.description}
+                Sector: {project_a.pillar}
+                
+                PROJECT B:
+                Name: {project_b.name}
+                Description: {project_b.description}
+                Sector: {project_b.pillar}
+                
+                Does Project A require Project B to be completed first?
+                
+                Return VALID JSON ONLY:
+                {{
+                    "has_dependency": boolean,
+                    "dependency_type": "infrastructure|policy|financing|technical|none",
+                    "confidence": 0.0-1.0,
+                    "reason": "explanation",
+                    "estimated_delay_days": integer (0 if no dependency)
+                }}
+                """
+                
+                try:
+                    analysis_str = llm.chat(prompt, max_tokens=500)
+                    # Clean json
+                    if "```json" in analysis_str:
+                        analysis_str = analysis_str.split("```json")[1].split("```")[0].strip()
+                    elif "```" in analysis_str:
+                         analysis_str = analysis_str.split("```")[1].split("```")[0].strip()
+                         
+                    analysis = json.loads(analysis_str)
+                    
+                    if analysis.get("has_dependency") and analysis.get("confidence", 0) > 0.7:
+                        
+                        # Determine severity based on delay and type
+                        delay = analysis.get("estimated_delay_days", 0)
+                        severity = ConflictSeverity.LOW
+                        if delay > 180: severity = ConflictSeverity.CRITICAL
+                        elif delay > 90: severity = ConflictSeverity.HIGH
+                        elif delay > 30: severity = ConflictSeverity.MEDIUM
+                        
+                        # Create conflict (in memory, caller saves)
+                        meta = {
+                            "dependent_project_id": str(project_a.id),
+                            "prerequisite_project_id": str(project_b.id),
+                            "dependency_type": analysis.get("dependency_type"),
+                            "confidence": analysis.get("confidence"),
+                            "reason": analysis.get("reason"),
+                            "estimated_delay_days": delay
+                        }
+                        
+                        conflicts.append(Conflict(
+                            conflict_type=ConflictType.PROJECT_DEPENDENCY_CONFLICT,
+                            severity=severity,
+                            agents_involved=[str(project_a.twg_id), str(project_b.twg_id)],
+                            description=f"Dependency: '{project_a.name}' depends on '{project_b.name}' ({analysis.get('reason')})",
+                            conflicting_positions={
+                                "dependent": f"{project_a.name} (Start: {project_a.metadata_json.get('planned_start', 'TBD') if project_a.metadata_json else 'TBD'})",
+                                "prerequisite": f"{project_b.name} (End: {project_b.metadata_json.get('planned_end', 'TBD') if project_b.metadata_json else 'TBD'})"
+                            },
+                            metadata_json=meta,
+                            status=ConflictStatus.DETECTED,
+                            detected_at=datetime.utcnow()
+                        ))
+                except Exception as e:
+                    logger.error(f"Error analyzing project dependency: {e}")
+                    
+        return conflicts
+
+    async def detect_duplicate_projects(self, db: Any) -> List[Conflict]:
+        """
+        Finds when two or more TWGs are proposing essentially the same project using embeddings.
+        """
+        result = await db.execute(select(Project).where(Project.status.not_in(["completed", "cancelled"])))
+        projects = result.scalars().all()
+        
+        conflicts = []
+        kb = get_knowledge_base()
+        
+        # Generate embeddings for all project descriptions
+        embeddings_cache = {}
+        for project in projects:
+            combined_text = f"{project.name} {project.description} {project.pillar or ''}"
+            # Batching would be better, but assuming low volume for now
+            try:
+                emb = kb.generate_embeddings([combined_text])[0]
+                embeddings_cache[project.id] = emb
+            except Exception as e:
+                logger.error(f"Failed to embed project {project.id}: {e}")
+        
+        # Compare pairs
+        for i, project_a in enumerate(projects):
+            for project_b in projects[i+1:]:
+                # Skip if same TWG (internal dupes handled differently usually, but let's check widely)
+                if project_a.twg_id == project_b.twg_id:
+                     continue
+                     
+                if project_a.id not in embeddings_cache or project_b.id not in embeddings_cache:
+                    continue
+                    
+                # Cosine Similarity
+                similarity = self._cosine_similarity(embeddings_cache[project_a.id], embeddings_cache[project_b.id])
+                
+                if similarity > 0.75:
+                    action = "DIFFERENTIATE"
+                    severity = ConflictSeverity.MEDIUM
+                    
+                    if similarity > 0.95:
+                        severity = ConflictSeverity.CRITICAL
+                        action = "MERGE"
+                    elif similarity > 0.85:
+                        severity = ConflictSeverity.HIGH
+                        action = "REVIEW"
+                        
+                    # Check Geography
+                    geo_match = (project_a.lead_country == project_b.lead_country)
+                    
+                    conflicts.append(Conflict(
+                        conflict_type=ConflictType.DUPLICATE_PROJECT_CONFLICT,
+                        severity=severity,
+                        agents_involved=[str(project_a.twg_id), str(project_b.twg_id)],
+                        description=f"Potential Duplicate: '{project_a.name}' vs '{project_b.name}' (Similarity: {similarity:.2f})",
+                        conflicting_positions={
+                            "project_a": f"{project_a.name} ({project_a.pillar})",
+                            "project_b": f"{project_b.name} ({project_b.pillar})"
+                        },
+                        metadata_json={
+                            "project_a_id": str(project_a.id),
+                            "project_b_id": str(project_b.id),
+                            "similarity_score": round(similarity, 3),
+                            "suggested_action": action,
+                            "geo_match": geo_match
+                        },
+                        status=ConflictStatus.DETECTED,
+                        human_action_required=True,
+                        detected_at=datetime.utcnow()
+                    ))
+                    
+        return conflicts
+
+    def _cosine_similarity(self, v1: List[float], v2: List[float]) -> float:
+        """Calculate cosine similarity between two vectors"""
+        dot_product = sum(a * b for a, b in zip(v1, v2))
+        norm_v1 = math.sqrt(sum(a * a for a in v1))
+        norm_v2 = math.sqrt(sum(b * b for b in v2))
+        if norm_v1 == 0 or norm_v2 == 0:
+            return 0.0
+        return dot_product / (norm_v1 * norm_v2) 
+
