@@ -134,6 +134,16 @@ export const dismissConflict = async (conflictId: string, resolution: string = '
     return response.data;
 };
 
+export const resolveConflictManually = async (conflictId: string, resolutionType: string, meetingId: string, newTime?: string, reason?: string): Promise<any> => {
+    const response = await api.post(`/dashboard/conflicts/${conflictId}/manual-resolve`, {
+        resolution_type: resolutionType,
+        meeting_id: meetingId,
+        new_time: newTime,
+        reason: reason
+    });
+    return response.data;
+};
+
 export interface AutonomousLogStats {
     total_detected: number;
     auto_resolved: number;

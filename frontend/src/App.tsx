@@ -29,6 +29,7 @@ import NotificationCenter from './pages/notifications/NotificationCenter'
 import TeamManagement from './pages/admin/TeamManagement'
 import ControlTower from './pages/admin/ControlTower'
 import AuditLogs from './pages/admin/AuditLogs'
+import ProjectConflicts from './pages/Conflicts/ProjectConflicts'
 import ProtectedRoute from './components/ProtectedRoute'
 
 function HomeRedirect() {
@@ -118,6 +119,7 @@ function App() {
                 <Route path="/meetings/:id" element={<MeetingDetail />} />
                 <Route path="/meetings/:id/live" element={<LiveMeeting />} />
                 <Route path="/knowledge-base" element={<KnowledgeBase />} />
+                <Route path="/conflicts" element={<ProjectConflicts />} />
                 <Route path="/deal-pipeline" element={<DealPipeline />} />
                 <Route path="/deal-pipeline/new" element={<NewProject />} />
                 <Route path="/deal-pipeline/:projectId" element={<ProjectDetails />} />

@@ -150,7 +150,8 @@ const NewProject: React.FC = () => {
         investment_size: investmentAmount,
         currency: formData.currency,
         readiness_score: 0,
-        status: 'IDENTIFIED',
+        strategic_alignment_score: 0,
+        status: 'identified',
         metadata_json: {
           pillar: formData.pillar,
           leadCountry: formData.leadCountry,
@@ -194,9 +195,16 @@ const NewProject: React.FC = () => {
         status: err.response?.status,
       });
 
-      const errorMessage = err.response?.data?.detail
-        || err.message
-        || 'Failed to create project. Please try again.';
+      let errorMessage = 'Failed to create project. Please try again.';
+      if (err.response?.data?.detail) {
+        if (typeof err.response.data.detail === 'string') {
+          errorMessage = err.response.data.detail;
+        } else {
+          errorMessage = JSON.stringify(err.response.data.detail);
+        }
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
       setError(errorMessage);
     } finally {
       setIsSubmitting(false);

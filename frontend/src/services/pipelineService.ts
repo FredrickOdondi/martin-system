@@ -1,0 +1,55 @@
+
+import api from './api';
+import {
+    Project, ProjectStatus, PipelineStats,
+    ProjectIngestDTO, InvestorMatch, UpdateMatchStatusDTO
+} from '../types/pipeline';
+
+export const pipelineService = {
+    // Pipeline Views
+    listProjects: async (stage?: ProjectStatus, pillar?: string): Promise<Project[]> => {
+        const params = new URLSearchParams();
+        if (stage) params.append('stage', stage);
+        if (pillar) params.append('pillar', pillar);
+
+        const response = await api.get(`/pipeline/?${params.toString()}`);
+        return response.data;
+    },
+
+    getProject: async (id: string): Promise<Project> => {
+        const response = await api.get(`/pipeline/${id}`);
+        return response.data;
+    },
+
+    getStats: async (): Promise<PipelineStats> => {
+        const response = await api.get('/pipeline/dashboard/stats');
+        return response.data;
+    },
+
+    // Actions
+    ingestProject: async (data: ProjectIngestDTO): Promise<Project> => {
+        const response = await api.post('/pipeline/ingest', data);
+        return response.data;
+    },
+
+    advanceStage: async (id: string, newStage: ProjectStatus, notes?: string): Promise<Project> => {
+        const response = await api.post(`/pipeline/${id}/advance`, { new_stage: newStage, notes });
+        return response.data;
+    },
+
+    // Investor Matching
+    getMatches: async (projectId: string): Promise<InvestorMatch[]> => {
+        const response = await api.get(`/pipeline/${projectId}/matches`);
+        return response.data;
+    },
+
+    triggerMatching: async (projectId: string): Promise<any> => {
+        const response = await api.post(`/pipeline/${projectId}/match`);
+        return response.data;
+    },
+
+    updateMatchStatus: async (matchId: string, data: UpdateMatchStatusDTO): Promise<any> => {
+        const response = await api.patch(`/pipeline/matches/${matchId}`, data);
+        return response.data;
+    }
+};

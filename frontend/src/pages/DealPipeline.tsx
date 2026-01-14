@@ -1,20 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-
-
-interface Project {
-  id: string;
-  name: string;
-  pillar: string;
-  leadCountry: string;
-  leadCompany: string;
-  investment: string;
-  readinessScore: number;
-  status: 'In Review' | 'Approved' | 'Draft';
-  aiScored: boolean;
-  icon: string;
-  iconColor: string;
-}
+import { pipelineService } from '../services/pipelineService';
+import { Project, PipelineStats, ProjectStatus } from '../types/pipeline';
 
 const DealPipeline: React.FC = () => {
   const navigate = useNavigate();
@@ -22,84 +9,67 @@ const DealPipeline: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [showAIInsight, setShowAIInsight] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
-  // const [showFilterModal, setShowFilterModal] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [stats, setStats] = useState<PipelineStats | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const projects: Project[] = [
-    {
-      id: '#ECW-2024-001',
-      name: 'West African Rail Link',
-      pillar: 'Infrastructure',
-      leadCountry: 'Nigeria',
-      leadCompany: 'RailCo Ltd.',
-      investment: '$1.2B',
-      readinessScore: 82,
-      status: 'In Review',
-      aiScored: true,
-      icon: 'train',
-      iconColor: 'blue',
-    },
-    {
-      id: '#ECW-2024-042',
-      name: 'Solar Grid Expansion',
-      pillar: 'Energy',
-      leadCountry: 'Ghana',
-      leadCompany: 'Volta Energy',
-      investment: '$450M',
-      readinessScore: 95,
-      status: 'Approved',
-      aiScored: false,
-      icon: 'solar_power',
-      iconColor: 'orange',
-    },
-    {
-      id: '#ECW-2024-088',
-      name: 'Agribusiness Hub',
-      pillar: 'Agriculture',
-      leadCountry: "Côte d'Ivoire",
-      leadCompany: 'AgriCorp Int.',
-      investment: '$85M',
-      readinessScore: 45,
-      status: 'Draft',
-      aiScored: false,
-      icon: 'agriculture',
-      iconColor: 'green',
-    },
-    {
-      id: '#ECW-2024-102',
-      name: 'Tech City Phase 1',
-      pillar: 'Technology',
-      leadCountry: 'Senegal',
-      leadCompany: 'Dakar Innovations',
-      investment: '$2.1B',
-      readinessScore: 78,
-      status: 'In Review',
-      aiScored: true,
-      icon: 'computer',
-      iconColor: 'indigo',
-    },
-  ];
+  // Fetch Data
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const [projectsData, statsData] = await Promise.all([
+          pipelineService.listProjects(
+            statusFilter !== 'all' ? (statusFilter as ProjectStatus) : undefined,
+            activeTab !== 'all' ? activeTab : undefined
+          ),
+          pipelineService.getStats()
+        ]);
+        setProjects(projectsData);
+        setStats(statsData);
+      } catch (error) {
+        console.error("Failed to fetch pipeline data", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, [activeTab, statusFilter]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'Approved':
+      case 'approved':
+      case 'bankable':
         return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300';
-      case 'In Review':
+      case 'vetting':
+      case 'in_review':
         return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
-      case 'Draft':
+      case 'identified':
+      case 'draft':
         return 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300';
+      case 'financing':
+        return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300';
       default:
         return 'bg-slate-100 text-slate-800';
     }
   };
 
-  const getIconColorClasses = (color: string) => {
-    const colors: Record<string, string> = {
-      blue: 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400',
-      orange: 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400',
-      green: 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400',
-      indigo: 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400',
-    };
-    return colors[color] || colors.blue;
+  const getPillarIcon = (pillar?: string) => {
+    const p = pillar?.toLowerCase() || '';
+    if (p.includes('infra')) return 'train';
+    if (p.includes('energy')) return 'solar_power';
+    if (p.includes('agri')) return 'agriculture';
+    if (p.includes('tech') || p.includes('digital')) return 'computer';
+    return 'business';
+  };
+
+  const getIconColorClasses = (pillar?: string) => {
+    const p = pillar?.toLowerCase() || '';
+    if (p.includes('infra')) return 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400';
+    if (p.includes('energy')) return 'bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400';
+    if (p.includes('agri')) return 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400';
+    if (p.includes('tech') || p.includes('digital')) return 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400';
+    return 'bg-slate-100 dark:bg-slate-900/30 text-slate-600 dark:text-slate-400';
   };
 
   const getProgressColor = (score: number) => {
@@ -108,19 +78,13 @@ const DealPipeline: React.FC = () => {
     return 'bg-yellow-500';
   };
 
-  const filteredProjects = projects.filter(project => {
-    if (activeTab !== 'all' && project.pillar.toLowerCase() !== activeTab) return false;
-    if (statusFilter !== 'all' && project.status.toLowerCase().replace(' ', '-') !== statusFilter) return false;
-    return true;
-  });
-
   const handleExport = () => {
     // Create CSV content
-    const headers = ['ID', 'Name', 'Pillar', 'Lead Country', 'Lead Company', 'Investment', 'Readiness Score', 'Status'];
+    const headers = ['ID', 'Name', 'Pillar', 'Investment', 'Readiness Score', 'Status'];
     const csvContent = [
       headers.join(','),
-      ...filteredProjects.map(p =>
-        [p.id, p.name, p.pillar, p.leadCountry, p.leadCompany, p.investment, p.readinessScore, p.status].join(',')
+      ...projects.map(p =>
+        [p.id, p.name, p.pillar, p.investment_size, p.readiness_score, p.status].join(',')
       )
     ].join('\n');
 
@@ -140,23 +104,23 @@ const DealPipeline: React.FC = () => {
     navigate('/deal-pipeline/new');
   };
 
-  const handleReviewSuggestions = () => {
-    alert('AI Suggestions feature coming soon!');
+  const formatCurrency = (amount: number) => {
+    if (amount >= 1000000000) return `$${(amount / 1000000000).toFixed(1)}B`;
+    if (amount >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`;
+    return `$${amount.toLocaleString()}`;
   };
 
-  const handleFilterClick = () => {
-    // setShowFilterModal(true);
-    alert('Advanced filters modal coming soon!');
-  };
+  // Pagination logic
+  const itemsPerPage = 10;
+  const totalPages = Math.ceil(projects.length / itemsPerPage);
+  const paginatedProjects = projects.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
   const handlePreviousPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(currentPage - 1);
-    }
+    if (currentPage > 1) setCurrentPage(currentPage - 1);
   };
 
   const handleNextPage = () => {
-    setCurrentPage(currentPage + 1);
+    if (currentPage < totalPages) setCurrentPage(currentPage + 1);
   };
 
   return (
@@ -198,48 +162,56 @@ const DealPipeline: React.FC = () => {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Total Projects Card */}
         <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col gap-1">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-              Total Pipeline Value
+              Total Projects
             </p>
             <span className="material-symbols-outlined text-green-600 bg-green-100 dark:bg-green-900/30 p-1 rounded">
               trending_up
             </span>
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white mt-2">$45.2B</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white mt-2">
+            {stats ? stats.total_projects : '-'}
+          </p>
           <p className="text-xs text-green-600 font-medium flex items-center gap-1 mt-1">
-            <span className="material-symbols-outlined text-[14px]">arrow_upward</span>
-            12% vs last month
+            Active Pipeline
           </p>
         </div>
 
+        {/* Healthy Projects Card */}
         <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col gap-1">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-              High Readiness Projects
+              Healthy Projects
             </p>
             <span className="material-symbols-outlined text-primary bg-primary/10 dark:bg-primary/20 p-1 rounded">
               verified
             </span>
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white mt-2">12</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white mt-2">
+            {stats ? stats.healthy_projects : '-'}
+          </p>
           <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-1">
-            Ready for immediate investment
+            On track
           </p>
         </div>
 
+        {/* Stalled Projects Card */}
         <div className="bg-white dark:bg-slate-800 p-5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm flex flex-col gap-1">
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
-              Pending AI Review
+              Stalled / Attention
             </p>
-            <span className="material-symbols-outlined text-purple-600 bg-purple-100 dark:bg-purple-900/30 p-1 rounded">
-              smart_toy
+            <span className="material-symbols-outlined text-red-600 bg-red-100 dark:bg-red-900/30 p-1 rounded">
+              warning
             </span>
           </div>
-          <p className="text-2xl font-bold text-slate-900 dark:text-white mt-2">5</p>
-          <p className="text-xs text-purple-600 font-medium mt-1">Awaiting agent analysis</p>
+          <p className="text-2xl font-bold text-slate-900 dark:text-white mt-2">
+            {stats ? stats.stalled_projects.length : '-'}
+          </p>
+          <p className="text-xs text-red-600 font-medium mt-1">Awaiting action</p>
         </div>
       </div>
 
@@ -255,15 +227,11 @@ const DealPipeline: React.FC = () => {
               AI Agent 'Alpha' Insight
             </h3>
             <p className="text-sm text-slate-600 dark:text-slate-300 mt-1">
-              I've identified missing financial data in 3 new project submissions. Updating these
-              could increase the overall readiness score by ~15%.
+              {stats && stats.stalled_projects.length > 0
+                ? `I've identified ${stats.stalled_projects.length} stalled projects that require your attention to move to the next stage.`
+                : "Pipeline looks healthy. No immediate actions required."}
             </p>
           </div>
-          <button
-            onClick={handleReviewSuggestions}
-            className="text-sm font-medium text-indigo-700 dark:text-indigo-300 hover:underline px-2 z-10 whitespace-nowrap self-center">
-            Review Suggestions
-          </button>
           <button
             onClick={() => setShowAIInsight(false)}
             className="absolute top-2 right-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
@@ -324,16 +292,16 @@ const DealPipeline: React.FC = () => {
               className="w-full appearance-none bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-sm rounded-lg focus:ring-primary focus:border-primary block px-3 py-2 pr-8"
             >
               <option value="all">Status: All</option>
-              <option value="approved">Approved</option>
-              <option value="in-review">In Review</option>
-              <option value="draft">Draft</option>
+              <option value={ProjectStatus.IDENTIFIED}>Identified</option>
+              <option value={ProjectStatus.VETTING}>Vetting</option>
+              <option value={ProjectStatus.BANKABLE}>Bankable</option>
+              <option value={ProjectStatus.FINANCING}>Financing</option>
             </select>
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
               <span className="material-symbols-outlined text-[20px]">expand_more</span>
             </div>
           </div>
           <button
-            onClick={handleFilterClick}
             className="p-2 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600">
             <span className="material-symbols-outlined text-[20px]">filter_list</span>
           </button>
@@ -342,144 +310,139 @@ const DealPipeline: React.FC = () => {
 
       {/* Data Table */}
       <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Project Name
-                </th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Pillar
-                </th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Lead Country/Co.
-                </th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Investment
-                </th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Readiness Score
-                </th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
-              {filteredProjects.map((project) => (
-                <tr
-                  key={project.id}
-                  onClick={() => navigate(`/deal-pipeline/${encodeURIComponent(project.id)}`)}
-                  className="group hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors cursor-pointer"
-                >
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`h-10 w-10 rounded-lg flex items-center justify-center shrink-0 ${getIconColorClasses(
-                          project.iconColor
+        {loading ? (
+          <div className="p-8 text-center text-slate-500">Loading projects...</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Project Name
+                  </th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Pillar
+                  </th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Size
+                  </th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Scores (AfCEN)
+                  </th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider text-right">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
+                {paginatedProjects.map((project) => (
+                  <tr
+                    key={project.id}
+                    onClick={() => navigate(`/deal-pipeline/${encodeURIComponent(project.id)}`)}
+                    className="group hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors cursor-pointer"
+                  >
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`h-10 w-10 rounded-lg flex items-center justify-center shrink-0 ${getIconColorClasses(
+                            project.pillar
+                          )}`}
+                        >
+                          <span className="material-symbols-outlined">{getPillarIcon(project.pillar)}</span>
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                            {project.name}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {project.lead_country || 'Regional'}
+                          </p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600">
+                        {project.pillar || 'General'}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span className="text-sm font-medium text-slate-900 dark:text-white">
+                        {formatCurrency(project.investment_size)}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap min-w-[180px]">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="font-medium text-slate-700 dark:text-slate-200">
+                            {project.afcen_score ? project.afcen_score.toFixed(0) : 0}%
+                          </span>
+                          {project.afcen_score != null && (
+                            <div
+                              className="flex items-center gap-1 text-purple-600 dark:text-purple-400"
+                              title="AI Calculated Score"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">
+                                auto_awesome
+                              </span>
+                              <span className="text-[10px] font-bold">AI SCORED</span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
+                          <div
+                            className={`${getProgressColor(project.afcen_score || 0)} h-2 rounded-full`}
+                            style={{ width: `${project.afcen_score || 0}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
+                          project.status
                         )}`}
                       >
-                        <span className="material-symbols-outlined">{project.icon}</span>
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white">
-                          {project.name}
-                        </p>
-                        <p className="text-xs text-slate-500">ID: {project.id}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600">
-                      {project.pillar}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex flex-col">
-                      <span className="text-sm text-slate-900 dark:text-white">
-                        {project.leadCountry}
+                        {project.status.replace('_', ' ').toUpperCase()}
                       </span>
-                      <span className="text-xs text-slate-500">{project.leadCompany}</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm font-medium text-slate-900 dark:text-white">
-                      {project.investment}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap min-w-[180px]">
-                    <div className="flex flex-col gap-1">
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="font-medium text-slate-700 dark:text-slate-200">
-                          {project.readinessScore}%
-                        </span>
-                        {project.aiScored && (
-                          <div
-                            className="flex items-center gap-1 text-purple-600 dark:text-purple-400"
-                            title="AI Calculated Score"
-                          >
-                            <span className="material-symbols-outlined text-[14px]">
-                              auto_awesome
-                            </span>
-                            <span className="text-[10px] font-bold">AI SCORED</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
-                        <div
-                          className={`${getProgressColor(project.readinessScore)} h-2 rounded-full`}
-                          style={{ width: `${project.readinessScore}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span
-                      className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(
-                        project.status
-                      )}`}
-                    >
-                      {project.status}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/deal-pipeline/${encodeURIComponent(project.id)}`);
-                      }}
-                      className="text-slate-400 hover:text-primary transition-colors p-1"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">visibility</span>
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        alert('More options menu coming soon!');
-                      }}
-                      className="text-slate-400 hover:text-primary transition-colors p-1 ml-2"
-                    >
-                      <span className="material-symbols-outlined text-[20px]">more_vert</span>
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-right">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/deal-pipeline/${encodeURIComponent(project.id)}`);
+                        }}
+                        className="text-slate-400 hover:text-primary transition-colors p-1"
+                      >
+                        <span className="material-symbols-outlined text-[20px]">visibility</span>
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // alert('More options menu coming soon!');
+                        }}
+                        className="text-slate-400 hover:text-primary transition-colors p-1 ml-2"
+                      >
+                        <span className="material-symbols-outlined text-[20px]">more_vert</span>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Pagination */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800">
           <div className="text-sm text-slate-500 dark:text-slate-400">
-            Showing <span className="font-medium text-slate-900 dark:text-white">1</span> to{' '}
+            Showing <span className="font-medium text-slate-900 dark:text-white">{(currentPage - 1) * itemsPerPage + 1}</span> to{' '}
             <span className="font-medium text-slate-900 dark:text-white">
-              {filteredProjects.length}
+              {Math.min(currentPage * itemsPerPage, projects.length)}
             </span>{' '}
-            of <span className="font-medium text-slate-900 dark:text-white">24</span> results
+            of <span className="font-medium text-slate-900 dark:text-white">{projects.length}</span> results
           </div>
           <div className="flex gap-2">
             <button
@@ -490,7 +453,8 @@ const DealPipeline: React.FC = () => {
             </button>
             <button
               onClick={handleNextPage}
-              className="px-3 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600">
+              disabled={currentPage >= totalPages}
+              className="px-3 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed">
               Next
             </button>
           </div>
