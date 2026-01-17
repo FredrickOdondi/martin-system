@@ -15,8 +15,12 @@ from app.services.project_pipeline_service import ProjectPipelineService
 from app.services.investor_matching_service import get_investor_matching_service
 from app.schemas.pipeline_schemas import (
     ProjectIngest, ProjectPipelineRead, ProjectAdvanceStage, 
-    InvestorMatchRead, PipelineStats, InvestorMatchUpdate, InvestorRead
+    InvestorMatchRead, PipelineStats, InvestorMatchUpdate, InvestorRead,
+    ProjectScoreDetailRead, ScoringCriteriaRead
 )
+from app.models.models import ProjectScoreDetail, ScoringCriteria
+from app.services.lifecycle_service import LifecycleService
+from app.services.project_insights_service import insights_service
 
 router = APIRouter(prefix="/pipeline", tags=["deal-pipeline"])
 
@@ -57,7 +61,11 @@ async def list_pipeline_projects(
             lead_country=p.lead_country,
             pillar=p.pillar,
             assigned_agent=p.assigned_agent,
-            updated_at=getattr(p, 'created_at', datetime.now(UTC))
+            updated_at=getattr(p, 'created_at', datetime.now(UTC)),
+            is_flagship=p.is_flagship,
+            funding_secured_usd=p.funding_secured_usd or 0,
+            deal_room_priority=p.deal_room_priority,
+            allowed_transitions=LifecycleService.get_allowed_transitions(p.status, current_user.role)
         ) for p in projects
     ]
 
@@ -91,7 +99,11 @@ async def ingest_project(
         lead_country=p.lead_country,
         pillar=p.pillar,
         assigned_agent=p.assigned_agent,
-        updated_at=getattr(p, 'created_at', datetime.now(UTC))
+        updated_at=getattr(p, 'created_at', datetime.now(UTC)),
+        is_flagship=p.is_flagship,
+        funding_secured_usd=p.funding_secured_usd or 0,
+        deal_room_priority=p.deal_room_priority,
+        allowed_transitions=LifecycleService.get_allowed_transitions(p.status, current_user.role)
     )
 
 @router.get("/{project_id}", response_model=ProjectPipelineRead)
@@ -122,7 +134,11 @@ async def get_project_details(
         lead_country=p.lead_country,
         pillar=p.pillar,
         assigned_agent=p.assigned_agent,
-        updated_at=getattr(p, 'created_at', datetime.now(UTC))
+        updated_at=getattr(p, 'created_at', datetime.now(UTC)),
+        is_flagship=p.is_flagship,
+        funding_secured_usd=p.funding_secured_usd or 0,
+        deal_room_priority=p.deal_room_priority,
+        allowed_transitions=LifecycleService.get_allowed_transitions(p.status, current_user.role)
     )
 
 @router.post("/{project_id}/advance", response_model=ProjectPipelineRead)
@@ -161,7 +177,11 @@ async def advance_project_stage(
         lead_country=p.lead_country,
         pillar=p.pillar,
         assigned_agent=p.assigned_agent,
-        updated_at=getattr(p, 'created_at', datetime.now(UTC))
+        updated_at=getattr(p, 'created_at', datetime.now(UTC)),
+        is_flagship=p.is_flagship,
+        funding_secured_usd=p.funding_secured_usd or 0,
+        deal_room_priority=p.deal_room_priority,
+        allowed_transitions=LifecycleService.get_allowed_transitions(p.status, current_user.role)
     )
 
 @router.get("/{project_id}/matches", response_model=List[InvestorMatchRead])
@@ -241,3 +261,140 @@ async def get_pipeline_stats(
     service = ProjectPipelineService(db)
     stats = await service.check_pipeline_health()
     return PipelineStats(**stats)
+
+@router.get("/{project_id}/score-details", response_model=List[ProjectScoreDetailRead])
+async def get_project_score_details(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get detailed breakdown of project scores.
+    """
+    # Join with Criteria
+    stmt = (
+        select(ProjectScoreDetail, ScoringCriteria)
+        .join(ScoringCriteria, ProjectScoreDetail.criterion_id == ScoringCriteria.id)
+        .where(ProjectScoreDetail.project_id == project_id)
+    )
+    result = await db.execute(stmt)
+    rows = result.all()
+    
+    return [
+        ProjectScoreDetailRead(
+            id=d.id,
+            criterion=ScoringCriteriaRead(
+                id=c.id,
+                criterion_name=c.criterion_name,
+                criterion_type=c.criterion_type,
+                weight=c.weight,
+                description=c.description
+            ),
+            score=float(d.score),
+            notes=d.notes,
+            scored_date=d.scored_date
+        )
+        for d, c in rows
+    ]
+
+
+
+@router.get("/{project_id}/insights")
+async def get_project_insights(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get AI-powered insights and recommendations for a project.
+    Uses LLM to analyze project status, scores, and generate actionable next steps.
+    """
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    insights = await insights_service.generate_project_insights(project, db)
+    
+    return {
+        "project_id": str(project_id),
+        "insight": insights["insight"],
+        "recommendation": insights["recommendation"],
+        "generated_at": datetime.now(UTC).isoformat()
+    }
+
+
+@router.get("/{project_id}/history")
+async def get_project_history(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get project status change history timeline.
+    Returns chronological list of all status changes.
+    """
+    from app.models.models import ProjectStatusHistory, User as UserModel
+    
+    # Verify project exists
+    project_result = await db.execute(select(Project).where(Project.id == project_id))
+    project = project_result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Fetch status history with user info
+    stmt = (
+        select(ProjectStatusHistory, UserModel)
+        .outerjoin(UserModel, ProjectStatusHistory.changed_by_id == UserModel.id)
+        .where(ProjectStatusHistory.project_id == project_id)
+        .order_by(ProjectStatusHistory.change_date.desc())
+    )
+    
+    result = await db.execute(stmt)
+    history_records = result.all()
+    
+    # Format response
+    history = []
+    for record, user in history_records:
+        history.append({
+            "id": str(record.id),
+            "previous_status": record.previous_status.value if record.previous_status else None,
+            "new_status": record.new_status.value,
+            "change_date": record.change_date.isoformat(),
+            "changed_by": {
+                "id": str(user.id) if user else None,
+                "name": user.full_name if user else "System",
+                "email": user.email if user else None
+            } if user else {"name": "System"},
+            "notes": record.notes
+        })
+    
+    return {
+        "project_id": str(project_id),
+        "history": history,
+        "total_changes": len(history)
+    }
+
+
+@router.post("/{project_id}/feature")
+async def toggle_project_flagship(
+    project_id: uuid.UUID,
+    is_flagship: bool = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Toggle the 'is_flagship' status of a project.
+    """
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalars().first()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+        
+    project.is_flagship = is_flagship
+    await db.commit()
+    
+    return {"status": "success", "is_flagship": is_flagship}

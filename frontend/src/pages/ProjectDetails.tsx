@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { pipelineService } from '../services/pipelineService';
-import { Project, InvestorMatch, InvestorMatchStatus } from '../types/pipeline';
+import { documentService, Document } from '../services/documentService';
+import { Project, InvestorMatch, InvestorMatchStatus, ProjectScoreDetail, ProjectStatus } from '../types/pipeline';
+import { useAppSelector } from '../hooks/useRedux';
+import { ProjectLifecycleTimeline } from '../components/pipeline/ProjectLifecycleTimeline';
+import { ProjectHistoryTimeline } from '../components/pipeline/ProjectHistoryTimeline';
+import { UserRole } from '../types/auth';
+import api from '../services/api';
 
 const ProjectDetails: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -9,9 +15,16 @@ const ProjectDetails: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'financials' | 'documents' | 'history' | 'matches'>('overview');
   const [project, setProject] = useState<Project | null>(null);
   const [matches, setMatches] = useState<InvestorMatch[]>([]);
+  const [scoreDetails, setScoreDetails] = useState<ProjectScoreDetail[]>([]);
+  const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMatches, setLoadingMatches] = useState(false);
   const [triggeringMatch, setTriggeringMatch] = useState(false);
+  const [togglingFlagship, setTogglingFlagship] = useState(false);
+
+  // RBAC - Must be at top level before any returns
+  const { user } = useAppSelector((state) => state.auth);
+  const canEdit = user?.role && [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD, UserRole.FACILITATOR].includes(user.role);
 
   // AI Insight State
   const [aiInsight, setAiInsight] = useState<string>('');
@@ -26,8 +39,10 @@ const ProjectDetails: React.FC = () => {
         const data = await pipelineService.getProject(projectId);
         setProject(data);
 
-        // Fetch matches if available, but don't block main load
+        // Fetch parallel data
         fetchMatches(projectId);
+        fetchScoreDetails(projectId);
+        fetchDocuments(projectId);
       } catch (error) {
         console.error("Failed to fetch project", error);
       } finally {
@@ -49,6 +64,39 @@ const ProjectDetails: React.FC = () => {
     }
   };
 
+  const fetchScoreDetails = async (id: string) => {
+    try {
+      const details = await pipelineService.getScoreDetails(id);
+      setScoreDetails(details);
+    } catch (e) {
+      console.error("Failed to load score details", e);
+    }
+  };
+
+  const fetchDocuments = async (id: string) => {
+    try {
+      // documentService now supports projectId filter
+      const response = await documentService.listDocuments(undefined, 1, 100, id);
+      setDocuments(response.data);
+    } catch (e) {
+      console.error("Failed to load documents", e);
+    }
+  };
+
+  const toggleFlagship = async () => {
+    if (!project) return;
+    setTogglingFlagship(true);
+    try {
+      const newVal = !project.is_flagship;
+      await pipelineService.toggleFlagship(project.id, newVal);
+      setProject({ ...project, is_flagship: newVal });
+    } catch (e) {
+      console.error("Failed toggle", e);
+    } finally {
+      setTogglingFlagship(false);
+    }
+  };
+
   const handleTriggerMatching = async () => {
     if (!project) return;
     setTriggeringMatch(true);
@@ -56,19 +104,17 @@ const ProjectDetails: React.FC = () => {
       await pipelineService.triggerMatching(project.id);
       await fetchMatches(project.id);
       alert("Investor matching triggered successfully!");
-    } catch (error: any) { // Changed 'error' to 'any' to allow access to 'response'
+    } catch (error: any) {
       let errorMessage = 'Failed to trigger matching. Please try again.';
       if (error.response?.data?.detail) {
-        if (typeof error.response.data.detail === 'string') {
-          errorMessage = error.response.data.detail;
-        } else {
-          errorMessage = JSON.stringify(error.response.data.detail);
-        }
+        errorMessage = typeof error.response.data.detail === 'string'
+          ? error.response.data.detail
+          : JSON.stringify(error.response.data.detail);
       } else if (error.message) {
         errorMessage = error.message;
       }
       console.error("Failed to trigger matching", error);
-      alert(errorMessage); // Use the constructed error message
+      alert(errorMessage);
     } finally {
       setTriggeringMatch(false);
     }
@@ -88,16 +134,37 @@ const ProjectDetails: React.FC = () => {
     }
   };
 
+  const handleStageTransition = async (newStage: string) => {
+    if (!project) return;
+    if (!confirm(`Are you sure you want to move this project to ${newStage.replace('_', ' ')}?`)) return;
+
+    try {
+      const result = await pipelineService.advanceStage(project.id, newStage as ProjectStatus);
+      setProject(result);
+      alert(`Project moved to ${newStage.replace('_', ' ')} successfully.`);
+    } catch (e: any) {
+      console.error("Transition failed", e);
+      alert(`Failed to transition: ${e.response?.data?.detail || e.message}`);
+    }
+  };
+
   const fetchAIInsights = async () => {
     if (!project) return;
     setIsLoadingInsight(true);
-    // ... existing AI logic adapted for real project data ...
-    // Placeholder for now as the logic was largely similar
-    setTimeout(() => {
-      setAiInsight(`Readiness Score is ${project.readiness_score >= 80 ? 'high' : 'moderate'} (${project.readiness_score}/100). AfCEN Score: ${project.afcen_score?.toFixed(1)}`);
+
+    try {
+      // Call the new AI insights API endpoint
+      const response = await api.get(`/pipeline/${project.id}/insights`);
+      setAiInsight(response.data.insight);
+      setAiRecommendation(response.data.recommendation);
+    } catch (error) {
+      console.error('Failed to fetch AI insights:', error);
+      // Fallback to basic insight
+      setAiInsight(`Readiness Score is ${project.readiness_score >= 80 ? 'high' : 'moderate'} (${project.readiness_score}/100). AfCEN Score: ${project.afcen_score ? Number(project.afcen_score).toFixed(1) : 'N/A'}`);
       setAiRecommendation('Review pending investor matches in the Deal Room tab.');
+    } finally {
       setIsLoadingInsight(false);
-    }, 1500);
+    }
   };
 
   useEffect(() => {
@@ -169,9 +236,48 @@ const ProjectDetails: React.FC = () => {
           </p>
         </div>
         <div className="flex gap-3">
-          <button className="flex items-center justify-center px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-bold rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
-            <span>Edit Project</span>
-          </button>
+          {canEdit && (
+            <>
+              <button
+                onClick={toggleFlagship}
+                disabled={togglingFlagship}
+                className={`flex items-center justify-center gap-2 px-4 py-2 border text-sm font-bold rounded-lg transition-colors ${project.is_flagship
+                  ? 'bg-amber-100 border-amber-300 text-amber-800 hover:bg-amber-200'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                  }`}
+              >
+                <span className="material-symbols-outlined text-[18px]">
+                  {project.is_flagship ? 'star' : 'star_outline'}
+                </span>
+                <span>{project.is_flagship ? 'Flagship Project' : 'Mark as Flagship'}</span>
+              </button>
+
+              <button className="flex items-center justify-center px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-bold rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                <span>Edit Project</span>
+              </button>
+
+              {/* Transition Actions */}
+              {project.allowed_transitions && project.allowed_transitions.length > 0 && (
+                <div className="relative group">
+                  <button className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition-colors">
+                    <span>Advance Stage</span>
+                    <span className="material-symbols-outlined text-[18px]">expand_more</span>
+                  </button>
+                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-1 z-50 hidden group-hover:block">
+                    {project.allowed_transitions.map(stage => (
+                      <button
+                        key={stage}
+                        onClick={() => handleStageTransition(stage)}
+                        className="w-full text-left px-3 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-md capitalize"
+                      >
+                        Move to {stage.replace(/_/g, ' ')}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
           <button
             onClick={() => navigate(`/deal-pipeline/${encodeURIComponent(project.id)}/memo`)}
             className="flex items-center justify-center gap-2 px-4 py-2 bg-primary text-white text-sm font-bold rounded-lg shadow-md hover:bg-blue-700 transition-colors"
@@ -180,6 +286,12 @@ const ProjectDetails: React.FC = () => {
             <span>Generate Memo</span>
           </button>
         </div>
+      </div>
+
+
+      {/* Lifecycle Timeline */}
+      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+        <ProjectLifecycleTimeline project={project} />
       </div>
 
       {/* Stats Grid */}
@@ -225,7 +337,7 @@ const ProjectDetails: React.FC = () => {
             <p className="text-slate-500 dark:text-slate-400 text-sm font-medium">AfCEN Score</p>
             <span className="material-symbols-outlined text-purple-400">stars</span>
           </div>
-          <p className="text-slate-900 dark:text-white text-2xl font-bold">{project.afcen_score ? project.afcen_score.toFixed(1) : 'N/A'}</p>
+          <p className="text-slate-900 dark:text-white text-2xl font-bold">{project.afcen_score ? Number(project.afcen_score).toFixed(1) : 'N/A'}</p>
           <p className="text-slate-400 text-xs">Composite Rating</p>
         </div>
 
@@ -282,30 +394,51 @@ const ProjectDetails: React.FC = () => {
                 </div>
               </div>
 
-              {/* Mock Data for Strategic Rationale (Placeholder) */}
+              {/* Data for Strategic Rationale */}
               <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-4">
                   Scores Breakdown
                 </h3>
-                <div className="grid grid-cols-3 gap-4 text-center">
-                  <div className="p-3 bg-slate-50 dark:bg-slate-700 rounded-lg">
-                    <div className="text-2xl font-bold text-primary">{project.strategic_alignment_score ?? 'N/A'}</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">Strategic Alignment</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Strategic Alignment */}
+                  <div className="p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                    <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-3">Strategic Fit</h4>
+                    <div className="space-y-3">
+                      {scoreDetails.filter(d => d.criterion.criterion_type === 'strategic_fit').map(d => (
+                        <div key={d.id} className="flex justify-between items-center text-sm">
+                          <span className="text-slate-600 dark:text-slate-400">{d.criterion.criterion_name}</span>
+                          <span className="font-bold text-slate-900 dark:text-white">{d.score}/10</span>
+                        </div>
+                      ))}
+                      {scoreDetails.filter(d => d.criterion.criterion_type === 'strategic_fit').length === 0 && (
+                        <div className="text-xs text-slate-400 italic">No details available.</div>
+                      )}
+                    </div>
                   </div>
-                  <div className="bg-slate-50 dark:bg-slate-700/50 p-3 rounded-lg text-center">
-                    <div className="text-2xl font-bold text-primary">N/A</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">Regional Impact</div>
-                  </div>
-                  <div className="p-3 bg-slate-50 dark:bg-slate-700 rounded-lg">
-                    <div className="text-2xl font-bold text-primary">{project.readiness_score}</div>
-                    <div className="text-xs text-slate-500">Readiness</div>
+
+                  {/* Readiness */}
+                  <div className="p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg">
+                    <h4 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-3">Readiness Factors</h4>
+                    <div className="space-y-3">
+                      {scoreDetails.filter(d => d.criterion.criterion_type === 'readiness').map(d => (
+                        <div key={d.id} className="flex justify-between items-center text-sm">
+                          <span className="text-slate-600 dark:text-slate-400">{d.criterion.criterion_name}</span>
+                          <span className={`font-bold ${d.score >= 5 ? 'text-green-600' : 'text-slate-400'}`}>
+                            {d.score >= 5 ? 'Yes' : 'No'}
+                          </span>
+                        </div>
+                      ))}
+                      {scoreDetails.filter(d => d.criterion.criterion_type === 'readiness').length === 0 && (
+                        <div className="text-xs text-slate-400 italic">No details available. Defaulting to estimated score.</div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
             </>
           )}
 
-          {/* Matches Tab (NEW) */}
+          {/* Matches Tab */}
           {activeTab === 'matches' && (
             <div className="space-y-6">
               <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
@@ -382,11 +515,68 @@ const ProjectDetails: React.FC = () => {
             </div>
           )}
 
-          {/* Placeholders for other tabs (Simple message to preserve layout) */}
-          {(activeTab === 'financials' || activeTab === 'documents' || activeTab === 'history') && (
-            <div className="bg-slate-50 border border-dashed border-slate-300 rounded-xl p-12 text-center text-slate-500">
-              <span className="material-symbols-outlined text-4xl mb-4">engineering</span>
-              <p>This module is currently being connected to the new pipeline backend.</p>
+          {/* Matches Tab as "Financials" */}
+          {activeTab === 'financials' && (
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm space-y-6">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white">Financial Structure</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="p-4 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
+                  <div className="text-sm text-slate-500 mb-1">Total Investment</div>
+                  <div className="text-2xl font-bold text-slate-900 dark:text-white">
+                    {formatCurrency(project.investment_size)}
+                  </div>
+                </div>
+                <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-100 dark:border-green-800">
+                  <div className="text-sm text-slate-500 mb-1">Funding Secured</div>
+                  <div className="text-2xl font-bold text-green-700 dark:text-green-400">
+                    {formatCurrency(project.funding_secured_usd)}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-1">
+                    {((project.funding_secured_usd || 0) / project.investment_size * 100).toFixed(1)}% of total
+                  </div>
+                </div>
+                <div className="p-4 rounded-lg bg-orange-50 dark:bg-orange-900/20 border border-orange-100 dark:border-orange-800">
+                  <div className="text-sm text-slate-500 mb-1">Funding Gap</div>
+                  <div className="text-2xl font-bold text-orange-700 dark:text-orange-400">
+                    {formatCurrency(project.investment_size - (project.funding_secured_usd || 0))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'documents' && (
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-bold text-slate-900 dark:text-white">Project Documents</h3>
+                <button className="text-sm text-primary font-bold hover:underline">Upload Document</button>
+              </div>
+              {documents.length === 0 ? (
+                <div className="text-center py-8 text-slate-500 italic">No documents found.</div>
+              ) : (
+                <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                  {documents.map(doc => (
+                    <div key={doc.id} className="py-3 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="material-symbols-outlined text-slate-400">description</span>
+                        <div>
+                          <div className="font-medium text-slate-900 dark:text-white text-sm">{doc.file_name}</div>
+                          <div className="text-xs text-slate-500">{new Date(doc.created_at).toLocaleDateString()}</div>
+                        </div>
+                      </div>
+                      <button className="text-slate-400 hover:text-primary">
+                        <span className="material-symbols-outlined">download</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'history' && (
+            <div className="bg-white dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
+              <ProjectHistoryTimeline projectId={projectId!} />
             </div>
           )}
 
@@ -429,7 +619,7 @@ const ProjectDetails: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 

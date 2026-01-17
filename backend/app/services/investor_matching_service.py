@@ -120,7 +120,26 @@ class InvestorMatchingService:
         if project_country and any(r.lower() in project_country.lower() or project_country.lower() in r.lower() for r in investor_regions):
             score += 20.0
             
-        return Decimal(f"{score:.2f}")
+        # Criterion 4: Investment Instrument (20 pts)
+        # Check metadata for instrument_needed (e.g. "Equity", "Debt")
+        project_instruments = (project.metadata_json or {}).get("instrument_needed", [])
+        if isinstance(project_instruments, str):
+            project_instruments = [project_instruments]
+            
+        investor_instruments = investor.investment_instruments or []
+        
+        if project_instruments and investor_instruments:
+             if any(i.lower() in [pi.lower() for pi in project_instruments] for i in investor_instruments):
+                 score += 20.0
+        elif not project_instruments:
+             # Neutral if undefined
+             score += 10.0
+             
+        # Boost: High Commitment Capability (+5 max)
+        if investor.total_commitments_usd and investor.total_commitments_usd > 100000000: # >100M
+            score += 5.0
+            
+        return Decimal(f"{min(100.0, score):.2f}")
         
     async def _upsert_match(
         self, 

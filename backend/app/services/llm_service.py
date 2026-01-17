@@ -544,9 +544,9 @@ def get_llm_service() -> LLMService:
         elif provider == "github" and getattr(settings, "GITHUB_TOKEN", None):
              _llm_service = OpenAILLMService(
                 api_key=settings.GITHUB_TOKEN,
-                model=getattr(settings, "GITHUB_MODEL", "openai/gpt-4o-mini"),
+                model=getattr(settings, "GITHUB_MODEL", "gpt-4o-mini").replace("openai/", ""),
                 temperature=settings.LLM_TEMPERATURE,
-                base_url="https://models.github.ai/inference"
+                base_url=settings.GITHUB_BASE_URL
             )
         else:
             if provider == "openai":

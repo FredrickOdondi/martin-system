@@ -177,7 +177,8 @@ async def chat_with_martin(
             # Admins always get Supervisor access with full permissions
             supervisor = get_supervisor()
             twg_context = str(chat_in.twg_id) if chat_in.twg_id else None
-            response_text = await supervisor.chat_with_tools(chat_in.message, twg_id=twg_context, thread_id=str(conv_id))
+            # Call supervisor (now returns dict or str)
+            raw_response = await supervisor.chat_with_tools(chat_in.message, twg_id=twg_context, thread_id=str(conv_id))
             agent_id = "supervisor_v1"
             
         elif current_user.role in [UserRole.TWG_FACILITATOR, UserRole.TWG_MEMBER]:
@@ -196,15 +197,12 @@ async def chat_with_martin(
                 )
             
             # Route to TWG-specific agent (using Supervisor with strict TWG context)
-            # Note: In the future, this could be replaced with dedicated TWG agent instances
             supervisor = get_supervisor()
-            response_text = await supervisor.chat_with_tools(
+            raw_response = await supervisor.chat_with_tools(
                 chat_in.message,
                 twg_id=str(chat_in.twg_id),
                 thread_id=str(conv_id)
             )
-            agent_id = f"twg_{chat_in.twg_id}_agent"
-            
             agent_id = f"twg_{chat_in.twg_id}_agent"
             
         else:
@@ -213,6 +211,14 @@ async def chat_with_martin(
                 status_code=403,
                 detail="Insufficient permissions to access AI agents"
             )
+
+        # Process Response (Handle Dict vs Str)
+        citations = []
+        if isinstance(raw_response, dict):
+            response_text = raw_response.get("response", "")
+            citations = raw_response.get("citations", [])
+        else:
+            response_text = str(raw_response)
 
         # Extract suggestions from response text if present
         suggestions = []
@@ -234,7 +240,7 @@ async def chat_with_martin(
         return {
             "response": response_text,
             "conversation_id": conv_id,
-            "citations": [],
+            "citations": citations,
             "agent_id": agent_id,
             "suggestions": suggestions
         }
@@ -496,12 +502,26 @@ async def stream_chat(
                 yield f"data: {json.dumps({'type': 'agent_routing', 'agents': agent_ids, 'status': routing_status})}\n\n"
 
                 # Execute with mentioned agent
-                response_text = await handle_mention(supervisor, parsed, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=conv_id)
+                raw_response = await handle_mention(supervisor, parsed, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=conv_id)
+                # Handle dict response
+                citations = []
+                if isinstance(raw_response, dict):
+                    citations = raw_response.get("citations", [])
+                    response_text = raw_response.get("response", "")
+                else:
+                    response_text = str(raw_response)
                 message_type = ChatMessageType.AGENT_TEXT
 
             elif parsed["type"] == MessageParseType.MIXED:
                 yield f"data: {json.dumps({'type': 'mixed_execution', 'status': 'Processing command with agent mention...'})}\n\n"
-                response_text = await handle_command(supervisor, parsed, chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=conv_id)
+                raw_response = await handle_command(supervisor, parsed, chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=conv_id)
+                # Handle dict response
+                citations = []
+                if isinstance(raw_response, dict):
+                    citations = raw_response.get("citations", [])
+                    response_text = raw_response.get("response", "")
+                else:
+                    response_text = str(raw_response)
                 message_type = ChatMessageType.COMMAND_RESULT
 
             else:
@@ -512,6 +532,7 @@ async def stream_chat(
                 yield f"data: {json.dumps({'type': 'thinking', 'status': 'Starting Supervisor...'})}\n\n"
 
                 response_text = ""
+                citations = []
                 
                 # Stream events from LangGraph
                 async for event in supervisor.stream_chat_events(chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=conv_id):
@@ -534,7 +555,13 @@ async def stream_chat(
                         yield f"data: {json.dumps({'type': 'thinking', 'status': status_msg})}\n\n"
                     
                     elif event["type"] == "final_response":
-                        response_text = event["content"]
+                        raw_content = event["content"]
+                        # Handle dict response
+                        if isinstance(raw_content, dict):
+                            citations = raw_content.get("citations", [])
+                            response_text = raw_content.get("response", "")
+                        else:
+                            response_text = str(raw_content)
                         
                 message_type = ChatMessageType.AGENT_TEXT
 
@@ -549,7 +576,7 @@ async def stream_chat(
                 content=response_text,
                 sender="agent",
                 timestamp=datetime.utcnow(),
-                metadata={"parsed": parsed} if parsed["type"] != MessageParseType.NATURAL else None
+                metadata={"parsed": parsed, "citations": citations} if citations else ({"parsed": parsed} if parsed["type"] != MessageParseType.NATURAL else None)
             )
 
             # Send final response - use model_dump with mode='json' to handle UUID serialization
@@ -562,6 +589,15 @@ async def stream_chat(
             logger.info(f"Graph interrupt caught in stream: {gi}")
             # Extract payload (assuming first arg is the payload dict)
             interrupt_payload = gi.args[0] if gi.args else {}
+            
+            # CRITICAL: Link thread_id to approval request for resumption
+            if interrupt_payload.get("type") == "email_approval_required" and "request_id" in interrupt_payload:
+                req_id = interrupt_payload["request_id"]
+                approval_service = get_email_approval_service()
+                if approval_service.update_approval_request_thread(req_id, conv_id):
+                    logger.info(f"[STREAM] Linked thread {conv_id} to approval request {req_id}")
+                else:
+                    logger.warning(f"[STREAM] Failed to link thread {conv_id} to approval request {req_id}")
             
             # Use jsonable_encoder to handle UUIDs and other types
             from fastapi.encoders import jsonable_encoder
@@ -759,6 +795,10 @@ async def approve_email(
     """
     approval_service = get_email_approval_service()
     approval_request = approval_service.get_approval_request(request_id)
+    
+    # Initialize audit service
+    from app.services.audit_service import audit_service
+
 
     if not approval_request:
         raise HTTPException(
@@ -798,6 +838,7 @@ async def approve_email(
         thread_id = approval_request.thread_id
         if thread_id:
             logger.info(f"Resuming agent execution for thread {thread_id}")
+            
             # Prepare resumption value for the agent
             resume_value = {
                 "approved": True, 
@@ -813,51 +854,80 @@ async def approve_email(
         else:
              logger.warning(f"No thread_id linked to approval request {request_id} - cannot resume agent")
 
-        return EmailApprovalResult(
-            success=True,
-            message="Email sent successfully via Resend" + (" (Agent resumed)" if thread_id else ""),
-            email_sent=True,
-            message_id=result.get('message_id'),
-            thread_id=thread_id
-        )
-
         # Audit Log
-        if result.get("status") == "success":
-            await audit_service.log_activity(
+        if result.get("status") == "success" or True: # result usually dict from resend
+             await audit_service.log_activity(
                 db=db,
                 user_id=current_user.id,
                 action="send_email",
                 resource_type="email",
-                resource_id=None,  # Could be message_id if we store emails as entities
+                resource_id=None,
                 details={
                     "to": draft.to,
                     "subject": draft.subject,
-                    "message_id": result.get('message_id'),
+                    "message_id": result.get('message_id', 'unknown'),
                     "request_id": request_id,
                     "provider": "resend"
                 },
-                ip_address=None # Could extract from request if available
+                ip_address=None
             )
-            # Commit the log
-            await db.commit()
-            
-        return EmailApprovalResult(
-            success=True,
-            message="Email sent successfully via Resend",
-            email_sent=True,
-            message_id=result.get('message_id'),
-            thread_id=None # Resend doesn't typically provide thread_id
-        )
+             await db.commit()
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-
+        # Revert/Log
+        logger.error(f"Failed to send email: {e}")
         return EmailApprovalResult(
             success=False,
             message=f"Failed to send email: {str(e)}",
             email_sent=False
         )
+    
+    return EmailApprovalResult(
+        success=True,
+        message="Email sent successfully via Resend" + (" (Agent resumed)" if thread_id else ""),
+        email_sent=True
+    )
+
+
+from app.schemas.schemas import DocumentApprovalRequest, DocumentApprovalResult
+
+@router.post("/document/approval/{request_id}/approve", response_model=DocumentApprovalResult)
+async def approve_document(
+    request_id: str,
+    approval_data: DocumentApprovalRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Approve and save a document.
+    """
+    from app.services.agent_service import AgentService
+    agent_service = AgentService(db)
+    
+    try:
+        result = await agent_service.approve_document_creation(
+            approval_request_id=request_id,
+            final_title=approval_data.title,
+            final_content=approval_data.content,
+            document_type=approval_data.document_type,
+            file_name=approval_data.file_name,
+            tags=approval_data.tags,
+            user_id=current_user.id,
+            twg_id=current_user.twg_ids[0] if current_user.twg_ids else None # Fallback
+        )
+        
+        return DocumentApprovalResult(
+            status="approved",
+            document_id=result["document_id"],
+            file_path=result["file_path"],
+            message="Document saved successfully."
+        )
+        
+    except Exception as e:
+        logger.error(f"Failed to approve document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 @router.post("/email/approval/{request_id}/decline", response_model=EmailApprovalResult)

@@ -362,6 +362,9 @@ class ProjectBase(SchemaBase):
     status: ProjectStatus = ProjectStatus.IDENTIFIED
     investment_memo_id: Optional[uuid.UUID] = None
     metadata_json: Optional[dict] = None
+    funding_secured_usd: Decimal = 0
+    is_flagship: bool = False
+    deal_room_priority: Optional[int] = None
 
 class ProjectCreate(ProjectBase):
     pass
@@ -438,7 +441,21 @@ class AgentTaskRequest(SchemaBase):
 class AgentStatus(SchemaBase):
     status: str
     swarm_ready: bool
+    swarm_ready: bool
     version: str
+
+class DocumentApprovalRequest(SchemaBase):
+    title: str
+    content: str
+    document_type: str
+    file_name: str
+    tags: List[str] = []
+    
+class DocumentApprovalResult(SchemaBase):
+    status: str
+    document_id: str
+    file_path: str
+    message: str
 
 # --- Conflict Schemas ---
 
@@ -494,3 +511,50 @@ class WeeklyPacketRead(WeeklyPacketBase):
 
 # Resolve forward references
 TWGRead.model_rebuild()
+
+# --- Settings Schemas ---
+
+class SystemSettingsBase(SchemaBase):
+    enable_google_calendar: bool = False
+    enable_zoom: bool = False
+    enable_teams: bool = False
+    llm_provider: str = "openai"
+    llm_model: str = "gpt-4o-mini"
+    smtp_config: Optional[dict] = None
+
+class SystemSettingsUpdate(SystemSettingsBase):
+    # Secrets field are optional writes
+    google_credentials_json: Optional[str] = None 
+    zoom_credentials_json: Optional[str] = None
+    teams_credentials_json: Optional[str] = None
+
+class SystemSettingsRead(SystemSettingsBase):
+    id: uuid.UUID
+    updated_at: datetime
+    # Do NOT return full credentials in read schema for security, maybe just a boolean "is_configured"
+    has_google_creds: bool = False
+    has_zoom_creds: bool = False
+    has_teams_creds: bool = False
+
+    @staticmethod
+    def from_orm_custom(obj):
+        """Custom converter to hide secrets"""
+        schema = SystemSettingsRead.model_validate(obj)
+        schema.has_google_creds = bool(obj.google_credentials_json)
+        schema.has_zoom_creds = bool(obj.zoom_credentials_json)
+        schema.has_teams_creds = bool(obj.teams_credentials_json)
+        return schema
+
+class TwgSettingsBase(SchemaBase):
+    meeting_cadence: Optional[str] = None
+    custom_templates: Optional[dict] = None
+    notification_preferences: Optional[dict] = None
+
+class TwgSettingsUpdate(TwgSettingsBase):
+    pass
+
+class TwgSettingsRead(TwgSettingsBase):
+    id: uuid.UUID
+    twg_id: uuid.UUID
+    updated_at: datetime
+

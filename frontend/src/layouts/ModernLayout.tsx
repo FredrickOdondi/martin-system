@@ -1,7 +1,6 @@
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../hooks/useRedux';
 import { logout } from '../store/slices/authSlice';
-import { toggleTheme } from '../store/slices/themeSlice';
 import { fetchNotifications, addNotification } from '../store/slices/notificationsSlice';
 import { UserRole } from '../types/auth';
 import { useEffect, useRef, useState } from 'react';
@@ -14,9 +13,8 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
     const navigate = useNavigate();
     const location = useLocation();
     const dispatch = useAppDispatch();
-    const theme = useAppSelector((state) => state.theme.mode);
-    const user = useAppSelector((state) => state.auth.user);
-    const unreadCount = useAppSelector((state) => state.notifications.unreadCount);
+    const { user } = useAppSelector((state) => state.auth)
+    const { unreadCount } = useAppSelector((state) => state.notifications)
     const token = useAppSelector((state) => state.auth.token);
     const socketRef = useRef<WebSocket | null>(null);
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -109,30 +107,19 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
                                     Reports
                                 </button>
                             )}
-                            <button
-                                onClick={() => navigate('/settings')}
-                                className={`${isActive('/settings') ? 'text-[#1152d4]' : 'text-[#4c669a] dark:text-[#a0aec0]'} font-medium text-sm hover:text-[#1152d4] transition-colors`}
-                            >
-                                Settings
-                            </button>
                         </nav>
                         {/* User Profile & Actions */}
                         <div className="flex items-center gap-4 border-l border-[#e7ebf3] dark:border-[#2d3748] pl-6">
                             <button
-                                onClick={() => dispatch(toggleTheme())}
-                                className="p-2 text-[#4c669a] dark:text-[#a0aec0] hover:text-[#1152d4] dark:hover:text-white transition-colors"
-                                title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-                            >
-                                <span className="material-symbols-outlined">
-                                    {theme === 'dark' ? 'light_mode' : 'dark_mode'}
-                                </span>
-                            </button>
-                            <button
                                 onClick={() => navigate('/notifications')}
-                                className={`relative ${isActive('/notifications') ? 'text-[#1152d4]' : 'text-[#4c669a] dark:text-[#a0aec0]'} hover:text-[#1152d4] transition-colors`}
+                                className={`relative p-1 ${isActive('/notifications') ? 'text-[#1152d4]' : 'text-[#4c669a] dark:text-[#a0aec0]'} hover:text-[#1152d4] transition-colors`}
                             >
                                 <span className="material-symbols-outlined">notifications</span>
-                                <span className="absolute top-0 right-0 size-2 bg-red-500 rounded-full border-2 border-white dark:border-[#1a202c]"></span>
+                                {unreadCount > 0 && (
+                                    <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white ring-2 ring-white dark:ring-[#1a202c] animate-pulse">
+                                        {unreadCount > 9 ? '9+' : unreadCount}
+                                    </span>
+                                )}
                             </button>
                             <div
                                 onClick={() => navigate('/profile')}
@@ -200,31 +187,7 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
                                         <span className="material-symbols-outlined text-[20px]">calendar_month</span>
                                         {!isSidebarCollapsed && <span>Meetings (Schedule)</span>}
                                     </button>
-                                    <button
-                                        onClick={() => navigate('/notifications')}
-                                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/notifications')
-                                            ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
-                                            : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
-                                            } ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
-                                        title={isSidebarCollapsed ? "Notifications" : ""}
-                                    >
-                                        <div className="relative">
-                                            <span className="material-symbols-outlined text-[20px]">notifications</span>
-                                            {unreadCount > 0 && isSidebarCollapsed && (
-                                                <span className="absolute -top-1 -right-1 size-2 bg-red-500 rounded-full"></span>
-                                            )}
-                                        </div>
-                                        {!isSidebarCollapsed && (
-                                            <>
-                                                <span>Notifications</span>
-                                                {unreadCount > 0 && (
-                                                    <span className="ml-auto bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-                                                        {unreadCount > 99 ? '99+' : unreadCount}
-                                                    </span>
-                                                )}
-                                            </>
-                                        )}
-                                    </button>
+
                                     <button
                                         onClick={() => navigate('/deal-pipeline')}
                                         className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/deal-pipeline')
@@ -290,17 +253,6 @@ export default function ModernLayout({ children }: ModernLayoutProps) {
                                         >
                                             <span className="material-symbols-outlined text-[20px]">history</span>
                                             {!isSidebarCollapsed && <span>Audit Logs</span>}
-                                        </button>
-                                        <button
-                                            onClick={() => navigate('/settings')}
-                                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium text-sm transition-colors ${isActive('/settings')
-                                                ? 'bg-[#e8effe] dark:bg-[#1e3a8a]/20 text-[#1152d4] dark:text-[#60a5fa]'
-                                                : 'text-[#4c669a] dark:text-[#a0aec0] hover:bg-[#f6f6f8] dark:hover:bg-[#2d3748]'
-                                                } ${isSidebarCollapsed ? 'justify-center !px-2' : ''}`}
-                                            title={isSidebarCollapsed ? "Settings" : ""}
-                                        >
-                                            <span className="material-symbols-outlined text-[20px]">settings</span>
-                                            {!isSidebarCollapsed && <span>Settings</span>}
                                         </button>
                                     </div>
                                 </div>

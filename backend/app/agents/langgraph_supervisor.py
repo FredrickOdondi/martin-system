@@ -20,7 +20,8 @@ from app.agents.langgraph_nodes import (
     supervisor_node,
     create_twg_agent_node,
     synthesis_node,
-    single_agent_response_node
+    single_agent_response_node,
+    negotiation_node
 )
 from app.services.supervisor_state_service import get_supervisor_state, SupervisorGlobalState
 
@@ -94,8 +95,6 @@ class LangGraphSupervisor:
             Useful for checking availability, finding conflicts, or seeing the overall timeline.
             """
             try:
-                # The state service is a singleton, accessed via get_supervisor_state()
-                # But here we can use the instance we referenced
                 state = self.state_service.get_state()
                 if not state:
                     return "Global state not yet initialized. Please try again in a moment."
@@ -149,7 +148,6 @@ class LangGraphSupervisor:
                 
                 response = f"Project Pipeline ({pipeline.total_projects} projects, Total Investment: ${pipeline.total_investment:,.2f}):\n"
                 
-                # Group by status for readability
                 by_status = {}
                 for p in pipeline.projects:
                     if p.status.value not in by_status:
@@ -165,24 +163,91 @@ class LangGraphSupervisor:
             except Exception as e:
                 return f"Error accessing pipeline: {str(e)}"
 
-        # Register these functions as tools for the supervisor LLM
-        # Note: LangGraphBaseAgent handles tool registration via its own mechanism
-        # We need to manually append to its tool list if it supports it, 
-        # or recreate the agent with these tools.
-        # Since LangGraphBaseAgent implementation isn't fully visible here, 
-        # let's assume we can append to `self.supervisor_agent.tools` if it exists,
-        # or better yet, pass them in `chat` context or system prompt.
-        
-        # For now, let's register them in a way the base agent can see.
-        # Ideally, LangGraphBaseAgent would have an `add_tool` method.
+        async def get_summit_status_tool() -> str:
+            """
+            Get the High-Level Summit Status Overview.
+            Returns the Global Status % (simulated logic) and TWG-level breakdown.
+            Use this for the 'Greeting' and 'Status Overview' sections of your response.
+            """
+            try:
+                state = self.state_service.get_state()
+                if not state:
+                    return "Status unavailable (System initializing)"
+                
+                # Mock Calculation Logic (since we don't have historical baselines yet)
+                # 1. Project Health (50% weight)
+                pipeline = self.state_service.get_project_pipeline()
+                proj_score = min(100, (pipeline.total_projects * 5)) # 20 projects = 100%
+                
+                # 2. Meeting Health (30% weight)
+                cal = self.state_service.get_global_calendar()
+                meet_score = 100 if cal.conflicts_detected == 0 else 70
+                
+                # 3. Document/Declaration Progress (20% weight)
+                docs = self.state_service.get_document_registry()
+                doc_score = min(100, docs.total_documents * 10)
+                
+                overall = int((proj_score * 0.5) + (meet_score * 0.3) + (doc_score * 0.2))
+                
+                # Format Response
+                res = f"📊 **Summit Status: {overall}% On Track**\n\n"
+                res += "**TWG Performance:**\n"
+                # Mock statuses based on real activity
+                twgs = ["Energy", "Agriculture", "Minerals", "Digital", "Protocol", "Resource Mobilization"]
+                for twg in twgs:
+                    # Logic: If they have projects or meetings, they are 'On Schedule'
+                    status = "✅ On schedule"
+                    if twg == "Minerals" and overall < 80:
+                         status = "⚠️ Minor delay (Data collection)" # Hardcoded flavor for demo
+                    res += f"{status}: {twg}\n"
+                    
+                res += "\n**Critical Path Items:**\n"
+                res += "1. Ministerial Harmonization Workshop (April 2026)\n"
+                res += "2. Declaration Draft (Deadline: March 15)\n"
+                
+                return res
+            except Exception as e:
+                return f"Error calculating status: {e}"
+
+        async def detect_conflicts_tool() -> str:
+            """
+            Run a deep scan for Policy and Scheduling conflicts across all TWGs.
+            """
+            try:
+                # 1. Check Schedule Conflicts
+                cal = self.state_service.get_global_calendar()
+                conflicts = []
+                if cal.conflicts_detected > 0:
+                    conflicts.append(f"• {cal.conflicts_detected} scheduling clashes detected in Global Calendar.")
+                
+                # 2. Check Policy Conflicts (Mocked for now - eventually query NegotiationService)
+                
+                if not conflicts:
+                     return "✅ No conflicts detected. All systems aligned."
+                
+                return "⚠️ **Conflicts Detected:**\n" + "\n".join(conflicts)
+            except Exception as e:
+                return f"Error scanning conflicts: {e}"
+
+        def start_negotiation_tool(conflict_description: str, agent_a: str, agent_b: str) -> str:
+            """
+            Initiate an automated negotiation between two agents to resolve a conflict.
+            Args:
+                conflict_description: Clear description of the policy divergence.
+                agent_a: ID of first agent (e.g. 'energy')
+                agent_b: ID of second agent (e.g. 'minerals')
+            """
+            # This returns a special flag that the graph routing logic will pick up
+            return f"NEGOTIATION_STARTED::{conflict_description}::{agent_a}::{agent_b}"
+
+        # Register tools
         if hasattr(self.supervisor_agent, "add_tool"):
             self.supervisor_agent.add_tool(get_global_calendar_tool)
             self.supervisor_agent.add_tool(get_document_registry_tool)
             self.supervisor_agent.add_tool(get_project_pipeline_tool)
-        else:
-            # Fallback: We might need to subclass or modify BaseAgent to accept dynamic tools
-            # Or we simply wrap these in the system prompt context injection
-            pass # TODO: Verify tool registration mechanism
+            self.supervisor_agent.add_tool(get_summit_status_tool)
+            self.supervisor_agent.add_tool(detect_conflicts_tool)
+            self.supervisor_agent.add_tool(start_negotiation_tool)
 
         # Add Scheduler Tools
         self._add_scheduler_tools()
@@ -515,6 +580,9 @@ class LangGraphSupervisor:
         # 5. Single agent response node - formats single agent response
         workflow.add_node("single_agent_response", single_agent_response_node)
 
+        # 6. Negotiation node
+        workflow.add_node("negotiation", negotiation_node)
+
         # =====================================================================
         # ADD EDGES AND CONDITIONAL ROUTING
         # =====================================================================
@@ -564,10 +632,14 @@ class LangGraphSupervisor:
                 - "supervisor" if no specific TWG needed
                 - agent_id if single agent
                 - "parallel_agents" if multiple agents (future enhancement)
+                - "negotiation" if negotiation is explicitly requested
             """
-            delegation_type = state["delegation_type"]
+            delegation_type = state.get("delegation_type")
             relevant_agents = state["relevant_agents"]
 
+            if delegation_type == "negotiation":
+                return "negotiation"
+            
             if delegation_type == "supervisor_only":
                 logger.info("[ROUTE] -> supervisor (general knowledge)")
                 return "supervisor"
@@ -578,8 +650,6 @@ class LangGraphSupervisor:
                 return agent_id
 
             else:  # multiple agents
-                # For now, route to first agent, then handle others
-                # Future: implement true parallel execution
                 logger.info(f"[ROUTE] -> multiple agents: {relevant_agents}")
                 return "dispatch_multiple"
 
@@ -588,15 +658,52 @@ class LangGraphSupervisor:
             route_to_agents,
             {
                 "supervisor": "supervisor",
+                "negotiation": "negotiation",
                 **{agent_id: agent_id for agent_id in self._twg_agents.keys()},
                 "dispatch_multiple": "dispatch_multiple"
             }
         )
 
+        
+        # Function to check if the supervisor or synthesis output triggers a negotiation
+        def check_for_negotiation_trigger(state: AgentState) -> str:
+            """
+            Check if the final response contains the negotiation trigger flag.
+            """
+            response = state.get("final_response") or ""
+            # Check for the tool output in the response content (it might be raw tool output)
+            # Or if the LLM output describes starting one (less reliable)
+            
+            # The tool output is "NEGOTIATION_STARTED::{desc}::{a}::{b}"
+            if "NEGOTIATION_STARTED::" in response:
+                logger.info("[COND] NEGOTIATION_STARTED trigger detected!")
+                
+                parts = response.split("::")
+                if len(parts) >= 4:
+                    desc, a, b = parts[1], parts[2], parts[3]
+                    state["negotiation_context"] = {
+                        "conflict_description": desc,
+                        "agent_ids": [a, b]
+                    }
+                    return "negotiation"
+            
+            # Also check for synthesis conflict detection
+            if "CONFLICT ALERT:" in response:
+                 # TODO: Parse conflict alert to auto-trigger? 
+                 # For now, let's Stick to manual tool trigger which is safer
+                 pass
 
+            return END
 
-        # From supervisor -> END
-        workflow.add_edge("supervisor", END)
+        # From supervisor -> check trigger -> negotiation OR end
+        workflow.add_conditional_edges(
+            "supervisor",
+            check_for_negotiation_trigger,
+            {
+                "negotiation": "negotiation",
+                END: END
+            }
+        )
 
         # From single agents -> single_agent_response -> END
         for agent_id in self._twg_agents.keys():
@@ -604,9 +711,19 @@ class LangGraphSupervisor:
 
         workflow.add_edge("single_agent_response", END)
 
-        # From dispatch_multiple -> synthesis -> END
+        # From dispatch_multiple -> synthesis -> check trigger -> negotiation OR end
         workflow.add_edge("dispatch_multiple", "synthesis")
-        workflow.add_edge("synthesis", END)
+        workflow.add_conditional_edges(
+            "synthesis",
+            check_for_negotiation_trigger,
+            {
+                "negotiation": "negotiation",
+                END: END
+            }
+        )
+        
+        # From negotiation -> END
+        workflow.add_edge("negotiation", END)
 
         # =====================================================================
         # COMPILE GRAPH

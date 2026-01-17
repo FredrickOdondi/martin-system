@@ -77,6 +77,31 @@ class ProjectPipelineRead(BaseModel):
     # Computed
     days_in_stage: Optional[int] = None
     is_stalled: bool = False
+    
+    # Financials
+    funding_secured_usd: Decimal = 0
+    funding_gap_usd: Optional[Decimal] = None # Calculated
+    
+    # Deal Room
+    is_flagship: bool = False
+    deal_room_priority: Optional[int] = None
+
+    # Lifecycle Config
+    allowed_transitions: List[str] = []
+
+class ScoringCriteriaRead(BaseModel):
+    id: UUID
+    criterion_name: str
+    criterion_type: str
+    weight: Decimal
+    description: Optional[str] = None
+
+class ProjectScoreDetailRead(BaseModel):
+    id: UUID
+    criterion: ScoringCriteriaRead
+    score: float
+    notes: Optional[str] = None
+    scored_date: datetime
 
 class PipelineStats(BaseModel):
     """Schema for pipeline dashboard stats"""

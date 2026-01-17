@@ -64,8 +64,8 @@ class Settings(BaseSettings):
     )
     
     # LLM Provider Configuration
-    LLM_PROVIDER: str = "groq"
-    LLM_MODEL: str = "llama-3.3-70b-versatile"
+    LLM_PROVIDER: str = "github"
+    LLM_MODEL: str = "gpt-4o-mini"
     LLM_MAX_TOKENS: int = 4000
 
     # Groq
@@ -82,7 +82,8 @@ class Settings(BaseSettings):
 
     # GitHub Models
     GITHUB_TOKEN: Optional[str] = None
-    GITHUB_MODEL: str = "openai/gpt-4o-mini"
+    GITHUB_MODEL: str = "gpt-4o-mini"
+    GITHUB_BASE_URL: str = "https://models.inference.ai.azure.com"
     
     # Message Bus Settings
     MESSAGE_BUS_ENABLED: bool = Field(
@@ -197,9 +198,9 @@ class Settings(BaseSettings):
     # PINECONE
     PINECONE_API_KEY: str = Field(default="test-key", description="Pinecone API key")
     PINECONE_ENVIRONMENT: str = Field(default="gcp-starter", description="Pinecone environment")
-    PINECONE_INDEX_NAME: str = Field(default="ecowas-martin-local-768", description="Pinecone index name")
-    EMBEDDING_MODEL: str = Field(default="nomic-embed-text", description="Embedding model name")
-    EMBEDDING_DIMENSION: int = Field(default=768, description="Embedding dimension")
+    PINECONE_INDEX_NAME: str = Field(default="ecowas-martin-github-1536", description="Pinecone index name")
+    EMBEDDING_MODEL: str = Field(default="text-embedding-3-small", description="Embedding model name")
+    EMBEDDING_DIMENSION: int = Field(default=1536, description="Embedding dimension")
     
     # Email
     SMTP_HOST: str = Field(default="localhost", description="SMTP server host")

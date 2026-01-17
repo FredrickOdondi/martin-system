@@ -83,7 +83,7 @@ class ReconciliationService:
                     api_key=settings.GITHUB_TOKEN,
                     base_url="https://models.github.ai/inference"
                 )
-                self._llm_model = getattr(settings, "GITHUB_MODEL", "openai/gpt-4o-mini")
+                self._llm_model = getattr(settings, "GITHUB_MODEL", "gpt-4o-mini").replace("openai/", "")
             elif provider == "groq" and getattr(settings, "GROQ_API_KEY", None):
                 from groq import Groq
                 self._llm_client = Groq(api_key=settings.GROQ_API_KEY)

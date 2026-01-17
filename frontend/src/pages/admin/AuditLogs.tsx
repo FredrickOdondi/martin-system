@@ -118,7 +118,7 @@ const AuditLogs: React.FC = () => {
                                         <td className="p-4 text-slate-600 dark:text-slate-400">
                                             <div className="flex flex-col">
                                                 <span className="uppercase text-xs font-bold text-slate-400">{log.resource_type}</span>
-                                                <span className="font-mono text-xs">{log.resource_id.substring(0, 8)}...</span>
+                                                <span className="font-mono text-xs">{log.resource_id ? log.resource_id.substring(0, 8) + '...' : '-'}</span>
                                             </div>
                                         </td>
                                         <td className="p-4">

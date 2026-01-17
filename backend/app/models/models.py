@@ -58,13 +58,36 @@ class ActionItemPriority(str, enum.Enum):
     URGENT = "urgent"
 
 class ProjectStatus(str, enum.Enum):
-    IDENTIFIED = "identified"
-    VETTING = "vetting"
-    DUE_DILIGENCE = "due_diligence"
-    FINANCING = "financing"
-    DEAL_ROOM = "deal_room"
-    BANKABLE = "bankable"
-    PRESENTED = "presented"
+    # Submission Phase
+    DRAFT = "draft"
+    PIPELINE = "pipeline"
+    UNDER_REVIEW = "under_review"
+    
+    # Decision Phase
+    DECLINED = "declined"
+    NEEDS_REVISION = "needs_revision"
+    SUMMIT_READY = "summit_ready"
+    
+    # Deal Room Phase
+    DEAL_ROOM_FEATURED = "deal_room_featured"
+    IN_NEGOTIATION = "in_negotiation"
+    
+    # Post-Deal Phase
+    COMMITTED = "committed"
+    IMPLEMENTED = "implemented"
+    
+    # Other
+    ON_HOLD = "on_hold"
+    ARCHIVED = "archived"
+    
+    # Legacy Statuses (Mapped to new ones where possible, but kept for safety)
+    IDENTIFIED = "identified"      # -> DRAFT or PIPELINE
+    VETTING = "vetting"            # -> UNSER_REVIEW
+    DUE_DILIGENCE = "due_diligence" # -> UNDER_REVIEW
+    FINANCING = "financing"         # -> SUMMIT_READY
+    DEAL_ROOM = "deal_room"        # -> SUMMIT_READY / DEAL_ROOM_FEATURED
+    BANKABLE = "bankable"          # -> COMMITTED
+    PRESENTED = "presented"        # -> DEAL_ROOM_FEATURED
 
 class NotificationType(str, enum.Enum):
     INFO = "info"
@@ -408,10 +431,48 @@ class Project(Base):
     strategic_alignment_score: Mapped[Optional[Decimal]] = mapped_column(Numeric(5, 2), nullable=True)
     assigned_agent: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     
+    # Financials
+    funding_secured_usd: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), default=0)
+    
+    # Deal Room Flags
+    is_flagship: Mapped[bool] = mapped_column(Boolean, default=False)
+    deal_room_priority: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    approved_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approval_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
     # Relationships
     twg: Mapped["TWG"] = relationship(back_populates="projects")
     investment_memo: Mapped[Optional["Document"]] = relationship(foreign_keys=[investment_memo_id])
     investor_matches: Mapped[List["ProjectInvestorMatch"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    documents: Mapped[List["Document"]] = relationship(foreign_keys="[Document.project_id]", back_populates="project")
+    score_details: Mapped[List["ProjectScoreDetail"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    status_history: Mapped[List["ProjectStatusHistory"]] = relationship(back_populates="project", cascade="all, delete-orphan")
+
+class ProjectStatusHistory(Base):
+    __tablename__ = "project_status_history"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("projects.id", ondelete="CASCADE"))
+    
+    # Status Change
+    previous_status: Mapped[Optional[ProjectStatus]] = mapped_column(Enum(ProjectStatus), nullable=True)
+    new_status: Mapped[ProjectStatus] = mapped_column(Enum(ProjectStatus))
+    
+    # Who changed it
+    changed_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    change_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    
+    # Why changed
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Automated vs Manual
+    is_automated: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Relationships
+    project: Mapped["Project"] = relationship(back_populates="status_history")
+    changed_by: Mapped[Optional["User"]] = relationship("User")
 
 class Document(Base):
     __tablename__ = "documents"
@@ -420,9 +481,11 @@ class Document(Base):
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     twg_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("twgs.id"), nullable=True)
     meeting_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("meetings.id"), nullable=True)
+    project_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("projects.id"), nullable=True)
     file_name: Mapped[str] = mapped_column(String(255))
     file_path: Mapped[str] = mapped_column(String(512))
     file_type: Mapped[str] = mapped_column(String(255))  # MIME type can be long
+    document_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True) # e.g. financial_model, esia
     uploaded_by_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
     is_confidential: Mapped[bool] = mapped_column(Boolean, default=False)
     metadata_json: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
@@ -430,7 +493,8 @@ class Document(Base):
     
     # Relationships
     twg: Mapped[Optional["TWG"]] = relationship(back_populates="documents")
-    meeting: Mapped[Optional["Meeting"]] = relationship(back_populates="documents")
+    meeting: Mapped[Optional["Meeting"]] = relationship(foreign_keys=[meeting_id], back_populates="documents")
+    project: Mapped[Optional["Project"]] = relationship(foreign_keys=[project_id], back_populates="documents")
 
     # Versioning
     version: Mapped[int] = mapped_column(Integer, default=1)
@@ -461,6 +525,21 @@ class RefreshToken(Base):
     
     # Relationships
     user: Mapped["User"] = relationship(back_populates="refresh_tokens")
+
+class PasswordResetToken(Base):
+    """Stores password reset tokens for forgot password functionality."""
+    __tablename__ = "password_reset_tokens"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    token: Mapped[str] = mapped_column(String(512), unique=True, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id", ondelete="CASCADE"))
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user: Mapped["User"] = relationship()
 
 class Notification(Base):
     __tablename__ = "notifications"
@@ -536,6 +615,12 @@ class Investor(Base):
     geographic_focus: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
     investment_instruments: Mapped[Optional[List[str]]] = mapped_column(JSON, nullable=True)
     
+    # Extended Fields
+    investor_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    contact_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    contact_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    total_commitments_usd: Mapped[Optional[Decimal]] = mapped_column(Numeric(15, 2), default=0)
+    
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -566,3 +651,97 @@ class ProjectInvestorMatch(Base):
     # Relationships
     project: Mapped["Project"] = relationship(back_populates="investor_matches")
     investor: Mapped["Investor"] = relationship(back_populates="project_matches")
+
+class ScoringCriteria(Base):
+    __tablename__ = "scoring_criteria"
+    __table_args__ = {'extend_existing': True}
+    
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    criterion_name: Mapped[str] = mapped_column(String(100))
+    criterion_type: Mapped[str] = mapped_column(String(50)) # 'readiness' or 'strategic_fit'
+    weight: Mapped[Decimal] = mapped_column(Numeric(3, 2))
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+class ProjectScoreDetail(Base):
+    __tablename__ = "project_scores_detail"
+    __table_args__ = {'extend_existing': True}
+    
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("projects.id", ondelete="CASCADE"))
+    criterion_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("scoring_criteria.id"))
+    score: Mapped[Decimal] = mapped_column(Numeric(3, 1)) # 0-10
+    scored_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id"))
+    scored_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Relationships
+    project: Mapped["Project"] = relationship(back_populates="score_details")
+
+class DealRoomMeeting(Base):
+    __tablename__ = "deal_room_meetings"
+    __table_args__ = {'extend_existing': True}
+    
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("projects.id", ondelete="CASCADE"))
+    investor_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("investors.id", ondelete="CASCADE"))
+    
+    meeting_datetime: Mapped[datetime] = mapped_column(DateTime)
+    duration_minutes: Mapped[int] = mapped_column(Integer, default=30)
+    location: Mapped[Optional[str]] = mapped_column(String(255))
+    meeting_status: Mapped[str] = mapped_column(String(50), default='scheduled')
+    outcome_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    scheduled_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id"))
+
+class SystemSettings(Base):
+    """
+    Singleton table for global system configuration.
+    Only editable by Admins.
+    """
+    __tablename__ = "system_settings"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    
+    # Integrations
+    enable_google_calendar: Mapped[bool] = mapped_column(Boolean, default=False)
+    enable_zoom: Mapped[bool] = mapped_column(Boolean, default=False)
+    enable_teams: Mapped[bool] = mapped_column(Boolean, default=False)
+    
+    # Credentials (Stored as Text/JSON - Encrypt in Prod)
+    google_credentials_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    zoom_credentials_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    teams_credentials_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # AI Configuration
+    llm_provider: Mapped[str] = mapped_column(String(50), default="openai") # openai, github, gemini
+    llm_model: Mapped[str] = mapped_column(String(50), default="gpt-4o-mini")
+    
+    # Email
+    smtp_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+class TwgSettings(Base):
+    """
+    Settings specific to a single TWG workspace.
+    Editable by Admin or assigned Facilitator.
+    """
+    __tablename__ = "twg_settings"
+    __table_args__ = {'extend_existing': True}
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    twg_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("twgs.id", ondelete="CASCADE"), unique=True)
+    
+    # Preferences
+    meeting_cadence: Mapped[Optional[str]] = mapped_column(String(50), nullable=True) # weekly, biweekly, monthly
+    custom_templates: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True) # Email/Doc templates overrides
+    notification_preferences: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True) # Defaults for members
+    
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by_id: Mapped[Optional[uuid.UUID]] = mapped_column(Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    
+    # Relationships
+    twg: Mapped["TWG"] = relationship("TWG")

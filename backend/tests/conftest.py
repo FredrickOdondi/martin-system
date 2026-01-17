@@ -11,7 +11,7 @@ import uuid
 
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture
 async def db_engine():
     """Create a database engine for the session."""
     async with engine.begin() as conn:
