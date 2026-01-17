@@ -44,6 +44,10 @@ class SupervisorAPIAdapter:
         try:
             # Call the async method (LangGraph handles state internally)
             response = await self.supervisor.chat(message, twg_id=twg_id, thread_id=thread_id)
+            
+            # If response is a dict (new format with citations), pass it through.
+            # If string (legacy), wrap it to ensure consistent dict output or just return string 
+            # and let API handle type check (doing the latter to minimize breakage risk).
             return response
         except GraphInterrupt as gi:
             # Re-raise GraphInterrupt so the API can catch it and return the approval payload

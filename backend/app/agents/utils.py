@@ -47,10 +47,12 @@ def get_twg_id_by_agent_id(agent_id: str) -> Optional[str]:
         
     try:
         with SyncSession() as session:
-            stmt = select(TWG).where(TWG.pillar == pillar)
-            twg = session.execute(stmt).scalar_one_or_none()
+            stmt = select(TWG).where(TWG.pillar == pillar).order_by(TWG.id)
+            result = session.execute(stmt)
+            twg = result.scalars().first()  # Use first() to handle duplicates gracefully
             
             if twg:
+                logger.info(f"Resolved agent '{agent_id}' to TWG ID: {twg.id}")
                 return str(twg.id)
             return None
     except Exception as e:

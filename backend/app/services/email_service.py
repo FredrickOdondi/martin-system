@@ -521,5 +521,42 @@ class EmailService:
         
         return True
 
+    async def send_password_reset_email(
+        self,
+        to_email: str,
+        full_name: str,
+        reset_token: str,
+        reset_url_base: str
+    ):
+        """
+        Sends a password reset email with a secure reset link.
+        """
+        template = self.jinja_env.get_template("password_reset.html")
+        reset_url = f"{reset_url_base}?token={reset_token}"
+        context = {
+            "full_name": full_name,
+            "reset_url": reset_url
+        }
+        html_content = template.render(**context)
+        subject = "Password Reset Request - ECOWAS Summit TWG"
+
+        if not settings.EMAILS_ENABLED:
+            print(f"[EmailService] Emails disabled. Would send password reset to: {to_email}")
+            print(f"[EmailService] Reset URL: {reset_url}")
+            return True
+
+        if self.use_resend:
+            return await self._send_via_resend(
+                to_emails=[to_email],
+                subject=subject,
+                html_content=html_content
+            )
+        else:
+            return await self._send_via_smtp(
+                to_emails=[to_email],
+                subject=subject,
+                html_content=html_content
+            )
+
 
 email_service = EmailService()

@@ -17,7 +17,9 @@ from app.schemas.auth import (
     AccessToken,
     PasswordChange,
     UserResponse,
-    UserWithToken
+    UserWithToken,
+    ForgotPassword,
+    ResetPassword
 )
 from app.services.auth_service import AuthService
 from app.api.deps import get_current_active_user
@@ -158,3 +160,62 @@ async def change_password(
     )
     
     return None
+
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+async def forgot_password(
+    forgot_data: ForgotPassword,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Request a password reset email.
+    
+    - **email**: User email address
+    
+    Always returns success for security (doesn't reveal if email exists).
+    """
+    from app.services.email_service import email_service
+    from app.core.config import settings
+    
+    auth_service = AuthService(db)
+    reset_token = await auth_service.request_password_reset(forgot_data.email)
+    
+    if reset_token:
+        # Get user to send personalized email
+        user = await auth_service.get_user_by_email(forgot_data.email)
+        if user:
+            # Construct reset URL (frontend URL)
+            reset_url_base = f"{settings.FRONTEND_URL}/reset-password"
+            
+            try:
+                await email_service.send_password_reset_email(
+                    to_email=user.email,
+                    full_name=user.full_name,
+                    reset_token=reset_token,
+                    reset_url_base=reset_url_base
+                )
+            except Exception as e:
+                print(f"Failed to send password reset email: {e}")
+                # Don't raise error to user for security
+    
+    # Always return success message (security best practice)
+    return {"message": "If the email exists, a password reset link has been sent."}
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+async def reset_password(
+    reset_data: ResetPassword,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Reset password using a reset token.
+    
+    - **token**: Password reset token from email
+    - **new_password**: New password (min 8 characters)
+    
+    Returns success message if password was reset.
+    """
+    auth_service = AuthService(db)
+    await auth_service.reset_password(reset_data.token, reset_data.new_password)
+    
+    return {"message": "Password has been reset successfully. You can now log in with your new password."}

@@ -1,6 +1,29 @@
 
 // Project Status Enum
 export enum ProjectStatus {
+    // Submission Phase
+    DRAFT = "draft",
+    PIPELINE = "pipeline",
+    UNDER_REVIEW = "under_review",
+
+    // Decisions
+    DECLINED = "declined",
+    NEEDS_REVISION = "needs_revision",
+    SUMMIT_READY = "summit_ready",
+
+    // Deal Room
+    DEAL_ROOM_FEATURED = "deal_room_featured",
+    IN_NEGOTIATION = "in_negotiation",
+
+    // Post-Deal
+    COMMITTED = "committed",
+    IMPLEMENTED = "implemented",
+
+    // Other
+    ON_HOLD = "on_hold",
+    ARCHIVED = "archived",
+
+    // Legacy (keep for now to avoid breaking existing UI if any data remains)
     IDENTIFIED = "identified",
     VETTING = "vetting",
     DUE_DILIGENCE = "due_diligence",
@@ -37,9 +60,30 @@ export interface Project {
     assigned_agent?: string;
     updated_at: string;
 
+    funding_secured_usd?: number;
+    is_flagship?: boolean;
+    deal_room_priority?: number;
+
     // Metadata from backend API
     days_in_stage?: number;
     is_stalled?: boolean;
+    allowed_transitions?: string[];
+}
+
+export interface ScoringCriteria {
+    id: string;
+    criterion_name: string;
+    criterion_type: string;
+    weight: number;
+    description?: string;
+}
+
+export interface ProjectScoreDetail {
+    id: string;
+    criterion: ScoringCriteria;
+    score: number;
+    notes?: string;
+    scored_date: string;
 }
 
 export interface Investor {

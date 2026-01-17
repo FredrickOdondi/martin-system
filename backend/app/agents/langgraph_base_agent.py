@@ -13,7 +13,6 @@ import json
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import interrupt, Command
-from langgraph.types import interrupt, Command
 from langgraph.errors import GraphInterrupt, GraphRecursionError
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
@@ -54,6 +53,9 @@ class AgentConversationState(TypedDict):
 
     # Context (optional)
     context: Optional[Dict]
+    
+    # Store structured citations for frontend
+    citations: Annotated[List[Dict], add]
     
     # Flag to indicate an approval is pending (stops agent loop)
     approval_pending: Optional[bool]
@@ -111,13 +113,15 @@ class LangGraphBaseAgent:
         
         # Tools Configuration
         from app.tools.calendar_tools import GET_SCHEDULE_TOOL_DEF, get_schedule
+        from app.tools.calendar_tools import GET_SCHEDULE_TOOL_DEF, get_schedule
         from app.tools.email_tools import EMAIL_TOOLS, send_email, create_email_draft
+        from app.tools.document_tools import REQUEST_DOCUMENT_APPROVAL_TOOL_DEF, request_document_approval_tool
         import json
         
         # Register default tools available to all agents (or specific ones)
         
         # 1. Start with standard tools
-        self.tools_def = [GET_SCHEDULE_TOOL_DEF]
+        self.tools_def = [GET_SCHEDULE_TOOL_DEF, REQUEST_DOCUMENT_APPROVAL_TOOL_DEF]
         
         # 2. Convert and add EMAIL_TOOLS
         for tool in EMAIL_TOOLS:
@@ -196,7 +200,10 @@ class LangGraphBaseAgent:
         self.tool_map = {
             "get_schedule": get_schedule,
             "send_email": send_email,
-            "create_email_draft": create_email_draft
+            "get_schedule": get_schedule,
+            "send_email": send_email,
+            "create_email_draft": create_email_draft,
+            "request_document_approval_tool": request_document_approval_tool
         }
         
         # Get Knowledge Base (RAG)
@@ -332,9 +339,11 @@ class LangGraphBaseAgent:
         """Process incoming query."""
         query = state["query"]
         
-        # Initialize context if needed
+        # Initialize context and citations if needed
         if state.get("context") is None:
             state["context"] = {}
+        if state.get("citations") is None:
+            state["citations"] = []
 
         # RAG Retrieval
         if self.twg_id and self.kb:
@@ -378,6 +387,17 @@ class LangGraphBaseAgent:
 
                     # Store in state
                     state['context'] = {"retrieved_docs": context_text, "source": namespace}
+                    
+                    # Also populate structured citations
+                    citations = []
+                    for r in results:
+                         citations.append({
+                             "source": r['metadata'].get('file_name', 'Unknown'),
+                             "page": r['metadata'].get('page', 1),
+                             "relevance": r['score']
+                         })
+                    state['citations'] = citations
+                    
                     logger.info(f"[{self.agent_id}] Retrieved {len(results)} docs from {namespace}")
                 else:
                     logger.info(f"[{self.agent_id}] No relevant docs found in {namespace}")
@@ -598,7 +618,28 @@ class LangGraphBaseAgent:
                                 output_str = json.dumps({"status": "approved", "message": "Email approved and will be sent."})
                             else:
                                 logger.info(f"[{self.agent_id}] Approval DENIED - cancelling send")
-                                output_str = json.dumps({"status": "declined", "message": "Email was declined by user."})
+                        
+                        elif isinstance(res_json, dict) and res_json.get("type") == "document_approval_required":
+                             logger.info(f"[{self.agent_id}] INTERRUPT: Document Approval required for {res_json['approval_request_id']}")
+                             
+                             approval_payload = {
+                                 "type": "document_approval_required",
+                                 "request_id": res_json.get("approval_request_id"),
+                                 "draft": res_json.get("document_draft", {}),
+                                 "message": res_json.get("message", "Document requires approval before saving.")
+                             }
+                             
+                             # INTERRUPT the graph
+                             human_response = interrupt(approval_payload)
+                             
+                             if human_response and human_response.get("approved"):
+                                 logger.info(f"[{self.agent_id}] Document Approval GRANTED - Saved.")
+                                 # Ideally we return the Doc ID here if the Approval Action saved it.
+                                 saved_doc_id = human_response.get("result", {}).get("document_id", "unknown")
+                                 output_str = json.dumps({"status": "approved", "message": f"Document approved and saved. ID: {saved_doc_id}"})
+                             else:
+                                 logger.info(f"[{self.agent_id}] Document Approval DENIED")
+                                 output_str = json.dumps({"status": "denied", "message": "User declined to save the document."})
                     except GraphInterrupt:
                         logger.info(f"[{self.agent_id}] GraphInterrupt raised - pausing graph for approval")
                         raise
@@ -619,7 +660,7 @@ class LangGraphBaseAgent:
         state["messages"].extend(new_messages)
         return state
 
-    async def chat(self, message: str, thread_id: Optional[str] = None) -> str:
+    async def chat(self, message: str, thread_id: Optional[str] = None) -> Dict[str, any]:
         """
         Chat interface using LangGraph execution (Async).
         """
@@ -671,18 +712,18 @@ class LangGraphBaseAgent:
 
         thread_id = thread_id or self.session_id
         logger.info(f"[{self.agent_id}:{thread_id}] Received: {message[:100]}...")
-
-        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 20}
-
+        # Run the graph
+        config = {"configurable": {"thread_id": thread_id}}
+        
+        # Initial state: user query
         initial_state: AgentConversationState = {
-            "messages": [HumanMessage(content=message)],
             "query": message,
-            "response": "",
+            "messages": [HumanMessage(content=message)],
             "agent_id": self.agent_id,
             "session_id": thread_id,
-            "context": None
+            "citations": []
         }
-
+        
         try:
             # Run the graph asynchronously
             # Use ainvoke for compatibility with async nodes
@@ -698,18 +739,30 @@ class LangGraphBaseAgent:
                             logger.info(f"[{self.agent_id}] Detected interrupt in state: {interrupt_value}")
                             raise GraphInterrupt(interrupt_value)
 
-            response = result.get("response", "")
-            logger.info(f"[{self.agent_id}:{thread_id}] Response: {response[:100]}...")
-            return response
+            response_text = result.get("response", "No response generated.")
+            citations = result.get("citations", [])
+            
+            logger.info(f"[{self.agent_id}:{thread_id}] Response: {response_text[:100]}...")
+            
+            return {
+                "response": response_text,
+                "citations": citations
+            }
 
         except GraphInterrupt:
             raise
         except GraphRecursionError:
             logger.warning(f"[{self.agent_id}:{thread_id}] GraphRecursionError: Max iterations reached")
-            return "I apologize, but I reached the maximum number of steps trying to solve this request."
+            return {
+                "response": "I apologize, but I reached the maximum number of steps trying to solve this request.",
+                "citations": []
+            }
         except Exception as e:
             logger.error(f"[{self.agent_id}:{thread_id}] Error: {e}")
-            return f"I apologize, but I encountered an error: {str(e)}"
+            return {
+                "response": f"I apologize, but I encountered an error: {str(e)}",
+                "citations": []
+            }
 
     async def resume_chat(self, thread_id: str, resume_value: Dict) -> str:
         """

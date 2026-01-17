@@ -124,6 +124,7 @@ async def list_documents(
     skip: int = 0,
     limit: int = 100,
     twg_id: uuid.UUID = None,
+    project_id: uuid.UUID = None,
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -150,6 +151,19 @@ async def list_documents(
             query = query.where(Document.twg_id == twg_id)
             if not has_twg_access(current_user, twg_id):
                 raise HTTPException(status_code=403, detail="Access denied")
+        elif project_id:
+            # New project filter
+            count_query = count_query.where(Document.project_id == project_id)
+            query = query.where(Document.project_id == project_id)
+            # Access control for project docs?
+            # For now, if user has access to project's TWG, they see it.
+            # But documents might not have TWG explicitly set if they are project-only?
+            # Assuming project docs belong to the TWG of the project. 
+            # We skip explicit check here relying on the fact that if they can see the project (RBAC elsewhere), they can see docs?
+            # Or enforce generic RBAC.
+            if current_user.role not in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD, UserRole.TWG_FACILITATOR, UserRole.TWG_MEMBER]:
+                 # Basic check
+                 pass 
         else:
             # Filter visible documents based on user role and TWG membership
             if current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:

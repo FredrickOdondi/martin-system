@@ -21,6 +21,16 @@ export const pipelineService = {
         return response.data;
     },
 
+    getScoreDetails: async (id: string): Promise<any[]> => {
+        const response = await api.get(`/pipeline/${id}/score-details`);
+        return response.data;
+    },
+
+    toggleFlagship: async (id: string, isFlagship: boolean): Promise<any> => {
+        const response = await api.post(`/pipeline/${id}/feature?is_flagship=${isFlagship}`);
+        return response.data;
+    },
+
     getStats: async (): Promise<PipelineStats> => {
         const response = await api.get('/pipeline/dashboard/stats');
         return response.data;

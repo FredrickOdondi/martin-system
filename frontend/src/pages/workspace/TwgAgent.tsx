@@ -7,6 +7,7 @@ import { twgs as twgApi, default as api } from '../../services/api';
 import { CommandAutocomplete } from '../../components/agent/CommandAutocomplete';
 import { MentionAutocomplete } from '../../components/agent/MentionAutocomplete';
 import EmailApprovalModal, { EmailApprovalRequest, EmailDraft } from '../../components/agent/EmailApprovalModal';
+import DocumentApprovalModal from '../../components/modals/DocumentApprovalModal';
 import SettingsModal from '../../components/agent/SettingsModal';
 import EnhancedMessageBubble from '../../components/agent/EnhancedMessageBubble';
 import TypingIndicator from '../../components/agent/TypingIndicator';
@@ -107,13 +108,10 @@ export default function TwgAgent() {
     const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(0);
     const [autocompleteType, setAutocompleteType] = useState<'command' | 'mention' | null>(null);
 
-    // Email approval state
-    const [pendingEmailApproval, setPendingEmailApproval] = useState<EmailApprovalRequest | null>(null);
-    const [showApprovalModal, setShowApprovalModal] = useState(false);
-
-    // Settings modal state
-    const [showSettingsModal, setShowSettingsModal] = useState(false);
-
+    // Modals
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const [emailApprovalRequest, setEmailApprovalRequest] = useState<EmailApprovalRequest | null>(null);
+    const [documentApprovalRequest, setDocumentApprovalRequest] = useState<any | null>(null);
 
     // Context panel state
     const [showContextPanel, setShowContextPanel] = useState(false);
@@ -122,9 +120,79 @@ export default function TwgAgent() {
     const [typingMessage, setTypingMessage] = useState<string | null>(null);
     const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
 
+
+    // Helper to get Martin Persona Name
+
+    // Document Approval Handlers
+    const handleDocumentApprovalResolve = async (approved: boolean, result?: any) => {
+        setDocumentApprovalRequest(null);
+
+        if (!conversationId) return;
+
+        // Resume the agent loop
+        try {
+            setIsLoading(true);
+            await agentService.chatStream({
+                message: approved
+                    ? `I have approved the document. The ID is ${result?.document_id}. Please proceed.`
+                    : "I have declined the document creation.",
+                conversation_id: conversationId,
+                twg_id: activeTwg?.id
+            }, {
+                onThinking: (status) => setTypingMessage(status), // Using setTypingMessage as setCurrentThought is not defined
+                onResponse: (response) => {
+                    // Update the last message if it's from agent, or add new
+                    setMessages(prev => {
+                        const newMsg: Message = {
+                            id: crypto.randomUUID(),
+                            role: 'agent',
+                            content: response.content || response,
+                            timestamp: new Date(),
+                            agentName: currentAgentName, // Use dynamic identity
+                            citations: response.citations || [],
+                            suggestions: response.suggestions
+                        };
+                        return [...prev, newMsg];
+                    });
+                    // Clear thought when response comes
+                    setTypingMessage(null); // Using setTypingMessage as setCurrentThought is not defined
+                },
+                onDone: () => setIsLoading(false),
+                onError: (err) => {
+                    console.error("Error resuming after doc approval", err);
+                    setIsLoading(false);
+                }
+            });
+        } catch (error) {
+            console.error("Failed to resume conversation", error);
+            setIsLoading(false);
+        }
+    };
+
+    const getAgentIdentity = (twgName?: string) => {
+        if (!twgName) return "Martin Copilot";
+
+        // Normalize
+        const name = twgName.toLowerCase();
+
+        if (name.includes('secretariat')) return "Secretariat Martin";
+        if (name.includes('energy')) return "Energy Martin";
+        if (name.includes('agriculture')) return "Agriculture Martin";
+        if (name.includes('minerals')) return "Minerals Martin";
+        if (name.includes('digital')) return "Digital Martin";
+        if (name.includes('protocol')) return "Protocol Martin";
+        if (name.includes('resource') || name.includes('mobilization')) return "Investment Martin";
+
+        // Fallback for custom/new TWGs
+        return `${twgName} Martin`;
+    };
+
+    const currentAgentName = getAgentIdentity(activeTwg?.name);
+
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
+
 
     useEffect(() => {
         scrollToBottom();
@@ -191,7 +259,7 @@ export default function TwgAgent() {
                         content: content,
                         timestamp: new Date(),
                         citations: [], // Stream doesn't support citations yet
-                        agentName: activeTwg?.name === 'Secretariat' ? 'Secretariat Assistant' : `${activeTwg?.name} Agent`,
+                        agentName: currentAgentName,
                         suggestions: suggestions
                     };
 
@@ -200,17 +268,25 @@ export default function TwgAgent() {
                 },
                 onInterrupt: (payload: any) => {
                     console.log('[STREAM] Received interrupt:', payload);
-                    const interruptMsg: Message = {
-                        id: `interrupt-${Date.now()}`,
-                        role: 'agent',
-                        content: payload.message || 'Action required.',
-                        timestamp: new Date(),
-                        agentName: activeTwg?.name === 'Secretariat' ? 'Secretariat Assistant' : `${activeTwg?.name} Agent`,
-                        approvalRequest: payload
-                    };
-                    setMessages(prev => [...prev, interruptMsg]);
-                    setIsLoading(false);
-                    setTypingMessage(null);
+                    if (payload.type === 'email_approval_required') {
+                        setEmailApprovalRequest(payload);
+                        setIsLoading(false); // Stop loading indicator while waiting for user
+                    } else if (payload.type === 'document_approval_required') {
+                        setDocumentApprovalRequest(payload);
+                        setIsLoading(false);
+                    } else {
+                        const interruptMsg: Message = {
+                            id: `interrupt-${Date.now()}`,
+                            role: 'agent',
+                            content: payload.message || 'Action required.',
+                            timestamp: new Date(),
+                            agentName: currentAgentName,
+                            approvalRequest: payload
+                        };
+                        setMessages(prev => [...prev, interruptMsg]);
+                        setIsLoading(false);
+                        setTypingMessage(null);
+                    }
                 },
                 onDone: () => {
                     setIsLoading(false);
@@ -445,58 +521,48 @@ export default function TwgAgent() {
         inputRef.current?.focus();
     };
 
-    const handleApproveEmail = async (requestId: string, modifications?: EmailDraft) => {
+    const handleEmailApprovalResolve = async (approved: boolean, requestId: string, modifications?: EmailDraft, declineReason?: string) => {
         try {
-            const approvalData = {
-                request_id: requestId,
-                approved: true,
-                modifications: modifications || null
-            };
-
-            const result = await agentService.approveEmail(requestId, approvalData);
-
-            setShowApprovalModal(false);
-            setPendingEmailApproval(null);
-
-            const successMessage: Message = {
-                id: Date.now().toString(),
-                role: 'agent',
-                content: result.email_sent
-                    ? `✅ Email sent successfully! Message ID: ${result.message_id}`
-                    : `⚠️ ${result.message}`,
-                timestamp: new Date()
-            };
-            setMessages(prev => [...prev, successMessage]);
+            if (approved) {
+                const approvalData = {
+                    request_id: requestId,
+                    approved: true,
+                    modifications: modifications || null
+                };
+                const result = await agentService.approveEmail(requestId, approvalData);
+                const successMessage: Message = {
+                    id: Date.now().toString(),
+                    role: 'agent',
+                    content: result.email_sent
+                        ? `✅ Email sent successfully! Message ID: ${result.message_id}`
+                        : `⚠️ ${result.message}`,
+                    timestamp: new Date()
+                };
+                setMessages(prev => [...prev, successMessage]);
+            } else {
+                await agentService.declineEmail(requestId, declineReason);
+                const declineMessage: Message = {
+                    id: Date.now().toString(),
+                    role: 'agent',
+                    content: `🚫 Email sending cancelled: ${declineReason || 'Declined by user'}`,
+                    timestamp: new Date()
+                };
+                setMessages(prev => [...prev, declineMessage]);
+            }
         } catch (error) {
-            console.error('Error approving email:', error);
+            console.error('Error handling email approval:', error);
             const errorMessage: Message = {
                 id: Date.now().toString(),
                 role: 'agent',
-                content: `❌ Failed to send email: ${error}`,
+                content: `❌ Failed to process email approval: ${error}`,
                 timestamp: new Date()
             };
             setMessages(prev => [...prev, errorMessage]);
+        } finally {
+            setEmailApprovalRequest(null);
         }
     };
 
-    const handleDeclineEmail = async (requestId: string, reason?: string) => {
-        try {
-            await agentService.declineEmail(requestId, reason);
-
-            setShowApprovalModal(false);
-            setPendingEmailApproval(null);
-
-            const declineMessage: Message = {
-                id: Date.now().toString(),
-                role: 'agent',
-                content: `🚫 Email sending cancelled: ${reason || 'Declined by user'}`,
-                timestamp: new Date()
-            };
-            setMessages(prev => [...prev, declineMessage]);
-        } catch (error) {
-            console.error('Error declining email:', error);
-        }
-    };
 
     const handleSuggestionClick = (suggestion: string) => {
         setInputMessage(suggestion);
@@ -525,7 +591,7 @@ export default function TwgAgent() {
                             </div>
                             <div>
                                 <h3 className="font-bold text-[#0d121b] dark:text-white">
-                                    {activeTwg?.name === 'Secretariat' ? 'Secretariat Assistant (v2)' : `${activeTwg?.name} Agent`}
+                                    {currentAgentName}
                                 </h3>
                                 <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
                                     <span className="size-1.5 bg-green-500 rounded-full"></span>
@@ -561,7 +627,7 @@ export default function TwgAgent() {
                                 </button>
                             )}
                             <button
-                                onClick={() => setShowSettingsModal(true)}
+                                onClick={() => setSettingsOpen(true)}
                                 className="p-2 text-[#4c669a] hover:bg-gray-100 dark:hover:bg-[#2d3748] rounded-lg transition-colors"
                                 title="Settings"
                             >
@@ -587,10 +653,10 @@ export default function TwgAgent() {
                                         <span className="material-symbols-outlined text-white" style={{ fontSize: '32px' }}>smart_toy</span>
                                     </div>
                                     <h3 className="text-3xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-purple-600 dark:from-blue-400 dark:to-purple-400 mb-3">
-                                        Hello, Dr. Sow
+                                        Good day, {user?.full_name ? user.full_name.split(' ')[0] : 'Dr. Sow'}
                                     </h3>
                                     <h4 className="text-xl text-slate-600 dark:text-slate-400 font-medium mb-8">
-                                        How can I assist with the TWG today?
+                                        {currentAgentName} is online. How may I assist?
                                     </h4>
 
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-left">
@@ -644,15 +710,15 @@ export default function TwgAgent() {
                                     key={message.id}
                                     message={{ ...message, approvalRequest: message.approvalRequest }}
                                     onReact={handleReact}
-                                    onApprove={message.approvalRequest ? (id, mods) => handleApproveEmail(id, mods) : undefined}
-                                    onDecline={message.approvalRequest ? () => handleDeclineEmail(message.approvalRequest!.request_id) : undefined}
+                                    onApprove={message.approvalRequest ? (id, mods) => handleEmailApprovalResolve(true, id, mods) : undefined}
+                                    onDecline={message.approvalRequest ? (id) => handleEmailApprovalResolve(false, id) : undefined}
                                     onSuggestionClick={handleSuggestionClick}
                                 />
                             ))
                         )}
                         {(isLoading || typingMessage) && (
                             <TypingIndicator
-                                agentName="Secretariat Assistant"
+                                agentName={currentAgentName}
                                 steps={thinkingSteps}
                             />
                         )}
@@ -723,21 +789,29 @@ export default function TwgAgent() {
             </main>
 
             {/* Modals */}
-            {showApprovalModal && pendingEmailApproval && (
-                <EmailApprovalModal
-                    approvalRequest={pendingEmailApproval}
-                    onApprove={handleApproveEmail}
-                    onDecline={handleDeclineEmail}
-                    onClose={() => {
-                        setShowApprovalModal(false);
-                        setPendingEmailApproval(null);
-                    }}
+            {/* Modals */}
+            {settingsOpen && (
+                <SettingsModal
+                    onClose={() => setSettingsOpen(false)}
                 />
             )}
 
-            {showSettingsModal && (
-                <SettingsModal
-                    onClose={() => setShowSettingsModal(false)}
+            {/* Email Approval Modal */}
+            {/* Email Approval Modal */}
+            {emailApprovalRequest && (
+                <EmailApprovalModal
+                    approvalRequest={emailApprovalRequest}
+                    onApprove={(id, mods) => handleEmailApprovalResolve(true, id, mods)}
+                    onDecline={(id, reason) => handleEmailApprovalResolve(false, id, undefined, reason)}
+                    onClose={() => setEmailApprovalRequest(null)}
+                />
+            )}
+
+            {/* Document Approval Modal */}
+            {documentApprovalRequest && (
+                <DocumentApprovalModal
+                    approvalRequest={documentApprovalRequest}
+                    onResolve={handleDocumentApprovalResolve}
                 />
             )}
         </div>

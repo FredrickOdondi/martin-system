@@ -397,3 +397,108 @@ class AuthService:
             token.is_revoked = True
         
         await self.db.commit()
+    
+    async def request_password_reset(self, email: str) -> Optional[str]:
+        """
+        Generate a password reset token for a user.
+        
+        Args:
+            email: User email address
+            
+        Returns:
+            Reset token if user exists, None otherwise (for security, don't reveal if email exists)
+        """
+        from app.models.models import PasswordResetToken
+        import secrets
+        
+        # Get user
+        user = await self.get_user_by_email(email)
+        if not user:
+            # For security, don't reveal that email doesn't exist
+            # Still return None but don't raise error
+            return None
+        
+        # Generate secure random token
+        reset_token = secrets.token_urlsafe(32)
+        
+        # Set expiration (1 hour from now)
+        expires_at = datetime.utcnow() + timedelta(hours=1)
+        
+        # Store token in database
+        password_reset = PasswordResetToken(
+            token=reset_token,
+            user_id=user.id,
+            expires_at=expires_at
+        )
+        
+        self.db.add(password_reset)
+        await self.db.commit()
+        
+        return reset_token
+    
+    async def reset_password(self, token: str, new_password: str) -> bool:
+        """
+        Reset user password using a reset token.
+        
+        Args:
+            token: Password reset token
+            new_password: New password
+            
+        Returns:
+            True if successful
+            
+        Raises:
+            HTTPException: If token is invalid, expired, or already used
+        """
+        from app.models.models import PasswordResetToken
+        
+        # Find token
+        result = await self.db.execute(
+            select(PasswordResetToken).where(
+                PasswordResetToken.token == token,
+                PasswordResetToken.is_used == False
+            )
+        )
+        reset_token = result.scalar_one_or_none()
+        
+        if not reset_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid or already used reset token"
+            )
+        
+        # Check expiration
+        if reset_token.expires_at < datetime.utcnow():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Reset token has expired"
+            )
+        
+        # Get user
+        user = await self.get_user_by_id(reset_token.user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Validate new password
+        is_valid, error_msg = validate_password_strength(new_password)
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_msg
+            )
+        
+        # Update password
+        user.hashed_password = hash_password(new_password)
+        
+        # Mark token as used
+        reset_token.is_used = True
+        
+        await self.db.commit()
+        
+        # Revoke all existing refresh tokens for security
+        await self._revoke_all_user_tokens(user.id)
+        
+        return True

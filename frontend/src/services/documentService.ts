@@ -49,9 +49,10 @@ export const documentService = {
         return response.data;
     },
 
-    listDocuments: async (twgId?: string, page: number = 1, limit: number = 10): Promise<{ data: Document[]; total: number }> => {
+    listDocuments: async (twgId?: string, page: number = 1, limit: number = 10, projectId?: string): Promise<{ data: Document[]; total: number }> => {
         const params = {
             ...(twgId ? { twg_id: twgId } : {}),
+            ...(projectId ? { project_id: projectId } : {}),
             skip: (page - 1) * limit,
             limit
         };

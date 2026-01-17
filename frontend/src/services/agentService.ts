@@ -195,4 +195,10 @@ export const agentService = {
         const response = await api.post(`/agents/email/approval/${requestId}/decline`, { reason });
         return response.data;
     },
+
+    // Document approval
+    approveDocument: async (requestId: string, approvalData: any): Promise<any> => {
+        const response = await api.post(`/agents/document/approval/${requestId}/approve`, approvalData);
+        return response.data;
+    },
 };

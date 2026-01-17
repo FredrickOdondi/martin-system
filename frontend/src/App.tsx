@@ -9,7 +9,6 @@ import Login from './pages/auth/Login'
 import ForgotPassword from './pages/auth/ForgotPassword'
 import ResetPassword from './pages/auth/ResetPassword'
 import ModernLayout from './layouts/ModernLayout'
-import Settings from './pages/settings/Settings'
 import Dashboard from './pages/dashboard/Dashboard'
 import TwgWorkspace from './pages/workspace/TwgWorkspace'
 import TwgAgent from './pages/workspace/TwgAgent'
@@ -71,20 +70,16 @@ function App() {
     }, [dispatch, token, user])
 
     useEffect(() => {
-        // Apply theme class to html element
-        if (theme === 'dark') {
-            document.documentElement.classList.add('dark')
-        } else {
-            document.documentElement.classList.remove('dark')
-        }
+        // Force light mode by removing dark class
+        document.documentElement.classList.remove('dark')
     }, [theme])
 
     if (!initialCheckDone && token && !user) {
         return (
-            <div className="h-screen w-screen flex items-center justify-center bg-[#020617]">
+            <div className="h-screen w-screen flex items-center justify-center bg-white">
                 <div className="flex flex-col items-center gap-4">
-                    <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                    <p className="text-blue-200 font-medium">Restoring session...</p>
+                    <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-primary font-medium">Restoring session...</p>
                 </div>
             </div>
         )
@@ -128,11 +123,6 @@ function App() {
                 <Route path="/assistant" element={<AgentAssistant />} />
 
                 {/* Admin Routes */}
-                <Route path="/settings" element={
-                    <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]}>
-                        <Settings />
-                    </ProtectedRoute>
-                } />
                 <Route path="/admin/team" element={
                     <ProtectedRoute allowedRoles={[UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]}>
                         <TeamManagement />

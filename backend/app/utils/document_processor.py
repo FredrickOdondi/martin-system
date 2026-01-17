@@ -345,7 +345,7 @@ def get_document_processor() -> DocumentProcessor:
     Returns:
         DocumentProcessor instance
     """
-    chunk_size = int(os.getenv("CHUNK_SIZE", "1000"))
+    chunk_size = int(os.getenv("CHUNK_SIZE", "500"))
     chunk_overlap = int(os.getenv("CHUNK_OVERLAP", "200"))
     max_chunks = int(os.getenv("MAX_CHUNKS_PER_DOC", "100"))
     

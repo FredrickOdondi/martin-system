@@ -34,8 +34,8 @@ export default function CopilotChat({ twgId: propTwgId, twgName }: { twgId?: str
                     conversation_id: 'init',
                     message_type: ChatMessageType.AGENT_TEXT,
                     content: twgName
-                        ? `Hello. I am the ${twgName} Agent. How can I assist you with ${twgName} matters today?`
-                        : "Hello Dr. Sow. I can help you analyze documents, draft agendas, and coordinate with other TWGs. How can I assist you today?",
+                        ? `Greetings. I am ${twgName} Martin. How may I assist you with your technical deliverables today?`
+                        : "Greetings. I am Secretariat Martin. I can assist with cross-pillar coordination, document synthesis, and conflict resolution.",
                     sender: 'agent',
                     timestamp: new Date().toISOString()
                 }
@@ -198,10 +198,10 @@ export default function CopilotChat({ twgId: propTwgId, twgName }: { twgId?: str
                         <span className="material-symbols-outlined text-[20px]">smart_toy</span>
                     </div>
                     <div>
-                        <h3 className="font-bold text-sm text-slate-900 dark:text-white">ECOWAS AI Copilot</h3>
+                        <h3 className="font-bold text-sm text-slate-900 dark:text-white">Martin Copilot</h3>
                         <p className="text-[10px] text-green-500 font-bold uppercase flex items-center gap-1 transition-colors">
                             <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                            Online • {twgName ? `${twgName} Agent` : (user?.role === 'admin' ? 'Secretariat Mode' : 'General Context')}
+                            Online • {twgName ? `${twgName} Martin` : (user?.role === 'admin' ? 'Secretariat Mode' : 'General Context')}
                         </p>
                     </div>
                 </div>

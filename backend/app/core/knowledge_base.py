@@ -63,6 +63,13 @@ class PineconeKnowledgeBase:
         self.openai_client = None
         if openai_api_key:
             self.openai_client = openai.Client(api_key=openai_api_key)
+        elif settings.GITHUB_TOKEN:
+            # GitHub Models (via Azure OpenAI)
+            self.openai_client = openai.Client(
+                api_key=settings.GITHUB_TOKEN,
+                base_url=settings.GITHUB_BASE_URL
+            )
+            logger.info("Initialized OpenAI Client using GitHub Models")
             
         # Get or create index
         self.index = self._get_or_create_index()
@@ -80,6 +87,7 @@ class PineconeKnowledgeBase:
                 logger.info(f"Creating new Pinecone index: {self.index_name}")
                 
                 # Create serverless index
+                # Note: GitHub Models embeddings are 1536 dim (text-embedding-3-small)
                 self.pc.create_index(
                     name=self.index_name,
                     dimension=self.dimension,
@@ -132,7 +140,7 @@ class PineconeKnowledgeBase:
         Returns:
             List of embedding vectors
         """
-        # Check if using OpenAI model and client is available
+        # Check if using OpenAI model (or GitHub Models) and client is available
         if self.embedding_model.startswith("text-embedding") and self.openai_client:
             try:
                 # OpenAI Embeddings
@@ -150,7 +158,7 @@ class PineconeKnowledgeBase:
                 return [data.embedding for data in response.data]
                 
             except Exception as e:
-                logger.error(f"OpenAI embedding error: {e}")
+                logger.error(f"OpenAI/GitHub embedding error: {e}")
                 raise
         
         # Fallback to Ollama (local development)
@@ -160,8 +168,8 @@ class PineconeKnowledgeBase:
             
             for text in texts:
                 # Ensure text is not too long for Ollama (nomic-embed-text limit is ~2048 tokens)
-                # Truncate to a safe length (~8000 chars) if needed
-                safe_text = text[:8000]
+                # Truncate to a safe length (~4000 chars approx 1000 tokens) to be safe for 2048 limit
+                safe_text = text[:4000]
                 
                 response = requests.post(
                     'http://localhost:11434/api/embeddings',
@@ -217,6 +225,10 @@ class PineconeKnowledgeBase:
                 # Prepare vectors for upsert
                 vectors = []
                 for doc, embedding in zip(batch, embeddings):
+                    # Ensure embedding dimensionality matches index (sanity check not exhaustive)
+                    if len(embedding) != self.dimension:
+                        logger.warning(f"Embedding dim {len(embedding)} != Index dim {self.dimension}. This will likely fail.")
+
                     vector = {
                         'id': doc['id'],
                         'values': embedding,
