@@ -68,6 +68,7 @@ export interface Project {
     days_in_stage?: number;
     is_stalled?: boolean;
     allowed_transitions?: string[];
+    metadata_json?: Record<string, any>;
 }
 
 export interface ScoringCriteria {

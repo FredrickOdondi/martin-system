@@ -14,7 +14,7 @@ from app.models.models import User, Project, ProjectStatus
 from app.services.project_pipeline_service import ProjectPipelineService
 from app.services.investor_matching_service import get_investor_matching_service
 from app.schemas.pipeline_schemas import (
-    ProjectIngest, ProjectPipelineRead, ProjectAdvanceStage, 
+    ProjectIngest, ProjectUpdate, ProjectPipelineRead, ProjectAdvanceStage, 
     InvestorMatchRead, PipelineStats, InvestorMatchUpdate, InvestorRead,
     ProjectScoreDetailRead, ScoringCriteriaRead
 )
@@ -121,6 +121,47 @@ async def get_project_details(
     if not p:
         raise HTTPException(status_code=404, detail="Project not found")
         
+    return ProjectPipelineRead(
+        id=p.id,
+        name=p.name,
+        description=p.description,
+        status=p.status,
+        investment_size=p.investment_size,
+        currency=p.currency,
+        readiness_score=p.readiness_score,
+        afcen_score=p.afcen_score,
+        strategic_alignment_score=p.strategic_alignment_score,
+        lead_country=p.lead_country,
+        pillar=p.pillar,
+        assigned_agent=p.assigned_agent,
+        updated_at=getattr(p, 'created_at', datetime.now(UTC)),
+        is_flagship=p.is_flagship,
+        funding_secured_usd=p.funding_secured_usd or 0,
+        deal_room_priority=p.deal_room_priority,
+        allowed_transitions=LifecycleService.get_allowed_transitions(p.status, current_user.role)
+    )
+
+@router.patch("/{project_id}", response_model=ProjectPipelineRead)
+async def update_project(
+    project_id: uuid.UUID,
+    payload: ProjectUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update project details.
+    """
+    service = ProjectPipelineService(db)
+    result = await service.update_project(
+        project_id=project_id,
+        data=payload.model_dump(exclude_unset=True),
+        updated_by_user_id=current_user.id
+    )
+    
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+        
+    p = result["project"]
     return ProjectPipelineRead(
         id=p.id,
         name=p.name,

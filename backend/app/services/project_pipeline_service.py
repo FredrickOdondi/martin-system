@@ -275,6 +275,17 @@ class ProjectPipelineService:
              match_result = await matching_service.match_investors(project_id)
              logger.info(f"Auto-triggered investor matching for project {project_id}: {match_result}")
 
+        # AUTOMATIC SCORING: Retrigger scoring after status change
+        try:
+            from app.services.scoring_tasks import rescore_project_async
+            
+            # Trigger background scoring via Celery
+            rescore_project_async.delay(str(project_id))
+            
+            logger.info(f"✓ Triggered AfCEN rescoring for project {project_id} after status change to {new_stage.value}")
+        except Exception as e:
+            logger.warning(f"Could not trigger automatic scoring: {e}")
+
         return {
             "project": project,
             "status": "success",
@@ -551,6 +562,7 @@ class ProjectPipelineService:
             assigned_agent=data.get("assigned_agent"),
             is_flagship=data.get("is_flagship", False), # New field
             metadata_json={
+                **(data.get("metadata_json") or {}), # Merge payload metadata
                 "source": "ingestion_api",
                 "submitted_at": datetime.now(UTC).isoformat(),
                 "submitted_by": str(submitted_by_user_id) if submitted_by_user_id else None
@@ -599,3 +611,53 @@ class ProjectPipelineService:
             "status": "created",
             "afcen_score": afcen_score
         }
+
+    async def update_project(
+        self,
+        project_id: uuid.UUID,
+        data: Dict[str, Any],
+        updated_by_user_id: Optional[uuid.UUID] = None
+    ) -> Dict[str, Any]:
+        """
+        Update project details.
+        """
+        result = await self.db.execute(select(Project).where(Project.id == project_id))
+        project = result.scalars().first()
+        
+        if not project:
+            return {"error": "Project not found"}
+            
+        # Update fields
+        if data.get("name"): project.name = data["name"]
+        if data.get("description"): project.description = data["description"]
+        if data.get("investment_size"): project.investment_size = data["investment_size"]
+        if data.get("currency"): project.currency = data["currency"]
+        if data.get("pillar"): project.pillar = data["pillar"]
+        if data.get("lead_country"): project.lead_country = data["lead_country"]
+        if data.get("assigned_agent"): project.assigned_agent = data["assigned_agent"]
+        if "is_flagship" in data and data["is_flagship"] is not None: 
+            project.is_flagship = data["is_flagship"]
+            
+        # Merge metadata
+        if data.get("metadata_json"):
+            current_meta = project.metadata_json or {}
+            project.metadata_json = {**current_meta, **data["metadata_json"]}
+            
+        if updated_by_user_id:
+            project.updated_by = updated_by_user_id
+            
+        await self.db.commit()
+        await self.db.refresh(project)
+        
+        # AUTOMATIC SCORING: Retrigger scoring after project update
+        try:
+            from app.services.scoring_tasks import rescore_project_async
+            
+            # Trigger background scoring via Celery
+            rescore_project_async.delay(str(project_id))
+            
+            logger.info(f"✓ Triggered AfCEN rescoring for project {project_id} after update")
+        except Exception as e:
+            logger.warning(f"Could not trigger automatic scoring: {e}")
+        
+        return {"project": project, "status": "updated"}

@@ -12,6 +12,7 @@ celery_app.conf.task_routes = {
     "app.services.tasks.send_meeting_reminders": "periodic",
     "app.services.tasks.sync_rsvps": "periodic",
     "app.services.tasks.generate_project_pdf": "formatting",
+    "app.services.scoring_tasks.rescore_project_async": "scoring",
 }
 
 celery_app.conf.beat_schedule = {

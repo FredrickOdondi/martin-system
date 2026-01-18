@@ -143,10 +143,10 @@ const NewProject: React.FC = () => {
         currency: formData.currency,
         readiness_score: 0,
         strategic_alignment_score: 0,
+        pillar: formData.pillar,
+        lead_country: formData.leadCountry,
         status: 'identified',
         metadata_json: {
-          pillar: formData.pillar,
-          leadCountry: formData.leadCountry,
           leadCompany: formData.leadCompany,
           icon: formData.icon,
           iconColor: formData.iconColor,
@@ -160,7 +160,7 @@ const NewProject: React.FC = () => {
 
       console.log('Creating project with data:', projectData);
 
-      const response = await api.post('/projects/', projectData, {
+      const response = await api.post('/pipeline/ingest', projectData, {
         timeout: 30000 // 30 second timeout
       });
 

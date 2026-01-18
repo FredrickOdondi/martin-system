@@ -31,7 +31,7 @@ export const ProjectHistoryTimeline: React.FC<ProjectHistoryTimelineProps> = ({ 
                 setHistory(data.history || []);
             } catch (err) {
                 setError('Failed to load project history');
-                console.error(err);
+                console.error('Error fetching history:', err);
             } finally {
                 setLoading(false);
             }

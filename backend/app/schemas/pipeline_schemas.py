@@ -23,6 +23,20 @@ class ProjectIngest(BaseModel):
     pillar: Optional[str] = None
     lead_country: Optional[str] = None
     assigned_agent: Optional[str] = None
+    metadata_json: Optional[Dict[str, Any]] = None
+    status: Optional[str] = None # Optional override, otherwise defaults to DRAFT
+
+class ProjectUpdate(BaseModel):
+    """Schema for updating a project"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    investment_size: Optional[Decimal] = None
+    currency: Optional[str] = None
+    pillar: Optional[str] = None
+    lead_country: Optional[str] = None
+    metadata_json: Optional[Dict[str, Any]] = None
+    assigned_agent: Optional[str] = None
+    is_flagship: Optional[bool] = None
 
 class ProjectAdvanceStage(BaseModel):
     """Schema for advancing a project stage"""

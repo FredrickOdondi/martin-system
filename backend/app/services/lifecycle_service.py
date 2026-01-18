@@ -27,6 +27,11 @@ class LifecycleService:
             "allowed_roles": [UserRole.TWG_FACILITATOR, UserRole.ADMIN, UserRole.SECRETARIAT_LEAD],
             "auto": False
         },
+        # Legacy support
+        (ProjectStatus.IDENTIFIED, ProjectStatus.PIPELINE): {
+            "allowed_roles": [UserRole.TWG_FACILITATOR, UserRole.ADMIN, UserRole.SECRETARIAT_LEAD],
+            "auto": False
+        },
         
         # 2. Pipeline -> Under Review (Automated when scoring starts)
         (ProjectStatus.PIPELINE, ProjectStatus.UNDER_REVIEW): {

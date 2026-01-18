@@ -16,6 +16,8 @@ class CalendarService:
     def __init__(self):
         self.creds = None
         self.service = None
+        self._credentials_valid = True  # Track if credentials are working
+        self._last_error_logged = None  # Prevent spam
         self._initialize_service()
 
     def _initialize_service(self):
@@ -115,6 +117,10 @@ class CalendarService:
         if not self.service:
             return {}
 
+        # Skip if we know credentials are invalid to avoid spam
+        if not self._credentials_valid:
+            return {}
+
         try:
             # Search for event with privateExtendedProperty meeting_id=<id>
             events_result = self.service.events().list(
@@ -125,7 +131,7 @@ class CalendarService:
 
             events = events_result.get('items', [])
             if not events:
-                logger.warning(f"No calendar event found for meeting_id {meeting_id}")
+                logger.debug(f"No calendar event found for meeting_id {meeting_id}")
                 return {}
 
             # Should only be one event
@@ -142,7 +148,16 @@ class CalendarService:
             return rsvps
 
         except Exception as e:
-            logger.error(f"Error fetching RSVPs for meeting {meeting_id}: {e}")
+            error_str = str(e)
+            # Check if it's a credential error
+            if 'invalid_grant' in error_str or 'expired' in error_str.lower() or 'revoked' in error_str.lower():
+                # Only log once
+                if self._credentials_valid:
+                    logger.warning("Google Calendar credentials are expired or revoked. RSVP sync disabled until re-authentication.")
+                    self._credentials_valid = False
+            else:
+                # Log other errors normally
+                logger.error(f"Error fetching RSVPs for meeting {meeting_id}: {e}")
             return {}
 
     def add_attendees_to_event(self, meeting_id: str, new_emails: list) -> bool:
