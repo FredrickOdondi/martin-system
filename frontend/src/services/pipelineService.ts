@@ -42,6 +42,11 @@ export const pipelineService = {
         return response.data;
     },
 
+    updateProject: async (id: string, data: any): Promise<Project> => {
+        const response = await api.patch(`/pipeline/${id}`, data);
+        return response.data;
+    },
+
     advanceStage: async (id: string, newStage: ProjectStatus, notes?: string): Promise<Project> => {
         const response = await api.post(`/pipeline/${id}/advance`, { new_stage: newStage, notes });
         return response.data;

@@ -57,16 +57,13 @@ export const ProjectLifecycleTimeline: React.FC<Props> = ({ project }) => {
                     const Icon = stage.icon;
 
                     let statusColor = 'bg-gray-200 text-gray-400';
-                    let lineColor = 'bg-gray-200';
 
                     if (isCompleted) {
                         statusColor = 'bg-green-500 text-white';
-                        lineColor = 'bg-green-500';
                     } else if (isActive) {
                         if (isDeclined) statusColor = 'bg-red-500 text-white';
                         else if (isRevision) statusColor = 'bg-amber-500 text-white';
                         else statusColor = 'bg-blue-600 text-white';
-                        lineColor = 'bg-gray-200'; // Line ahead is gray
                     }
 
                     return (

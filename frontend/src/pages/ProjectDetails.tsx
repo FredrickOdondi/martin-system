@@ -21,6 +21,10 @@ const ProjectDetails: React.FC = () => {
   const [loadingMatches, setLoadingMatches] = useState(false);
   const [triggeringMatch, setTriggeringMatch] = useState(false);
   const [togglingFlagship, setTogglingFlagship] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [uploadingDoc, setUploadingDoc] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [documentType, setDocumentType] = useState('feasibility_study');
 
   // RBAC - Must be at top level before any returns
   const { user } = useAppSelector((state) => state.auth);
@@ -80,6 +84,59 @@ const ProjectDetails: React.FC = () => {
       setDocuments(response.data);
     } catch (e) {
       console.error("Failed to load documents", e);
+    }
+  };
+
+  const handleUploadDocument = async () => {
+    if (!selectedFile || !projectId) return;
+
+    setUploadingDoc(true);
+    try {
+      // Upload document with project_id in metadata
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('is_confidential', 'false');
+      formData.append('document_type', documentType);
+      formData.append('project_id', projectId);
+
+      await api.post('/documents/upload', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
+
+      // Refresh documents list and scores
+      await fetchDocuments(projectId);
+      await fetchScoreDetails(projectId);
+
+      // Close modal and reset
+      setShowUploadModal(false);
+      setSelectedFile(null);
+      setDocumentType('feasibility_study');
+
+      alert('Document uploaded successfully!');
+    } catch (error) {
+      console.error('Upload failed:', error);
+      alert('Failed to upload document. Please try again.');
+    } finally {
+      setUploadingDoc(false);
+    }
+  };
+
+  const handleDeleteDocument = async (docId: string, fileName: string) => {
+    if (!confirm(`Are you sure you want to delete "${fileName}"?`)) return;
+
+    try {
+      await documentService.deleteDocument(docId);
+
+      // Refresh documents list and scores
+      if (projectId) {
+        await fetchDocuments(projectId);
+        await fetchScoreDetails(projectId);
+      }
+
+      alert('Document deleted successfully!');
+    } catch (error) {
+      console.error('Delete failed:', error);
+      alert('Failed to delete document. Please try again.');
     }
   };
 
@@ -252,7 +309,10 @@ const ProjectDetails: React.FC = () => {
                 <span>{project.is_flagship ? 'Flagship Project' : 'Mark as Flagship'}</span>
               </button>
 
-              <button className="flex items-center justify-center px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-bold rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+              <button
+                onClick={() => navigate(`/deal-pipeline/${project.id}/edit`)}
+                className="flex items-center justify-center px-4 py-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-bold rounded-lg hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+              >
                 <span>Edit Project</span>
               </button>
 
@@ -549,7 +609,13 @@ const ProjectDetails: React.FC = () => {
             <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-6 shadow-sm">
               <div className="flex justify-between items-center mb-4">
                 <h3 className="text-lg font-bold text-slate-900 dark:text-white">Project Documents</h3>
-                <button className="text-sm text-primary font-bold hover:underline">Upload Document</button>
+                <button
+                  onClick={() => setShowUploadModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition-colors"
+                >
+                  <span className="material-symbols-outlined text-[18px]">upload_file</span>
+                  Upload Document
+                </button>
               </div>
               {documents.length === 0 ? (
                 <div className="text-center py-8 text-slate-500 italic">No documents found.</div>
@@ -564,9 +630,22 @@ const ProjectDetails: React.FC = () => {
                           <div className="text-xs text-slate-500">{new Date(doc.created_at).toLocaleDateString()}</div>
                         </div>
                       </div>
-                      <button className="text-slate-400 hover:text-primary">
-                        <span className="material-symbols-outlined">download</span>
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => documentService.downloadDocument(doc.id)}
+                          className="text-slate-400 hover:text-primary"
+                          title="Download"
+                        >
+                          <span className="material-symbols-outlined text-[20px]">download</span>
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDocument(doc.id, doc.file_name)}
+                          className="text-slate-400 hover:text-red-600"
+                          title="Delete"
+                        >
+                          <span className="material-symbols-outlined text-[20px]">delete</span>
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -619,7 +698,78 @@ const ProjectDetails: React.FC = () => {
           </div>
         </div>
       </div>
-    </div >
+
+      {/* Upload Document Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-slate-800 rounded-xl p-6 max-w-md w-full mx-4 shadow-xl">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white">Upload Document</h3>
+              <button
+                onClick={() => setShowUploadModal(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Document Type
+                </label>
+                <select
+                  value={documentType}
+                  onChange={(e) => setDocumentType(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                >
+                  <option value="feasibility_study">Feasibility Study</option>
+                  <option value="esia">ESIA Report</option>
+                  <option value="financial_model">Financial Model</option>
+                  <option value="government_support">Government Support Letter</option>
+                  <option value="investment_memo">Investment Memo</option>
+                  <option value="technical_spec">Technical Specification</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  Select File
+                </label>
+                <input
+                  type="file"
+                  onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx"
+                  className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-blue-700"
+                />
+                {selectedFile && (
+                  <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                    Selected: {selectedFile.name}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={() => setShowUploadModal(false)}
+                  className="flex-1 px-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleUploadDocument}
+                  disabled={!selectedFile || uploadingDoc}
+                  className="flex-1 px-4 py-2 bg-primary text-white rounded-lg font-bold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {uploadingDoc ? 'Uploading...' : 'Upload'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 

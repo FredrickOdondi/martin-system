@@ -31,14 +31,19 @@ class ProjectInsightsService:
         try:
             # Calculate days since project creation as a proxy for stage duration
             days_since_creation = 0
-            if project.created_at:
-                days_since_creation = (datetime.now(UTC) - project.created_at).days
+            created_at = getattr(project, 'created_at', None)
+            
+            if created_at:
+                # Handle both offset-naive and offset-aware datetimes
+                if created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=UTC)
+                days_since_creation = (datetime.now(UTC) - created_at).days
             
             # Build context for LLM
             context = f"""
 Project Analysis Request:
 
-Title: {project.title}
+Title: {project.name}
 Status: {project.status}
 AfCEN Score: {project.afcen_score or 'Not scored'}/100
 Readiness Score: {project.readiness_score or 'Not assessed'}/100

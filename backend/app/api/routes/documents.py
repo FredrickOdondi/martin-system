@@ -26,6 +26,8 @@ if not os.path.exists(UPLOAD_DIR):
 async def upload_document(
     file: UploadFile = File(...),
     twg_id: Optional[str] = Form(None),
+    project_id: Optional[str] = Form(None),
+    document_type: Optional[str] = Form(None),
     is_confidential: bool = Form(False),
     current_user: User = Depends(get_current_active_user),
     db: AsyncSession = Depends(get_db)
@@ -37,8 +39,19 @@ async def upload_document(
     - A UUID string (for backward compatibility)
     - A pillar key: energy, agriculture, minerals, digital, protocol, resource_mobilization
     - None/empty for Global Secretariat
+    
+    project_id: Optional UUID string to link document to a project
+    document_type: Optional document type (feasibility_study, esia, financial_model, etc.)
     """
     resolved_twg_id = None
+    resolved_project_id = None
+    
+    # Parse project_id if provided
+    if project_id:
+        try:
+            resolved_project_id = uuid.UUID(project_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid project_id: must be UUID")
     
     if twg_id:
         # Map pillar keys to enum values for lookup
@@ -89,17 +102,23 @@ async def upload_document(
         raise HTTPException(status_code=500, detail=f"Could not save file: {str(e)}")
         
     # Create DB record
-    # Create DB record
     # Workaround: Explicitly truncate file_type to 50 chars to avoid persistent DBAPIError
     safe_file_type = (file.content_type or "unknown")[:50]
     
+    # Build metadata_json with document_type if provided
+    metadata = {}
+    if document_type:
+        metadata["document_type"] = document_type
+    
     db_doc = Document(
         twg_id=resolved_twg_id,
+        project_id=resolved_project_id,
         file_name=file.filename,
         file_path=file_path,
         file_type=safe_file_type,
         uploaded_by_id=current_user.id,
-        is_confidential=is_confidential
+        is_confidential=is_confidential,
+        metadata_json=metadata if metadata else None
     )
     
     db.add(db_doc)
@@ -115,6 +134,19 @@ async def upload_document(
         )
     )
     db_doc = result.scalar_one()
+    
+    # AUTOMATIC SCORING: If document is linked to a project, trigger AfCEN assessment
+    if resolved_project_id:
+        try:
+            from app.services.scoring_tasks import rescore_project_async
+            
+            # Trigger background scoring via Celery
+            rescore_project_async.delay(str(resolved_project_id))
+            
+            logger.info(f"✓ Triggered automatic AfCEN assessment for project {resolved_project_id}")
+        except Exception as e:
+            # Don't fail upload if scoring fails
+            logger.warning(f"Could not trigger automatic scoring: {e}")
     
     return db_doc
 
@@ -344,9 +376,24 @@ async def delete_document(
         except Exception as e:
             print(f"Error deleting file {db_doc.file_path}: {e}")
 
+    # Store project_id before deletion
+    project_id = db_doc.project_id
+
     # Delete from DB
     await db.delete(db_doc)
     await db.commit()
+    
+    # AUTOMATIC SCORING: If document was linked to a project, retrigger scoring
+    if project_id:
+        try:
+            from app.services.scoring_tasks import rescore_project_async
+            
+            # Trigger background scoring via Celery
+            rescore_project_async.delay(str(project_id))
+            
+            logger.info(f"✓ Triggered AfCEN rescoring for project {project_id} after document deletion")
+        except Exception as e:
+            logger.warning(f"Could not trigger automatic scoring: {e}")
     
     return None
 

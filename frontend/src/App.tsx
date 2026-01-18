@@ -16,6 +16,7 @@ import ActionTracker from './pages/actions/ActionTracker'
 import KnowledgeBase from './pages/knowledge/KnowledgeBase'
 import DealPipeline from './pages/DealPipeline'
 import NewProject from './pages/NewProject'
+import EditProject from './pages/EditProject'
 import ProjectDetails from './pages/ProjectDetails'
 import ProjectMemo from './pages/ProjectMemo'
 import UserProfile from './pages/profile/UserProfile'
@@ -117,6 +118,7 @@ function App() {
                 <Route path="/conflicts" element={<ProjectConflicts />} />
                 <Route path="/deal-pipeline" element={<DealPipeline />} />
                 <Route path="/deal-pipeline/new" element={<NewProject />} />
+                <Route path="/deal-pipeline/:projectId/edit" element={<EditProject />} />
                 <Route path="/deal-pipeline/:projectId" element={<ProjectDetails />} />
                 <Route path="/deal-pipeline/:projectId/memo" element={<ProjectMemo />} />
                 <Route path="/actions" element={<ActionTracker />} />
