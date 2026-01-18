@@ -1,4 +1,5 @@
 import React from 'react';
+import api from '../../services/api';
 
 interface StatusHistoryEntry {
     id: string;
@@ -25,10 +26,8 @@ export const ProjectHistoryTimeline: React.FC<ProjectHistoryTimelineProps> = ({ 
     React.useEffect(() => {
         const fetchHistory = async () => {
             try {
-                const response = await fetch(`/api/v1/pipeline/${projectId}/history`);
-                if (!response.ok) throw new Error('Failed to fetch history');
-                const data = await response.json();
-                setHistory(data.history || []);
+                const response = await api.get(`/pipeline/${projectId}/history`);
+                setHistory(response.data.history || []);
             } catch (err) {
                 setError('Failed to load project history');
                 console.error('Error fetching history:', err);
