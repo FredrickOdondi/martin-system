@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import api from '../services/api';
 import { pipelineService } from '../services/pipelineService';
 
 const EditProject: React.FC = () => {
@@ -49,7 +48,7 @@ const EditProject: React.FC = () => {
                     description: project.description,
                     currency: project.currency || 'USD',
                     status: project.status,
-                    is_flagship: project.is_flagship
+                    is_flagship: project.is_flagship || false
                 });
 
                 // Improve investment formatting
