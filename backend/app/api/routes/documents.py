@@ -7,7 +7,10 @@ from typing import List, Optional
 import uuid
 import os
 import shutil
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
 from app.models.models import Document, User, UserRole
