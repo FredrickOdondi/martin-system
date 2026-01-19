@@ -75,7 +75,7 @@ class ProjectPipelineService:
     async def assess_project_readiness(self, project_id: uuid.UUID) -> Decimal:
         """
         Run a full AfCEN readiness assessment against the project.
-        Updates ProjectScoreDetail records and the project's aggregate scores.
+        Uses AI to analyze document content and updates ProjectScoreDetail records.
         """
         await self._ensure_default_criteria()
         
@@ -87,48 +87,79 @@ class ProjectPipelineService:
         if not project:
             return Decimal("0.0")
 
-        # Fetch Documents (naive fetch, could optimized to join)
+        # Fetch Documents
         doc_stmt = select(Document).where(Document.project_id == project_id)
         doc_res = await self.db.execute(doc_stmt)
         documents = doc_res.scalars().all()
         
-        # Analyze documents (Simplistic check for now)
-        found_docs = [d.document_type for d in documents if d.document_type]
-        found_names = [d.file_name.lower() for d in documents]
+        # AI-POWERED ANALYSIS: Extract text and analyze with LLM
+        from app.services.document_analyzer import get_document_analyzer
         
+        analyzer = get_document_analyzer()
+        all_analyses = []
+        
+        logger.info(f"Analyzing {len(documents)} documents for project {project_id}")
+        
+        for doc in documents:
+            try:
+                # Extract text from PDF
+                text = await self.doc_intelligence.extract_text_from_document(
+                    doc.file_path, 
+                    doc.file_type
+                )
+                
+                # Analyze with LLM
+                analysis = await analyzer.analyze_document(text, doc.file_name)
+                all_analyses.append(analysis)
+                
+                logger.info(f"✓ Analyzed {doc.file_name}: {analysis.get('document_type')}")
+                
+            except Exception as e:
+                logger.error(f"Failed to analyze {doc.file_name}: {e}")
+                continue
+        
+        # Aggregate analysis results
+        aggregated = self._aggregate_document_analyses(all_analyses)
+        
+        # Fetch scoring criteria
         criteria_res = await self.db.execute(select(ScoringCriteria))
         all_criteria = criteria_res.scalars().all()
         
         total_readiness = Decimal("0.0")
         total_strategic = Decimal("0.0")
         
-        # Reset existing details (optional, or update)
-        # For MVP we just add/update logic conceptually. 
-        # Here we assume clean slate or upsert logic needed.
-        # We will iterate and verify.
-        
+        # Score each criterion based on AI analysis
         for crit in all_criteria:
             score = Decimal("0.0")
             notes = "Not found"
             
-            # Logic: Check if criterion met
-            met = False
             crit_name = crit.criterion_name.lower()
             
-            if "feasibility" in crit_name and ("feasibility_study" in found_docs or any("feasibility" in n for n in found_names)):
-                met = True
-            elif "esia" in crit_name and ("esia" in found_docs or any("esia" in n for n in found_names)):
-                met = True
-            elif "financial model" in crit_name and ("financial_model" in found_docs or any("financial" in n for n in found_names)):
-                met = True
-            # ... Add more heuristics
+            # Map criteria to AI analysis results
+            if "feasibility" in crit_name and aggregated.get("has_feasibility_study"):
+                score = Decimal("10.0")
+                notes = "AI verified: Feasibility study found in documents"
+            elif "esia" in crit_name and aggregated.get("has_esia"):
+                score = Decimal("10.0")
+                notes = "AI verified: ESIA report found"
+            elif "financial model" in crit_name and aggregated.get("has_financial_model"):
+                score = Decimal("10.0")
+                irr = aggregated.get("irr_percentage")
+                notes = f"AI verified: Financial model found{f' (IRR: {irr}%)' if irr else ''}"
+            elif "site control" in crit_name and aggregated.get("has_site_control"):
+                score = Decimal("10.0")
+                notes = "AI verified: Site control mentioned"
+            elif "permit" in crit_name and aggregated.get("has_permits"):
+                score = Decimal("10.0")
+                notes = "AI verified: Permits/licenses mentioned"
+            elif "gov support" in crit_name and aggregated.get("has_government_support"):
+                score = Decimal("10.0")
+                notes = "AI verified: Government support confirmed"
+            elif "regional integration" in crit_name and aggregated.get("cross_border_impact"):
+                score = Decimal("10.0")
+                notes = "AI verified: Cross-border/regional impact identified"
             
-            if met:
-                score = Decimal("10.0") # Full points if met
-                notes = "Document verification passed"
-            
-            # Save Detail
-            # Check if exists
+            # Save/Update Score Detail
             detail_stmt = select(ProjectScoreDetail).where(
                 ProjectScoreDetail.project_id == project_id,
                 ProjectScoreDetail.criterion_id == crit.id
@@ -148,22 +179,13 @@ class ProjectPipelineService:
                     notes=notes
                 ))
             
-            # Weighted aggregation (Simplified: just Average for now or sum * weight?)
-            # Valid Range 0-10.
-            # Let's say we have 5 readiness criteria, each weight 2.0. (2 * 10) * 5 = 100? No.
-            # If weight is "multiplier", then sum(score * weight) / sum(weights) * 10?
-            # Creating a normalized 0-10 score.
-            
+            # Weighted aggregation
             if crit.criterion_type == 'readiness':
-                total_readiness += score * crit.weight # Assumes weights sum to roughly 10 for max score? 
-                # If 5 criteria * 2.0 weight * 10 score = 100. So we divide by 10 to get 0-10 scale?
+                total_readiness += score * crit.weight
             elif crit.criterion_type == 'strategic_fit':
                 total_strategic += score * crit.weight
 
-        # Normalize (Assuming standard weights described above)
-        # 5 readiness criteria * 2.0 = 10.0 max weight sum.
-        # 2 strategic criteria * 5.0 = 10.0 max weight sum.
-        
+        # Normalize scores (0-10 scale)
         final_readiness = min(Decimal("10.0"), total_readiness / Decimal("10.0"))
         final_strategic = min(Decimal("10.0"), total_strategic / Decimal("10.0"))
         
@@ -176,7 +198,44 @@ class ProjectPipelineService:
         project.afcen_score = afcen
         
         await self.db.flush()
+        
+        logger.info(f"✓ AfCEN Score calculated: {afcen} (Readiness: {final_readiness}, Strategic: {final_strategic})")
+        
         return afcen
+    
+    def _aggregate_document_analyses(self, analyses: list) -> dict:
+        """
+        Aggregate multiple document analyses into a single result.
+        Uses OR logic: if ANY document has a feature, it's considered present.
+        """
+        aggregated = {
+            "has_feasibility_study": False,
+            "has_esia": False,
+            "has_financial_model": False,
+            "has_government_support": False,
+            "has_permits": False,
+            "has_site_control": False,
+            "cross_border_impact": False,
+            "esg_compliant": False,
+            "irr_percentage": None,
+            "npv_value": None
+        }
+        
+        for analysis in analyses:
+            # OR logic for boolean fields
+            for key in ["has_feasibility_study", "has_esia", "has_financial_model", 
+                       "has_government_support", "has_permits", "has_site_control",
+                       "cross_border_impact", "esg_compliant"]:
+                if analysis.get(key):
+                    aggregated[key] = True
+            
+            # Take first non-null value for numeric fields
+            if analysis.get("irr_percentage") and not aggregated["irr_percentage"]:
+                aggregated["irr_percentage"] = analysis["irr_percentage"]
+            if analysis.get("npv_value") and not aggregated["npv_value"]:
+                aggregated["npv_value"] = analysis["npv_value"]
+        
+        return aggregated
 
     def __init__(self, db: AsyncSession):
         """

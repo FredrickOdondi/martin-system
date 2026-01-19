@@ -190,6 +190,179 @@ async def generate_investment_memo(project_id: str) -> str:
         logger.error(f"Error generating memo: {e}")
         return f"Error generating memo: {str(e)}"
 
+async def analyze_project_documents(project_id: str) -> str:
+    """
+    Analyze all project documents using AI to assess investment readiness and bankability.
+    
+    This tool uses OCR and LLM to read PDFs and extract:
+    - Document completeness (feasibility study, ESIA, financial model, etc.)
+    - Financial metrics (IRR, NPV)
+    - Compliance indicators (ESG, permits, government support)
+    - Investment recommendation based on analysis
+    
+    Args:
+        project_id: The UUID of the project to analyze.
+        
+    Returns:
+        Detailed analysis report with investment recommendation.
+    """
+    try:
+        async with get_db_session_context() as db:
+            from app.models.models import Project, Document
+            from app.services.document_intelligence import DocumentIntelligenceService
+            from app.services.document_analyzer import get_document_analyzer
+            
+            # 1. Fetch Project
+            stmt = select(Project).where(Project.id == project_id)
+            result = await db.execute(stmt)
+            project = result.scalars().first()
+            
+            if not project:
+                return f"Error: Project with ID {project_id} not found."
+            
+            # 2. Fetch Documents
+            doc_stmt = select(Document).where(Document.project_id == project_id)
+            doc_res = await db.execute(doc_stmt)
+            documents = doc_res.scalars().all()
+            
+            if not documents:
+                return f"⚠️ **No documents uploaded for {project.name}**\n\nCannot perform AI analysis without project documents. Please upload:\n- Feasibility Study\n- ESIA Report\n- Financial Model\n- Government Support Letter"
+            
+            # 3. Analyze Documents with AI
+            doc_intelligence = DocumentIntelligenceService()
+            analyzer = get_document_analyzer()
+            
+            all_analyses = []
+            doc_summaries = []
+            
+            for doc in documents:
+                try:
+                    # Extract text
+                    text = await doc_intelligence.extract_text_from_document(
+                        doc.file_path,
+                        doc.file_type
+                    )
+                    
+                    # Analyze with LLM
+                    analysis = await analyzer.analyze_document(text, doc.file_name)
+                    all_analyses.append(analysis)
+                    
+                    # Build summary
+                    doc_type = analysis.get('document_type', 'unknown')
+                    confidence = analysis.get('confidence', 0)
+                    doc_summaries.append(f"  - **{doc.file_name}**: {doc_type} (confidence: {confidence:.0%})")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to analyze {doc.file_name}: {e}")
+                    doc_summaries.append(f"  - **{doc.file_name}**: Analysis failed")
+            
+            # 4. Aggregate Results
+            aggregated = {
+                "has_feasibility_study": any(a.get("has_feasibility_study") for a in all_analyses),
+                "has_esia": any(a.get("has_esia") for a in all_analyses),
+                "has_financial_model": any(a.get("has_financial_model") for a in all_analyses),
+                "has_government_support": any(a.get("has_government_support") for a in all_analyses),
+                "has_permits": any(a.get("has_permits") for a in all_analyses),
+                "has_site_control": any(a.get("has_site_control") for a in all_analyses),
+                "cross_border_impact": any(a.get("cross_border_impact") for a in all_analyses),
+                "esg_compliant": any(a.get("esg_compliant") for a in all_analyses),
+                "irr_percentage": next((a.get("irr_percentage") for a in all_analyses if a.get("irr_percentage")), None),
+                "npv_value": next((a.get("npv_value") for a in all_analyses if a.get("npv_value")), None),
+            }
+            
+            # 5. Calculate Readiness Score
+            readiness_items = [
+                aggregated["has_feasibility_study"],
+                aggregated["has_esia"],
+                aggregated["has_financial_model"],
+                aggregated["has_permits"],
+                aggregated["has_site_control"]
+            ]
+            readiness_pct = sum(readiness_items) / len(readiness_items) * 100
+            
+            strategic_items = [
+                aggregated["has_government_support"],
+                aggregated["cross_border_impact"]
+            ]
+            strategic_pct = sum(strategic_items) / len(strategic_items) * 100
+            
+            # 6. Investment Recommendation
+            if readiness_pct >= 80 and strategic_pct >= 50:
+                recommendation = "✅ **RECOMMEND FOR DEAL ROOM** - Project is investment-ready"
+                rating = "BANKABLE"
+            elif readiness_pct >= 60:
+                recommendation = "⚠️ **CONDITIONAL APPROVAL** - Requires additional documentation"
+                rating = "NEAR-BANKABLE"
+            else:
+                recommendation = "❌ **NOT READY** - Significant gaps in documentation"
+                rating = "EARLY STAGE"
+            
+            # 7. Build Report
+            report = f"""📊 **AI DOCUMENT ANALYSIS REPORT**
+
+**Project:** {project.name}
+**Investment Size:** ${project.investment_size:,.0f} {project.currency}
+**Current AfCEN Score:** {project.afcen_score or 0:.1f}/100
+
+---
+
+**Documents Analyzed ({len(documents)}):**
+{chr(10).join(doc_summaries)}
+
+---
+
+**READINESS ASSESSMENT:**
+
+**Technical Readiness:** {readiness_pct:.0f}%
+- Feasibility Study: {"✅" if aggregated["has_feasibility_study"] else "❌"}
+- ESIA Report: {"✅" if aggregated["has_esia"] else "❌"}
+- Financial Model: {"✅" if aggregated["has_financial_model"] else "❌"}
+- Permits/Licenses: {"✅" if aggregated["has_permits"] else "❌"}
+- Site Control: {"✅" if aggregated["has_site_control"] else "❌"}
+
+**Strategic Alignment:** {strategic_pct:.0f}%
+- Government Support: {"✅" if aggregated["has_government_support"] else "❌"}
+- Cross-Border Impact: {"✅" if aggregated["cross_border_impact"] else "❌"}
+
+**ESG Compliance:** {"✅" if aggregated["esg_compliant"] else "⚠️ Not verified"}
+
+---
+
+**FINANCIAL METRICS:**
+- IRR: {f"{aggregated['irr_percentage']}%" if aggregated['irr_percentage'] else "Not found"}
+- NPV: {f"${aggregated['npv_value']:,.0f}" if aggregated['npv_value'] else "Not found"}
+
+---
+
+**INVESTMENT RATING:** {rating}
+
+{recommendation}
+
+---
+
+**NEXT STEPS:**
+"""
+            
+            # Add specific recommendations
+            if not aggregated["has_feasibility_study"]:
+                report += "\n- ⚠️ Upload Feasibility Study"
+            if not aggregated["has_esia"]:
+                report += "\n- ⚠️ Upload ESIA Report"
+            if not aggregated["has_financial_model"]:
+                report += "\n- ⚠️ Upload Financial Model"
+            if not aggregated["has_government_support"]:
+                report += "\n- ⚠️ Obtain Government Support Letter"
+            
+            if rating == "BANKABLE":
+                report += "\n- ✅ Ready for investor matching"
+                report += "\n- ✅ Can be featured in Deal Room"
+            
+            return report
+            
+    except Exception as e:
+        logger.error(f"Error analyzing project documents: {e}")
+        return f"Error analyzing project documents: {str(e)}"
+
 # Tool definitions
 DEAL_PIPELINE_TOOLS = [
     {
@@ -221,5 +394,13 @@ DEAL_PIPELINE_TOOLS = [
             "project_id": "The UUID of the project"
         },
         "function": generate_investment_memo
+    },
+    {
+        "name": "analyze_project_documents",
+        "description": "Use AI to analyze all project documents (PDFs) and provide investment readiness assessment. Reads actual document content using OCR and LLM to verify completeness, extract financial metrics, and recommend next steps.",
+        "parameters": {
+            "project_id": "The UUID of the project"
+        },
+        "function": analyze_project_documents
     }
 ]

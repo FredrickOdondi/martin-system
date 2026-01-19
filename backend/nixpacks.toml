@@ -1,0 +1,14 @@
+# Railway deployment configuration for Martin System backend
+
+[phases.setup]
+# Install system dependencies
+aptPkgs = ["tesseract-ocr", "tesseract-ocr-eng"]
+
+[phases.install]
+# Python dependencies installed via requirements.txt
+
+[phases.build]
+# No build phase needed for Python backend
+
+[start]
+# Start command handled by Railway's auto-detection
