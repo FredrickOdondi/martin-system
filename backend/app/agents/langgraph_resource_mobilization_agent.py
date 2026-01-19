@@ -25,7 +25,8 @@ class LangGraphResourceMobilizationAgent(LangGraphBaseAgent):
             get_project_details,
             list_flagship_projects,
             trigger_investor_matching,
-            generate_investment_memo
+            generate_investment_memo,
+            analyze_project_documents
         )
 
         async def get_deal_pipeline_summary_tool() -> str:
@@ -134,6 +135,7 @@ class LangGraphResourceMobilizationAgent(LangGraphBaseAgent):
         self.add_tool(list_flagship_projects)
         self.add_tool(trigger_investor_matching)
         self.add_tool(generate_investment_memo)
+        self.add_tool(analyze_project_documents)  # NEW: AI document analysis
 
 def create_langgraph_resource_mobilization_agent(keep_history: bool = True, session_id: str = None) -> LangGraphResourceMobilizationAgent:
     return LangGraphResourceMobilizationAgent(keep_history=keep_history, session_id=session_id)
