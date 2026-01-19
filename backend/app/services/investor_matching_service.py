@@ -82,45 +82,57 @@ class InvestorMatchingService:
     def _calculate_match_score(self, project: Project, investor: Investor) -> Decimal:
         """
         Calculate match score (0-100) based on criteria.
+        
+        Scoring Breakdown:
+        - Sector Match: 30 pts
+        - Ticket Size: 30 pts  
+        - Geography: 15 pts
+        - Investment Instrument: 15 pts
+        - AfCEN Score (Readiness): 20 pts
+        - Commitment Capability: +5 pts bonus
         """
+        # Minimum threshold: Only match projects with AfCEN score >= 40
+        if project.afcen_score and float(project.afcen_score) < 40:
+            return Decimal("0.0")
+        
         score = 0.0
         
-        # Criterion 1: Sector Match (40 pts)
+        # Criterion 1: Sector Match (30 pts)
         # Assuming project.pillar (string) matches one of the investor.sector_preferences (list)
         project_sector = project.pillar
         investor_sectors = investor.sector_preferences or []
         
         # Normalize for comparison
         if project_sector and any(s.lower() in project_sector.lower() for s in investor_sectors):
-            score += 40.0
+            score += 30.0
         elif not project_sector:
             # If project has no sector yet, partial credit? No, strict matching.
             pass
             
-        # Criterion 2: Ticket Size Match (40 pts)
+        # Criterion 2: Ticket Size Match (30 pts)
         inv_size = float(project.investment_size)
         min_size = float(investor.ticket_size_min or 0)
         max_size = float(investor.ticket_size_max or float('inf'))
         
         if min_size <= inv_size <= max_size:
-            score += 40.0
+            score += 30.0
         elif inv_size < min_size:
             # Too small - partial credit if close?
             if inv_size >= min_size * 0.8:
-                score += 20.0
+                score += 15.0
         elif inv_size > max_size:
             # Too large - partial credit if close?
             if inv_size <= max_size * 1.2:
-                score += 20.0
+                score += 15.0
                 
-        # Criterion 3: Geography Match (20 pts)
+        # Criterion 3: Geography Match (15 pts)
         project_country = project.lead_country
         investor_regions = investor.geographic_focus or []
         
         if project_country and any(r.lower() in project_country.lower() or project_country.lower() in r.lower() for r in investor_regions):
-            score += 20.0
+            score += 15.0
             
-        # Criterion 4: Investment Instrument (20 pts)
+        # Criterion 4: Investment Instrument (15 pts)
         # Check metadata for instrument_needed (e.g. "Equity", "Debt")
         project_instruments = (project.metadata_json or {}).get("instrument_needed", [])
         if isinstance(project_instruments, str):
@@ -130,10 +142,23 @@ class InvestorMatchingService:
         
         if project_instruments and investor_instruments:
              if any(i.lower() in [pi.lower() for pi in project_instruments] for i in investor_instruments):
-                 score += 20.0
+                 score += 15.0
         elif not project_instruments:
              # Neutral if undefined
-             score += 10.0
+             score += 7.5
+        
+        # Criterion 5: AfCEN Score / Project Readiness (20 pts)
+        # Higher AfCEN score = more attractive to investors
+        if project.afcen_score:
+            afcen = float(project.afcen_score)
+            if afcen >= 70:
+                score += 20.0  # Highly ready
+            elif afcen >= 60:
+                score += 15.0  # Ready
+            elif afcen >= 50:
+                score += 10.0  # Moderately ready
+            elif afcen >= 40:
+                score += 5.0   # Minimum threshold
              
         # Boost: High Commitment Capability (+5 max)
         if investor.total_commitments_usd and investor.total_commitments_usd > 100000000: # >100M
