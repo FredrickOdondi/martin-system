@@ -7,7 +7,10 @@ from typing import List, Optional
 import uuid
 import os
 import shutil
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from app.core.database import get_db
 from app.models.models import Document, User, UserRole
@@ -140,12 +143,16 @@ async def upload_document(
         try:
             from app.services.scoring_tasks import rescore_project_async
             
-            # Trigger background scoring via Celery
+            # Trigger background scoring via Celery (if available)
             rescore_project_async.delay(str(resolved_project_id))
             
             logger.info(f"✓ Triggered automatic AfCEN assessment for project {resolved_project_id}")
+        except (ConnectionRefusedError, ConnectionError) as e:
+            # Celery/Redis not available - log warning but don't crash
+            logger.warning(f"⚠️ Celery unavailable, skipping background scoring: {e}")
+            logger.info(f"💡 Tip: Manually trigger scoring via POST /api/v1/pipeline/{resolved_project_id}/rescore")
         except Exception as e:
-            # Don't fail upload if scoring fails
+            # Don't fail upload if scoring fails for any other reason
             logger.warning(f"Could not trigger automatic scoring: {e}")
     
     return db_doc
@@ -388,10 +395,14 @@ async def delete_document(
         try:
             from app.services.scoring_tasks import rescore_project_async
             
-            # Trigger background scoring via Celery
+            # Trigger background scoring via Celery (if available)
             rescore_project_async.delay(str(project_id))
             
             logger.info(f"✓ Triggered AfCEN rescoring for project {project_id} after document deletion")
+        except (ConnectionRefusedError, ConnectionError) as e:
+            # Celery/Redis not available - log warning but don't crash
+            logger.warning(f"⚠️ Celery unavailable, skipping background scoring: {e}")
+            logger.info(f"💡 Tip: Manually trigger scoring via POST /api/v1/pipeline/{project_id}/rescore")
         except Exception as e:
             logger.warning(f"Could not trigger automatic scoring: {e}")
     
