@@ -16,7 +16,7 @@ from sqlalchemy import select
 from app.core.database import get_db_session_context
 from app.services.project_pipeline_service import ProjectPipelineService
 from app.services.investor_matching_service import InvestorMatchingService, get_investor_matching_service
-from app.services.llm_service import LLMService
+from app.services.llm_service import get_llm_service
 
 logger = logging.getLogger(__name__)
 

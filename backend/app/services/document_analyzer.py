@@ -8,7 +8,7 @@ for the scoring algorithm.
 import logging
 from typing import Dict, Any, Optional
 import json
-from app.core.llm_client import get_llm_client
+from app.services.llm_service import get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class DocumentAnalyzer:
     """
     
     def __init__(self):
-        self.llm_client = get_llm_client()
+        self.llm_client = get_llm_service()
     
     async def analyze_document(self, text: str, filename: str) -> Dict[str, Any]:
         """
@@ -43,7 +43,10 @@ class DocumentAnalyzer:
         
         try:
             # Call LLM
-            response = await self.llm_client.generate_completion(
+            # Note: chat() is synchronous so we run it directly (may block briefly)
+            # or we could use run_in_threadpool if needed. 
+            # For now, simplistic approach as per existing patterns.
+            response = self.llm_client.chat(
                 prompt=prompt,
                 temperature=0.1,  # Low temperature for consistent extraction
                 max_tokens=1000
