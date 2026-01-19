@@ -71,40 +71,46 @@ class DocumentAnalyzer:
 
 **Task:** Extract the following information from the document text and return as JSON:
 
-1. **document_type**: Identify the type (feasibility_study, esia, financial_model, government_support, technical_spec, or other)
-2. **has_feasibility_study**: Boolean - Does this contain feasibility analysis?
-3. **has_esia**: Boolean - Does this contain Environmental & Social Impact Assessment?
-4. **has_financial_model**: Boolean - Does this contain financial projections/models?
-5. **has_government_support**: Boolean - Is this a government support letter or does it mention government backing?
-6. **has_permits**: Boolean - Does it mention permits, licenses, or regulatory approvals?
-7. **has_site_control**: Boolean - Does it mention land access, site control, or property rights?
-8. **irr_percentage**: Float or null - Extract Internal Rate of Return (IRR) if mentioned
-9. **npv_value**: Float or null - Extract Net Present Value (NPV) if mentioned
-10. **cross_border_impact**: Boolean - Does it mention cross-border, regional integration, or multi-country benefits?
-11. **esg_compliant**: Boolean - Does it address ESG (Environmental, Social, Governance) standards?
+1. **document_type**: Identify what TYPE of document this is (feasibility_study, esia, financial_model, government_support, technical_spec, or other)
+2. **has_feasibility_study**: Boolean - Is this document itself a feasibility study? (Not just mentioning feasibility)
+3. **has_esia**: Boolean - Is this document itself an Environmental & Social Impact Assessment? (Not just mentioning ESIA)
+4. **has_financial_model**: Boolean - Is this document itself a financial model with detailed projections? (Not just mentioning finances)
+5. **has_government_support**: Boolean - Is this a government support letter or official endorsement? (Not just mentioning government)
+6. **has_permits**: Boolean - Does this document contain actual permits, licenses, or regulatory approvals? (Not just mentioning them)
+7. **has_site_control**: Boolean - Does this document prove land access, site control, or property rights? (Not just mentioning land)
+8. **irr_percentage**: Float or null - Extract Internal Rate of Return (IRR) if explicitly stated
+9. **npv_value**: Float or null - Extract Net Present Value (NPV) if explicitly stated
+10. **cross_border_impact**: Boolean - Does it explicitly discuss cross-border, regional integration, or multi-country benefits?
+11. **esg_compliant**: Boolean - Does it explicitly address ESG (Environmental, Social, Governance) standards?
 12. **technical_viability_score**: Integer 0-10 - Rate technical feasibility if assessable
 13. **confidence**: Float 0-1 - Your confidence in this analysis
+
+**IMPORTANT RULES:**
+- Only set a field to `true` if THIS SPECIFIC DOCUMENT contains that information
+- If a feasibility study MENTIONS that permits are needed, that does NOT mean has_permits=true
+- If a document DISCUSSES financial projections, that does NOT mean has_financial_model=true unless it IS a detailed financial model
+- Be conservative - when in doubt, set to false
 
 **Document Text:**
 ```
 {text}
 ```
 
-**IMPORTANT:** Return ONLY valid JSON, no markdown formatting. Example:
+**IMPORTANT:** Return ONLY valid JSON, no markdown formatting. Example for a feasibility study document:
 {{
     "document_type": "feasibility_study",
     "has_feasibility_study": true,
     "has_esia": false,
-    "has_financial_model": true,
+    "has_financial_model": false,
     "has_government_support": false,
-    "has_permits": true,
-    "has_site_control": true,
-    "irr_percentage": 15.2,
-    "npv_value": 45000000,
+    "has_permits": false,
+    "has_site_control": false,
+    "irr_percentage": null,
+    "npv_value": null,
     "cross_border_impact": true,
-    "esg_compliant": true,
-    "technical_viability_score": 8,
-    "confidence": 0.85
+    "esg_compliant": false,
+    "technical_viability_score": 7,
+    "confidence": 0.9
 }}"""
     
     def _parse_llm_response(self, response: str) -> Dict[str, Any]:

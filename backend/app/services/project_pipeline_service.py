@@ -49,9 +49,18 @@ class ProjectPipelineService:
 
     async def _ensure_default_criteria(self):
         """Seed default scoring criteria if none exist."""
+        logger.info("Checking if default criteria need to be seeded...")
+        
         result = await self.db.execute(select(ScoringCriteria))
-        if result.scalars().first():
+        existing = result.scalars().all()
+        
+        logger.info(f"Query returned {len(existing)} criteria")
+        
+        if len(existing) > 0:
+            logger.info(f"Found {len(existing)} existing criteria: {[c.criterion_name for c in existing]}")
             return
+        
+        logger.info("No criteria found, seeding defaults...")
 
         defaults = [
             {"name": "Feasibility Study", "type": "readiness", "weight": 2.0, "desc": "Completed Feasibility Study"},
@@ -70,7 +79,10 @@ class ProjectPipelineService:
                 weight=Decimal(str(d["weight"])),
                 description=d["desc"]
             ))
-        await self.db.flush()
+        
+        # Commit immediately to ensure criteria persist
+        await self.db.commit()
+        logger.info(f"✓ Seeded and committed {len(defaults)} default criteria")
 
     async def assess_project_readiness(self, project_id: uuid.UUID) -> Decimal:
         """
@@ -120,10 +132,15 @@ class ProjectPipelineService:
         
         # Aggregate analysis results
         aggregated = self._aggregate_document_analyses(all_analyses)
+        logger.info(f"Aggregated analysis: {aggregated}")
         
         # Fetch scoring criteria
         criteria_res = await self.db.execute(select(ScoringCriteria))
         all_criteria = criteria_res.scalars().all()
+        logger.info(f"Found {len(all_criteria)} criteria to evaluate")
+        
+        if not all_criteria:
+            logger.warning("No scoring criteria found! Score will be 0.")
         
         total_readiness = Decimal("0.0")
         total_strategic = Decimal("0.0")
@@ -135,29 +152,35 @@ class ProjectPipelineService:
             
             crit_name = crit.criterion_name.lower()
             
-            # Map criteria to AI analysis results
-            if "feasibility" in crit_name and aggregated.get("has_feasibility_study"):
+            # Debug: Log what we're evaluating
+            logger.debug(f"Evaluating criterion: '{crit_name}' (type: {crit.criterion_type})")
+            
+            # Map criteria to AI analysis results (more flexible matching)
+            if ("feasibility" in crit_name or "feasibility study" in crit_name) and aggregated.get("has_feasibility_study"):
                 score = Decimal("10.0")
                 notes = "AI verified: Feasibility study found in documents"
-            elif "esia" in crit_name and aggregated.get("has_esia"):
+            elif ("esia" in crit_name or "environmental" in crit_name) and aggregated.get("has_esia"):
                 score = Decimal("10.0")
                 notes = "AI verified: ESIA report found"
-            elif "financial model" in crit_name and aggregated.get("has_financial_model"):
+            elif ("financial" in crit_name or "model" in crit_name) and aggregated.get("has_financial_model"):
                 score = Decimal("10.0")
                 irr = aggregated.get("irr_percentage")
                 notes = f"AI verified: Financial model found{f' (IRR: {irr}%)' if irr else ''}"
-            elif "site control" in crit_name and aggregated.get("has_site_control"):
+            elif ("site" in crit_name or "land" in crit_name) and aggregated.get("has_site_control"):
                 score = Decimal("10.0")
                 notes = "AI verified: Site control mentioned"
-            elif "permit" in crit_name and aggregated.get("has_permits"):
+            elif ("permit" in crit_name or "license" in crit_name) and aggregated.get("has_permits"):
                 score = Decimal("10.0")
                 notes = "AI verified: Permits/licenses mentioned"
-            elif "gov support" in crit_name and aggregated.get("has_government_support"):
+            elif ("gov" in crit_name or "government" in crit_name or "support" in crit_name) and aggregated.get("has_government_support"):
                 score = Decimal("10.0")
                 notes = "AI verified: Government support confirmed"
-            elif "regional integration" in crit_name and aggregated.get("cross_border_impact"):
+            elif ("regional" in crit_name or "cross" in crit_name or "integration" in crit_name) and aggregated.get("cross_border_impact"):
                 score = Decimal("10.0")
                 notes = "AI verified: Cross-border/regional impact identified"
+            
+            # Log the result
+            logger.info(f"Criterion '{crit.criterion_name}': score={score}, notes='{notes}'")
             
             # Save/Update Score Detail
             detail_stmt = select(ProjectScoreDetail).where(
@@ -191,15 +214,27 @@ class ProjectPipelineService:
         
         # Update Project
         project.readiness_score = float(final_readiness)
-        project.strategic_alignment_score = final_strategic
+        project.strategic_alignment_score = float(final_strategic)  # Convert to float
         
         # Recalculate AfCEN
         afcen = self.calculate_afcen_score(float(final_readiness), float(final_strategic))
         project.afcen_score = afcen
         
         await self.db.flush()
+        await self.db.commit()  # Persist changes to database
         
         logger.info(f"✓ AfCEN Score calculated: {afcen} (Readiness: {final_readiness}, Strategic: {final_strategic})")
+        
+        # AUTOMATIC INVESTOR MATCHING: Trigger if AfCEN score >= 60
+        # This runs in background via Celery (non-blocking)
+        if float(afcen) >= 60:
+            try:
+                from app.services.scoring_tasks import match_investors_async
+                match_investors_async.delay(str(project_id))
+                logger.info(f"✓ Triggered investor matching for project {project_id} (AfCEN: {afcen})")
+            except Exception as e:
+                # Don't crash if Celery is not running or task fails
+                logger.warning(f"Could not trigger automatic investor matching (non-critical): {e}")
         
         return afcen
     
@@ -327,12 +362,13 @@ class ProjectPipelineService:
              pass
 
         if new_stage == ProjectStatus.SUMMIT_READY: 
-             # Was FINANCING -> trigger matching?
-             # Prompt: "SUMMIT_READY -> [Auto-actions: Run investor matching]"
-             from app.services.investor_matching_service import get_investor_matching_service
-             matching_service = get_investor_matching_service(self.db)
-             match_result = await matching_service.match_investors(project_id)
-             logger.info(f"Auto-triggered investor matching for project {project_id}: {match_result}")
+             # Trigger investor matching via Celery for non-blocking execution
+             try:
+                 from app.services.scoring_tasks import match_investors_async
+                 match_investors_async.delay(str(project_id))
+                 logger.info(f"✓ Triggered investor matching for project {project_id} after advancing to SUMMIT_READY")
+             except Exception as e:
+                 logger.warning(f"Could not trigger automatic investor matching: {e}")
 
         # AUTOMATIC SCORING: Retrigger scoring after status change
         try:

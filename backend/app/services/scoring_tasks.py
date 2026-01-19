@@ -57,3 +57,48 @@ def rescore_project_async(self, project_id: str) -> Dict[str, Any]:
         logger.error(f"Scoring failed for project {project_id}: {e}")
         # Retry with exponential backoff
         raise self.retry(exc=e, countdown=60)
+
+
+@celery_app.task(bind=True, max_retries=3)
+def match_investors_async(self, project_id: str) -> Dict[str, Any]:
+    """
+    Background task to run investor matching for a project.
+    
+    This task is triggered when:
+    - Project advances to SUMMIT_READY status
+    - Project AfCEN score exceeds threshold (>= 60)
+    - New investors are added to the database
+    
+    Args:
+        project_id: UUID string of the project to match
+        
+    Returns:
+        Dict with match results or error details
+    """
+    try:
+        logger.info(f"Starting investor matching for project {project_id}")
+        
+        # Run async matching in sync context
+        async def run_matching():
+            from app.services.investor_matching_service import get_investor_matching_service
+            
+            async with get_db_session_context() as db:
+                service = get_investor_matching_service(db)
+                result = await service.match_investors(UUID(project_id))
+                return result
+        
+        # Execute async function
+        result = asyncio.run(run_matching())
+        
+        logger.info(f"✓ Matched investors for project {project_id}: {result['new_matches']} new, {result['updated_matches']} updated")
+        
+        return {
+            "status": "success",
+            "project_id": project_id,
+            **result
+        }
+        
+    except Exception as e:
+        logger.error(f"Investor matching failed for project {project_id}: {e}")
+        # Retry with exponential backoff
+        raise self.retry(exc=e, countdown=60)
