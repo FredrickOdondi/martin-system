@@ -439,3 +439,39 @@ async def toggle_project_flagship(
     await db.commit()
     
     return {"status": "success", "is_flagship": is_flagship}
+
+
+@router.post("/{project_id}/rescore")
+async def rescore_project(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Manually trigger AfCEN scoring assessment for a project.
+    Useful when automatic Celery scoring is unavailable.
+    """
+    # Verify project exists
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+    
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    # Run scoring synchronously
+    service = ProjectPipelineService(db)
+    try:
+        score = await service.assess_project_readiness(project_id)
+        
+        return {
+            "status": "success",
+            "project_id": str(project_id),
+            "afcen_score": float(score),
+            "message": f"Project rescored successfully. New AfCEN score: {score:.2f}"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Scoring failed: {str(e)}"
+        )
+

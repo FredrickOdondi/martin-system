@@ -25,6 +25,7 @@ const ProjectDetails: React.FC = () => {
   const [uploadingDoc, setUploadingDoc] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [documentType, setDocumentType] = useState('feasibility_study');
+  const [rescoring, setRescoring] = useState(false);
 
   // RBAC - Must be at top level before any returns
   const { user } = useAppSelector((state) => state.auth);
@@ -228,6 +229,24 @@ const ProjectDetails: React.FC = () => {
     if (project) fetchAIInsights();
   }, [project]);
 
+  const handleRescore = async () => {
+    if (!project) return;
+    setRescoring(true);
+    try {
+      const response = await api.post(`/pipeline/${project.id}/rescore`);
+      // Refresh project data to get new score
+      const updatedProject = await pipelineService.getProject(project.id);
+      setProject(updatedProject);
+      await fetchScoreDetails(project.id);
+      alert(response.data.message || 'Project rescored successfully!');
+    } catch (error: any) {
+      console.error('Rescore failed:', error);
+      alert(error.response?.data?.detail || 'Failed to rescore project. Please try again.');
+    } finally {
+      setRescoring(false);
+    }
+  };
+
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -398,7 +417,15 @@ const ProjectDetails: React.FC = () => {
             <span className="material-symbols-outlined text-purple-400">stars</span>
           </div>
           <p className="text-slate-900 dark:text-white text-2xl font-bold">{project.afcen_score ? Number(project.afcen_score).toFixed(1) : 'N/A'}</p>
-          <p className="text-slate-400 text-xs">Composite Rating</p>
+          <button
+            onClick={handleRescore}
+            disabled={rescoring}
+            className="mt-2 w-full py-1.5 bg-purple-50 hover:bg-purple-100 dark:bg-purple-900/20 dark:hover:bg-purple-900/40 text-purple-600 dark:text-purple-400 text-xs font-bold rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1"
+            title="Manually trigger AfCEN scoring assessment"
+          >
+            <span className="material-symbols-outlined text-[14px]">{rescoring ? 'hourglass_empty' : 'refresh'}</span>
+            {rescoring ? 'Scoring...' : 'Rescore Project'}
+          </button>
         </div>
 
         {/* Pillar */}
