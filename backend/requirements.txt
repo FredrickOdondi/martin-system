@@ -104,3 +104,8 @@ tqdm==4.66.1
 # WebSocket Support
 websockets==12.0
 apscheduler
+
+# Text Extraction & OCR
+PyMuPDF==1.23.8        # PDF text extraction
+pytesseract==0.3.10    # OCR wrapper for scanned PDFs
+Pillow==10.1.0         # Image processing for OCR
