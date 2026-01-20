@@ -213,6 +213,59 @@ class DocumentSynthesizer:
         if not self.llm:
             raise ValueError("LLM client is not available for synthesis")
 
+        # CRITICAL: Validate transcript is not empty to prevent AI hallucination
+        transcript_stripped = transcript_text.strip() if transcript_text else ""
+        
+        # Check for empty or minimal transcript
+        if not transcript_stripped or len(transcript_stripped) < 50:
+            logger.warning(f"Transcript is empty or too short ({len(transcript_stripped)} chars). Cannot generate minutes.")
+            return {
+                "content": f"""# Meeting Minutes: {meeting_context.get('meeting_title', 'Untitled Meeting')}
+
+**Date:** {meeting_context.get('meeting_date', 'Unknown Date')}
+**TWG:** {meeting_context.get('pillar_name', 'General')}
+
+## ⚠️ No Transcript Available
+
+The meeting recording did not capture any transcript content. This could be because:
+- The bot left the meeting before any speech was recorded
+- No one spoke during the meeting
+- There was a technical issue with the recording
+
+**Action Required:** Please manually upload meeting notes or re-record the meeting.
+""",
+                "metadata": {
+                    "source_transcript_length": len(transcript_stripped),
+                    "generated_at": datetime.now(UTC).isoformat(),
+                    "error": "empty_transcript"
+                }
+            }
+        
+        # Check if transcript is just JSON with empty segments
+        if transcript_stripped.startswith("{") and '"segments": []' in transcript_stripped:
+            logger.warning("Transcript contains empty segments array. No actual speech recorded.")
+            return {
+                "content": f"""# Meeting Minutes: {meeting_context.get('meeting_title', 'Untitled Meeting')}
+
+**Date:** {meeting_context.get('meeting_date', 'Unknown Date')}
+**TWG:** {meeting_context.get('pillar_name', 'General')}
+
+## ⚠️ No Speech Recorded
+
+The meeting bot joined successfully but did not record any speech. This could be because:
+- No one spoke during the recording session
+- The bot was removed before any discussion began
+- Microphone permissions were not granted
+
+**Action Required:** Please manually upload meeting notes or schedule a new recording session.
+""",
+                "metadata": {
+                    "source_transcript_length": len(transcript_stripped),
+                    "generated_at": datetime.now(UTC).isoformat(),
+                    "error": "no_speech_segments"
+                }
+            }
+
         # 1. Prepare Prompt
         prompt = format_synthesis_prompt(
             SynthesisType.MEETING_MINUTES,
@@ -251,6 +304,93 @@ class DocumentSynthesizer:
         except Exception as e:
             logger.error(f"Failed to synthesize minutes: {e}")
             raise e
+
+    def extract_action_items(self, minutes_text: str, pillar: str = "energy") -> List[Dict[str, Any]]:
+        """
+        Extract action items from meeting minutes using the appropriate specialist agent.
+        """
+        from app.agents.langgraph_base_agent import create_langgraph_agent
+        import json
+        
+        logger.info(f"Extracting action items for pillar: {pillar}")
+        
+        # specific mapping for agent personas
+        agent_map = {
+            "energy_infrastructure": "energy",
+            "agriculture_food_systems": "agriculture",
+            "critical_minerals_industrialization": "minerals",
+            "digital_economy_transformation": "digital",
+            "protocol_logistics": "protocol",
+            "resource_mobilization": "resource_mobilization"
+        }
+        # Normalize pillar string just in case
+        pillar_key = pillar.lower().replace(" ", "_")
+        if pillar_key not in agent_map:
+             # Try to match by value if Enum string passed directly
+             pass
+        
+        agent_id = agent_map.get(pillar, "energy") # Default to energy if not found
+        # Actually simplest to trust the passed ID or map it loosely. 
+        # The meetings endpoint mapping was: 
+        # energy_infrastructure -> energy.
+        
+        # Let's use the same mapping logic as the endpoint for safety
+        normalized_pillar = pillar
+        if pillar not in agent_map.values():
+             normalized_pillar = agent_map.get(pillar, "energy")
+        
+        # We need a session_id, let's generate one or use a placeholder since we don't have meeting_id here trivially
+        # actually LangGraph needs a session_id for persistent state but for a one-off extraction it matters less?
+        # effectively we want a new session per extraction request
+        import uuid
+        session_id = str(uuid.uuid4())
+        
+        try:
+            agent = create_langgraph_agent(agent_id=normalized_pillar, session_id=session_id)
+            
+            prompt = f"""Extract action items from the following meeting minutes.
+
+Minutes:
+{minutes_text}
+
+Return ONLY a JSON array of action items, each with:
+- "description": the action item text
+- "owner": suggested owner name (or "TBD" if unclear)
+- "due_date": suggested due date in YYYY-MM-DD format (or null if unclear)
+
+Example format:
+[
+  {{"description": "Draft energy policy framework", "owner": "TBD", "due_date": "2026-02-01"}},
+  {{"description": "Review ECOWAS Vision 2050 alignment", "owner": "TBD", "due_date": null}}
+]
+"""
+            # Use the agent to invoke the prompt
+            # The agent returns a dict with "messages" usually.
+            # We need to parse the response.
+            response = agent.invoke({"messages": [("user", prompt)]})
+            
+            # Extract content from the last message
+            ai_message = response["messages"][-1]
+            content = ai_message.content
+            
+            # Parse JSON
+            # Clean markdown code blocks if present
+            content = content.replace("```json", "").replace("```", "").strip()
+            
+            try:
+                actions = json.loads(content)
+                if isinstance(actions, list):
+                    return actions
+                else:
+                    logger.warning(f"Extracted actions is not a list: {type(actions)}")
+                    return []
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse JSON from extraction response: {content[:100]}...")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Error extracting action items: {e}")
+            return []
 
     def _standardize_terminology(
         self,

@@ -97,22 +97,40 @@ class ReconciliationService:
         return self._llm_client
     
     async def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
-        """Make an LLM call with the configured provider."""
+        """Make an LLM call with the configured provider, with retries."""
         client = self._get_llm_client()
         
-        try:
-            response = client.chat.completions.create(
-                model=self._llm_model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7,
-                max_tokens=500
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            raise RuntimeError(f"LLM call failed: {str(e)}")
+        import asyncio
+        import random
+        
+        max_retries = 3
+        base_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                response = client.chat.completions.create(
+                    model=self._llm_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.7,
+                    max_tokens=500
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                is_rate_limit = "rate limit" in str(e).lower() or "too many requests" in str(e).lower() or "429" in str(e)
+                
+                if attempt < max_retries - 1 and is_rate_limit:
+                    delay = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
+                    print(f"Warning: LLM Rate Limit hit. Retrying in {delay:.2f}s... (Attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(delay)
+                else:
+                    # Reraise or return error if last attempt or not rate limit
+                    # Note: We wrap in RuntimeError to maintain interface contract
+                    if is_rate_limit:
+                        print(f"Error: LLM Rate Limit exhausted after {max_retries} attempts.")
+                    raise RuntimeError(f"LLM call failed: {str(e)}")
     
     async def query_agent_constraints(self, conflict: Conflict, twg_name: str) -> Dict[str, Any]:
         """

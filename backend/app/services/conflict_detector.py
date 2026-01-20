@@ -47,7 +47,7 @@ class ConflictDetector:
     def _initialize_conflict_patterns(self) -> Dict[str, Any]:
         """Initialize conflict detection patterns"""
         return {
-            "policy_targets": {
+            ConflictType.POLICY_MISALIGNMENT.value: {
                 "description": "Contradictory policy targets or goals",
                 "keywords": [
                     "target", "goal", "%", "by 2026", "by 2030",
@@ -55,7 +55,7 @@ class ConflictDetector:
                 ],
                 "severity": "high"
             },
-            "resource_allocation": {
+            ConflictType.RESOURCE_CONSTRAINT.value: {
                 "description": "Competing resource allocation needs",
                 "keywords": [
                     "budget", "funding", "investment", "allocation",
@@ -63,7 +63,7 @@ class ConflictDetector:
                 ],
                 "severity": "medium"
             },
-            "session_overlap": {
+            ConflictType.SCHEDULE_CLASH.value: {
                 "description": "Overlapping or conflicting session proposals",
                 "keywords": [
                     "session", "panel", "presentation", "workshop",
@@ -71,7 +71,12 @@ class ConflictDetector:
                 ],
                 "severity": "low"
             },
+            # Merging policy direction into MISALIGNMENT but keeping unique keywords could be tricky if keys must be unique.
+            # I will assume we can reuse the type OR I should have reduced the patterns.
+            # But wait, keys need to be unique for the iteration.
+            # So I will keep unique keys and map them to Enum *Types* separately.
             "policy_direction": {
+                "type": ConflictType.POLICY_MISALIGNMENT.value,
                 "description": "Contradictory policy directions",
                 "keywords": [
                     "must", "should", "require", "mandate",
@@ -80,6 +85,7 @@ class ConflictDetector:
                 "severity": "high"
             },
             "technology_choice": {
+                "type": ConflictType.POLICY_MISALIGNMENT.value,
                 "description": "Incompatible technology recommendations",
                 "keywords": [
                     "technology", "platform", "standard", "protocol",
@@ -257,7 +263,7 @@ class ConflictDetector:
         if has_renewable_a and has_fossil_b:
             # Potential conflict detected
             return create_conflict_alert(
-                conflict_type="policy_target",
+                conflict_type=ConflictType.POLICY_MISALIGNMENT.value,
                 severity="high",
                 agents_involved=[agent_a, agent_b],
                 description=f"{agent_a.upper()} promotes renewable energy targets while {agent_b.upper()} includes fossil fuel infrastructure",
@@ -294,8 +300,13 @@ class ConflictDetector:
         # In real implementation, this would use LLM for deeper analysis
 
         if sentences_a and sentences_b:
+            # Determine correct enum type
+            c_type = pattern_config.get("type", pattern_type)
+            # If pattern_type (the key) is already a valid enum value, usage is fine.
+            # But if we used a custom key like "policy_direction", we must use the mapped type.
+            
             return create_conflict_alert(
-                conflict_type=pattern_type,
+                conflict_type=c_type,
                 severity=pattern_config["severity"],
                 agents_involved=[agent_a, agent_b],
                 description=f"Potential {pattern_config['description']} between {agent_a} and {agent_b}",
@@ -407,7 +418,20 @@ If no conflicts, respond with: NO CONFLICT
 
             for line in response.split('\n'):
                 if line.startswith("CONFLICT:"):
-                    conflict_type = line.split(":", 1)[1].strip()
+                    raw_type = line.split(":", 1)[1].strip().upper()
+                    # Map LLM output to valid ENUM
+                    type_map = {
+                        "POLICY_CLASH": ConflictType.POLICY_MISALIGNMENT.value,
+                        "TARGET_MISMATCH": ConflictType.POLICY_MISALIGNMENT.value,
+                        "DUPLICATE_SESSION": ConflictType.SCHEDULE_CLASH.value, 
+                        "MISSING_DEPENDENCY": ConflictType.DEPENDENCY_BLOCKER.value,
+                        "RESOURCE_CONFLICT": ConflictType.RESOURCE_CONSTRAINT.value,
+                        # Fallback for direct match
+                        "SCHEDULE_CLASH": ConflictType.SCHEDULE_CLASH.value,
+                        "POLICY_MISALIGNMENT": ConflictType.POLICY_MISALIGNMENT.value,
+                        "RESOURCE_CONSTRAINT": ConflictType.RESOURCE_CONSTRAINT.value
+                    }
+                    conflict_type = type_map.get(raw_type, ConflictType.POLICY_MISALIGNMENT.value) # Default safe
                 elif line.startswith("SEVERITY:"):
                     severity = line.split(":", 1)[1].strip().lower()
                 elif line.startswith("DESCRIPTION:"):

@@ -6,7 +6,7 @@ from typing import List, Optional
 import uuid
 
 from app.core.database import get_db
-from app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesStatus, MeetingParticipant, RsvpStatus, ActionItem, TWG, Document, MeetingStatus, MeetingDependency, DependencyType
+from app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesStatus, MeetingParticipant, RsvpStatus, ActionItem, ActionItemStatus, TWG, Document, MeetingStatus, MeetingDependency, DependencyType
 from app.schemas.schemas import (
     MeetingCreate, MeetingRead, MeetingUpdate,
     MinutesCreate, MinutesUpdate, MinutesRead,
@@ -94,9 +94,12 @@ async def create_meeting(
         result = await db.execute(
             select(Meeting)
             .options(
-                selectinload(Meeting.participants),
-                selectinload(Meeting.documents), # Added to satisfy MeetingRead schema
-                selectinload(Meeting.twg)        # Good practice to include parent
+                selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+                selectinload(Meeting.documents), 
+                selectinload(Meeting.twg),
+                selectinload(Meeting.successors),
+                selectinload(Meeting.predecessors),
+                selectinload(Meeting.agenda)
             )
             .where(Meeting.id == db_meeting.id)
         )
@@ -158,7 +161,7 @@ async def get_meeting(
         selectinload(Meeting.agenda),
         selectinload(Meeting.minutes),
         selectinload(Meeting.twg),
-        selectinload(Meeting.documents),
+        selectinload(Meeting.documents).selectinload(Document.uploaded_by),
         selectinload(Meeting.successors).selectinload(MeetingDependency.target_meeting),
         selectinload(Meeting.predecessors).selectinload(MeetingDependency.source_meeting)
     )
@@ -327,9 +330,37 @@ async def generate_minutes(
     if not has_twg_access(current_user, db_meeting.twg_id):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # 2. Validation
+    # 2. Validation & Fallback for Active Vexa Meetings
     if not db_meeting.transcript:
-        raise HTTPException(status_code=400, detail="No transcript available for this meeting. Please add a transcript first.")
+        # Check if we have a Vexa placeholder and can fetch a partial transcript
+        from app.services.vexa_service import vexa_service
+        
+        # Find placeholder doc
+        placeholder_doc = None
+        for doc in db_meeting.documents:
+            if doc.document_type == "transcript_placeholder":
+                placeholder_doc = doc
+                break
+        
+        if placeholder_doc and placeholder_doc.metadata_json:
+            platform = placeholder_doc.metadata_json.get("platform")
+            native_meeting_id = placeholder_doc.metadata_json.get("native_meeting_id")
+            
+            if platform and native_meeting_id:
+                try:
+                    print(f"Attempting to fetch partial transcript for {platform}/{native_meeting_id}")
+                    transcript_data = await vexa_service.get_transcript(platform, native_meeting_id)
+                    
+                    if transcript_data and transcript_data.get("text"):
+                        # Save the partial transcript to the meeting
+                        db_meeting.transcript = transcript_data.get("text")
+                        await db.commit()
+                        print(f"Fetched and saved partial transcript ({len(db_meeting.transcript)} chars)")
+                except Exception as e:
+                    print(f"Failed to fetch partial transcript: {e}")
+
+    if not db_meeting.transcript:
+        raise HTTPException(status_code=400, detail="No transcript available for this meeting. Please add a transcript first or wait for Vexa processing.")
 
     # 3. Prepare Context for Synthesizer
     attendees_list = []
@@ -338,10 +369,20 @@ async def generate_minutes(
         role = f" ({p.user.role.value})" if (p.user and p.user.role) else ""
         attendees_list.append(f"- {name}{role}")
     
+    # Get robust Pillar/TWG Name
+    pillar_name = "General"
+    if db_meeting.twg:
+        if hasattr(db_meeting.twg, 'name') and db_meeting.twg.name:
+            pillar_name = db_meeting.twg.name
+        elif hasattr(db_meeting.twg, 'pillar'):
+             # Handle Enum or string
+             val = db_meeting.twg.pillar
+             pillar_name = val.value if hasattr(val, 'value') else str(val)
+
     meeting_context = {
         "meeting_title": db_meeting.title,
         "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d"),
-        "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "General",
+        "pillar_name": pillar_name,
         "attendees_list": "\n".join(attendees_list),
         "agenda_content": db_meeting.agenda.content if db_meeting.agenda else "No formal agenda provided."
     }
@@ -372,6 +413,49 @@ async def generate_minutes(
             )
             db.add(db_minutes)
             
+        # --- NEW: Extract Action Items Automatically ---
+        try:
+            import asyncio
+            # Run extraction (blocking) in thread to avoid blocking loop
+            # Or just call sync if we accept blocking (current synthesize_minutes is blocking)
+            # Let's use thread for safety as it involves another LLM call
+            
+            actions_list = await asyncio.to_thread(
+                synthesizer.extract_action_items,
+                generated_content,
+                pillar_name
+            )
+            
+            action_count = 0
+            for action in actions_list:
+                desc = action.get("description")
+                if not desc: continue
+                
+                # Parse Due Date
+                due_date = None
+                if action.get("due_date"):
+                    try:
+                        from datetime import datetime
+                        due_date = datetime.strptime(action["due_date"], "%Y-%m-%d").date()
+                    except:
+                        pass
+                
+                new_action = ActionItem(
+                    meeting_id=meeting_id,
+                    description=desc,
+                    owner=action.get("owner", "TBD"),
+                    due_date=due_date,
+                    status=ActionItemStatus.PENDING
+                )
+                db.add(new_action)
+                action_count += 1
+                
+            if action_count > 0:
+                print(f"✓ Automatically extracted {action_count} action items.")
+        except Exception as ae:
+            print(f"Failed to auto-extract action items: {ae}")
+        # -----------------------------------------------
+            
         # Log activity
         await audit_service.log_activity(
             db=db,
@@ -392,233 +476,9 @@ async def generate_minutes(
         raise HTTPException(status_code=500, detail=f"Failed to generate minutes: {str(e)}")
 
 
-@router.post("/{meeting_id}/upload-recording", response_model=MinutesRead)
-async def upload_recording(
-    meeting_id: uuid.UUID,
-    file: UploadFile = File(...),
-    current_user: User = Depends(require_facilitator),
-    db: AsyncSession = Depends(get_db)
-):
-    """
-    Upload an audio recording, transcribe it using Groq Whisper, saving the transcript,
-    and then automatically generate minutes.
-    """
-    import shutil
-    import os
-    from app.core.config import settings
-    
-    # 1. Validation
-    if not file.filename.lower().endswith(('.mp3', '.wav', '.m4a', '.mp4', '.mpeg', '.mpga', '.webm')):
-        raise HTTPException(status_code=400, detail="Invalid file format. Supported: mp3, wav, m4a, mp4, mpeg, mpga, webm")
 
-    # 2. Save File Temporarily
-    upload_dir = os.path.join(settings.UPLOAD_DIR, "recordings")
-    os.makedirs(upload_dir, exist_ok=True)
-    temp_file_path = os.path.join(upload_dir, f"{meeting_id}_{file.filename}")
-    
-    try:
-        with open(temp_file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            
-        print(f"File saved to {temp_file_path}, starting transcription...")
 
-        # 3. Transcribe using LLM Service (Groq)
-        try:
-            transcript_text = llm_service.transcribe_audio(temp_file_path)
-        except NotImplementedError:
-             raise HTTPException(status_code=500, detail="Audio transcription is not supported by the current LLM provider configuration.")
-        
-        print(f"Transcription complete. Length: {len(transcript_text)}")
 
-        # 4. Update Meeting Transcript in DB
-        result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
-        db_meeting = result.scalar_one_or_none()
-        
-        if not db_meeting:
-            raise HTTPException(status_code=404, detail="Meeting not found")
-            
-        if not has_twg_access(current_user, db_meeting.twg_id):
-             raise HTTPException(status_code=403, detail="Access denied")
-
-        db_meeting.transcript = transcript_text
-        await db.commit()
-        
-        # 5. Trigger Minute Generation (Reuse logic)
-        # We can call the generate_minutes endpoint handler directly or reuse the logic.
-        # Calling handler directly is tricky due to Dependency Injection.
-        # Better to reuse the service logic.
-        
-        # Re-fetch with full relationships for context
-        query = select(Meeting).where(Meeting.id == meeting_id).options(
-            selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
-            selectinload(Meeting.agenda),
-            selectinload(Meeting.twg)
-        )
-        result = await db.execute(query)
-        db_meeting = result.scalar_one_or_none()
-        
-        attendees_list = []
-        for p in db_meeting.participants:
-            name = p.user.full_name if (p.user and p.user.full_name) else (p.name or p.email or "Unknown")
-            role = f" ({p.user.role.value})" if (p.user and p.user.role) else ""
-            attendees_list.append(f"- {name}{role}")
-        
-        meeting_context = {
-            "meeting_title": db_meeting.title,
-            "meeting_date": db_meeting.scheduled_at.strftime("%Y-%m-%d"),
-            "pillar_name": db_meeting.twg.pillar.value if db_meeting.twg else "General",
-            "attendees_list": "\n".join(attendees_list),
-            "agenda_content": db_meeting.agenda.content if db_meeting.agenda else "No formal agenda provided."
-        }
-
-        synthesizer = DocumentSynthesizer(llm_client=llm_service)
-        minutes_result = synthesizer.synthesize_minutes(
-             transcript_text=db_meeting.transcript,
-             meeting_context=meeting_context
-        )
-        generated_content = minutes_result["content"]
-        
-        # Upsert Minutes
-        min_result = await db.execute(select(Minutes).where(Minutes.meeting_id == meeting_id))
-        db_minutes = min_result.scalar_one_or_none()
-        
-        if db_minutes:
-             db_minutes.content = generated_content
-             db_minutes.status = MinutesStatus.DRAFT
-        else:
-            db_minutes = Minutes(
-                meeting_id=meeting_id,
-                content=generated_content,
-                status=MinutesStatus.DRAFT
-            )
-            db.add(db_minutes)
-            
-        await db.commit()
-        await db.refresh(db_minutes)
-        
-        # Cleanup
-        if os.path.exists(temp_file_path):
-             os.remove(temp_file_path)
-
-        return db_minutes
-
-    except Exception as e:
-        # Cleanup on error
-        if os.path.exists(temp_file_path):
-             os.remove(temp_file_path)
-        import traceback
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to process recording: {str(e)}")
-
-@router.websocket("/{meeting_id}/live")
-async def live_meeting_transcription_websocket(
-    websocket: WebSocket, 
-    meeting_id: uuid.UUID,
-    token: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
-):
-    from app.services.speech_service import speech_service
-    from app.utils.security import verify_token
-    import asyncio
-    import time
-    from fastapi import WebSocketDisconnect
-    from app.models.models import Agenda
-    from app.agents.agenda_monitor import AgendaMonitor
-    
-    # 1. Connection & Auth
-    await websocket.accept()
-    
-    user_id = "anonymous"
-    if token:
-        payload = verify_token(token, "access")
-        if payload:
-            user_id = payload.get("sub")
-    
-    print(f"WS Connected to Meeting {meeting_id} | User: {user_id}")
-    
-    # Fetch Agenda for Context
-    result = await db.execute(select(Agenda).where(Agenda.meeting_id == meeting_id))
-    agenda = result.scalar_one_or_none()
-    agenda_text = agenda.content if agenda else "No agenda content available."
-
-    # Init Agent
-    monitor = AgendaMonitor()
-    transcript_buffer = ""
-    last_analysis_time = time.time()
-
-    # Async Queue to buffer audio chunks from Client -> Google
-    audio_queue = asyncio.Queue()
-    
-    async def receive_audio():
-        """Reads audio chunks from WebSocket and puts into queue."""
-        try:
-            while True:
-                data = await websocket.receive_bytes()
-                await audio_queue.put(data)
-        except WebSocketDisconnect:
-             await audio_queue.put(None)
-        except Exception as e:
-            print(f"Receive Error: {e}")
-            await audio_queue.put(None) # Signal EOF
-
-    async def audio_generator():
-        """Yields chunks from queue to Google Speech Service."""
-        while True:
-            chunk = await audio_queue.get()
-            if chunk is None:
-                break
-            yield chunk
-
-    # 3. Main Loop
-    try:
-        # Start receiver task
-        receiver_task = asyncio.create_task(receive_audio())
-        
-        # Start Google Stream (Bi-directional)
-        async for transcript_data in speech_service.stream_audio(audio_generator()):
-            # 1. Send Transcript
-            await websocket.send_json({
-                "type": "transcript",
-                "data": transcript_data
-            })
-            
-            # 2. Agenda Monitor Analysis
-            # Only analyze "final" results to save tokens/stability
-            if transcript_data.get('is_final'):
-                new_text = transcript_data.get('text', '')
-                transcript_buffer += " " + new_text
-                
-                # Check triggers (Time + buffer size)
-                # Analyze every 15 seconds if there is new content
-                if time.time() - last_analysis_time > 15 and len(new_text) > 10:
-                    print(f"Running Agenda Monitor Analysis... Buffer: {len(transcript_buffer)}")
-                    analysis = await monitor.analyze(transcript_buffer, agenda_text)
-                    
-                    if analysis:
-                        await websocket.send_json({
-                            "type": "agenda_update",
-                            "data": analysis
-                        })
-                    
-                    last_analysis_time = time.time()
-                    
-                    # Manage Buffer Size (keep context but don't explode)
-                    if len(transcript_buffer) > 4000:
-                        transcript_buffer = transcript_buffer[-2000:]
-            
-    except Exception as e:
-        print(f"WebSocket Error: {e}")
-        try:
-             await websocket.send_json({"type": "error", "message": str(e)})
-        except:
-            pass
-    finally:
-        try:
-            await websocket.close()
-        except:
-            pass
-        print(f"WS Closed for Meeting {meeting_id}")
 
 @router.get("/{meeting_id}/invite-preview")
 async def get_invite_preview(
@@ -2374,9 +2234,6 @@ async def extract_action_items(
     """
     Use AI to extract action items from meeting minutes and create ActionItem records.
     """
-    from app.agents.langgraph_base_agent import create_langgraph_agent
-    import json
-    import re
     
     # Get meeting with minutes
     result = await db.execute(
@@ -2401,51 +2258,19 @@ async def extract_action_items(
     if not minutes_content:
         raise HTTPException(status_code=400, detail="No minutes or transcript available to extract actions from")
     
-    # Create agent to extract action items
-    pillar = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
-    agent_map = {
-        "energy_infrastructure": "energy",
-        "agriculture_food_systems": "agriculture",
-        "critical_minerals_industrialization": "minerals",
-        "digital_economy_transformation": "digital",
-        "protocol_logistics": "protocol",
-        "resource_mobilization": "resource_mobilization"
-    }
-    agent_id = agent_map.get(pillar, "energy")
-    agent = create_langgraph_agent(agent_id=agent_id, session_id=str(meeting_id))
+    # Use DocumentSynthesizer to extract action items
+    synthesizer = DocumentSynthesizer(llm_client=llm_service)
+    pillar_name = db_meeting.twg.pillar.value if db_meeting.twg else "energy_infrastructure"
     
-    prompt = f"""Extract action items from the following meeting minutes.
-
-Meeting: {db_meeting.title}
-
-Minutes:
-{minutes_content}
-
-Return ONLY a JSON array of action items, each with:
-- "description": the action item text
-- "owner": suggested owner name (or "TBD" if unclear)
-- "due_date": suggested due date in YYYY-MM-DD format (or null if unclear)
-
-Example format:
-[
-  {{"description": "Draft energy policy framework", "owner": "TBD", "due_date": "2026-02-01"}},
-  {{"description": "Review ECOWAS Vision 2050 alignment", "owner": "TBD", "due_date": null}}
-]
-
-Return ONLY valid JSON, no markdown or other text."""
-
-    response = await agent.chat(prompt)
-    
-    # Parse the JSON from response
+    import asyncio
     try:
-        # Try to find JSON array in the response
-        json_match = re.search(r'\[.*\]', response, re.DOTALL)
-        if json_match:
-            extracted_items = json.loads(json_match.group())
-        else:
-            extracted_items = json.loads(response)
-    except json.JSONDecodeError:
-        return {"extracted_actions": [], "raw_response": response, "error": "Could not parse JSON"}
+        extracted_items = await asyncio.to_thread(
+            synthesizer.extract_action_items,
+            minutes_content,
+            pillar_name
+        )
+    except Exception as e:
+        return {"extracted_actions": [], "error": str(e), "message": "Failed to extract action items"}
     
     # Auto-create ActionItem records
     # Deduplication: Fetch existing actions first
@@ -2484,7 +2309,7 @@ Return ONLY valid JSON, no markdown or other text."""
                 description=item.get("description", ""),
                 owner_id=current_user.id,  # Default to current user, can be reassigned
                 due_date=due_date,
-                status="PENDING"
+                status=ActionItemStatus.PENDING # Ensure using Enum
             )
             db.add(db_action)
             created_items.append({

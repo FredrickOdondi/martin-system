@@ -27,7 +27,6 @@ export default function MeetingDetail() {
     // Agenda State
     const [agendaContent, setAgendaContent] = useState('')
     const [isEditingAgenda, setIsEditingAgenda] = useState(false)
-    const [isGeneratingAgenda, setIsGeneratingAgenda] = useState(false)
 
     // Minutes State
     const [minutesContent, setMinutesContent] = useState('')
@@ -59,7 +58,7 @@ export default function MeetingDetail() {
     // Modal States
     const [isEditingMeeting, setIsEditingMeeting] = useState(false)
     const [isAddingAction, setIsAddingAction] = useState(false)
-    const [isExtractingActions, setIsExtractingActions] = useState(false)
+
     const [newActionDescription, setNewActionDescription] = useState('')
     const [newActionOwner, setNewActionOwner] = useState('')
     const [selectedAction, setSelectedAction] = useState<any>(null)
@@ -166,26 +165,7 @@ export default function MeetingDetail() {
         }
     }
 
-    const handleGenerateAgenda = async () => {
-        if (!meetingId || isGeneratingAgenda) return
-        setIsGeneratingAgenda(true)
-        try {
-            const res = await meetings.generateAgenda(meetingId)
-            setAgendaContent(res.data.generated_agenda)
-            setIsEditingAgenda(true)  // Switch to edit mode to allow modifications
-        } catch (error: any) {
-            console.error("Failed to generate agenda", error)
-            let errorMessage = "Failed to generate agenda."
-            if (error.response) {
-                errorMessage = error.response.data?.detail || `Server error: ${error.response.status}`
-            } else if (error.request) {
-                errorMessage = "Network error: Could not connect to the server."
-            }
-            alert(errorMessage)
-        } finally {
-            setIsGeneratingAgenda(false)
-        }
-    }
+
 
     const handleGenerateSummary = async () => {
         if (!meetingId || isGeneratingMinutes) return
@@ -497,30 +477,7 @@ export default function MeetingDetail() {
         }
     }
 
-    const handleExtractActions = async () => {
-        if (!meetingId || isExtractingActions) return
-        setIsExtractingActions(true)
-        try {
-            const res = await meetings.extractActionItems(meetingId)
-            const message = res.data.message || `Extracted ${res.data.extracted_actions?.length || 0} action items`
-            const createdCount = res.data.created_items?.filter((i: any) => i.created).length || 0
 
-            if (createdCount > 0) {
-                alert(`✅ ${message}! The action items have been added to the tracker.`)
-                await loadMeetingDetails()  // Refresh to show new action items
-            } else if (res.data.extracted_actions?.length > 0) {
-                alert("Extracted action items but failed to save them. Check console.")
-                console.log("Extraction result:", res.data)
-            } else {
-                alert("No action items could be extracted from the minutes.")
-            }
-        } catch (error: any) {
-            console.error("Failed to extract actions", error)
-            alert(error?.response?.data?.detail || "Failed to extract action items")
-        } finally {
-            setIsExtractingActions(false)
-        }
-    }
 
     const handleUpdateRsvp = async (participantId: string, status: string) => {
         if (!meetingId) return;
@@ -833,12 +790,7 @@ export default function MeetingDetail() {
                                     Join Video Call
                                 </button>
                             )}
-                            <button onClick={() => navigate(`/meetings/${meetingId}/live`)} className="btn-primary text-sm flex items-center gap-2 bg-red-600 hover:bg-red-700 border-red-600">
-                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-                                </svg>
-                                Join Live Session
-                            </button>
+
                             {minutesStatus === 'PENDING_APPROVAL' && (
                                 <button onClick={handleApproveMinutes} className="btn-primary text-sm flex items-center gap-2">
                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -889,17 +841,6 @@ export default function MeetingDetail() {
                                             <div className="flex justify-between items-center">
                                                 <h2 className="text-xl font-bold text-slate-900 dark:text-white">Meeting Agenda</h2>
                                                 <div className="flex gap-2">
-                                                    <button
-                                                        onClick={handleGenerateAgenda}
-                                                        disabled={isGeneratingAgenda}
-                                                        className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50"
-                                                    >
-                                                        {isGeneratingAgenda ? (
-                                                            <><span className="animate-spin">⏳</span> Generating...</>
-                                                        ) : (
-                                                            <>✨ Generate Agenda</>
-                                                        )}
-                                                    </button>
                                                     {!isEditingAgenda ? (
                                                         <button onClick={() => setIsEditingAgenda(true)} className="btn-secondary text-sm">
                                                             Edit Agenda
@@ -983,41 +924,7 @@ export default function MeetingDetail() {
 
                                                     {isTranscriptExpanded && (
                                                         <div className="mt-4 animate-in fade-in slide-in-from-top-2 duration-200 space-y-4">
-                                                            {/* Audio Upload Section */}
-                                                            <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
-                                                                <h4 className="text-sm font-semibold mb-2 text-slate-700 dark:text-slate-300">🎙️ Transcribe Audio Recording</h4>
-                                                                <p className="text-xs text-slate-500 mb-3">Upload an MP3/WAV file to automatically transcribe and generate minutes.</p>
-                                                                <div className="flex gap-4 items-center">
-                                                                    <input
-                                                                        type="file"
-                                                                        accept="audio/*"
-                                                                        className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                                                                        onChange={async (e) => {
-                                                                            if (!meetingId || !e.target.files?.length) return;
-                                                                            const file = e.target.files[0];
-                                                                            const formData = new FormData();
-                                                                            formData.append('file', file);
 
-                                                                            setIsGeneratingMinutes(true); // Re-use loading state
-                                                                            setStatusModal({ isOpen: true, type: 'info', title: 'Processing Audio', message: 'Uploading and transcribing audio. This may take a minute...' });
-
-                                                                            try {
-                                                                                const res = await meetings.uploadRecording(meetingId, formData);
-                                                                                setMinutesContent(res.data.content);
-                                                                                setTranscript(res.data.transcript || 'Transcript updated from audio.'); // Would need to re-fetch meeting to get full transcript if not returned in minutes, but let's assume standard flow
-                                                                                setMinutesStatus('DRAFT'); // Or res.data.status
-                                                                                await loadMeetingDetails(); // Refresh everything
-                                                                                setStatusModal({ isOpen: true, type: 'success', title: 'Success', message: 'Audio transcribed and minutes generated!' });
-                                                                            } catch (error: any) {
-                                                                                console.error("Audio upload failed", error);
-                                                                                setStatusModal({ isOpen: true, type: 'error', title: 'Error', message: error?.response?.data?.detail || 'Failed to process audio recording.' });
-                                                                            } finally {
-                                                                                setIsGeneratingMinutes(false);
-                                                                            }
-                                                                        }}
-                                                                    />
-                                                                </div>
-                                                            </div>
 
                                                             <textarea
                                                                 className="w-full h-64 p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 focus:ring-2 focus:ring-blue-500 font-mono text-sm leading-relaxed resize-y mb-4 transition-all"
@@ -1159,18 +1066,7 @@ export default function MeetingDetail() {
                                                         <div className="flex items-center justify-between mb-4">
                                                             <h2 className="text-xl font-bold text-slate-900 dark:text-white">Action Items</h2>
                                                             <div className="flex gap-2">
-                                                                <button
-                                                                    onClick={handleExtractActions}
-                                                                    disabled={isExtractingActions || !minutesContent}
-                                                                    className="btn-secondary text-sm flex items-center gap-1 disabled:opacity-50"
-                                                                    title="Extract action items from minutes using AI"
-                                                                >
-                                                                    {isExtractingActions ? (
-                                                                        <><span className="animate-spin">⏳</span> Extracting...</>
-                                                                    ) : (
-                                                                        <>📋 Extract from Minutes</>
-                                                                    )}
-                                                                </button>
+
                                                                 <button onClick={() => setIsAddingAction(true)} className="btn-secondary text-sm flex items-center gap-2">
                                                                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
