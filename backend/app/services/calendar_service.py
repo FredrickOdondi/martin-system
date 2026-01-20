@@ -26,7 +26,27 @@ class CalendarService:
             # Note: token.json is restored by app.core.google_utils.setup_google_credentials() on startup
             if os.path.exists('token.json'):
                 from google.oauth2.credentials import Credentials
+                from google.auth.transport.requests import Request
+                
                 self.creds = Credentials.from_authorized_user_file('token.json', self.SCOPES)
+                
+                # Auto-refresh token if expired
+                if self.creds and self.creds.expired and self.creds.refresh_token:
+                    logger.info("OAuth token expired. Refreshing...")
+                    try:
+                        self.creds.refresh(Request())
+                        
+                        # Save refreshed token back to file
+                        with open('token.json', 'w') as token:
+                            token.write(self.creds.to_json())
+                        
+                        logger.info(f"✓ Token refreshed successfully. New expiry: {self.creds.expiry}")
+                    except Exception as refresh_error:
+                        logger.error(f"Failed to refresh token: {refresh_error}")
+                        logger.warning("Calendar service will not function until token is manually refreshed.")
+                        self._credentials_valid = False
+                        return
+                
                 logger.info("Using OAuth2 User Credentials (token.json).")
             
             # 2. Start Service Account Logic
