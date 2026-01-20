@@ -69,20 +69,7 @@ async def startup_event():
     # TEMPORARILY DISABLED: asyncio event loop conflict
     # TODO: Run migrations manually with: alembic upgrade head
     logger.info("Skipping automatic migrations (run manually: alembic upgrade head)")
-    # try:
-    #     logger.info("Running database migrations...")
-    #     if os.path.exists("alembic.ini"):
-    #         alembic_cfg = Config("alembic.ini")
-    #         # Run upgrade head in a separate thread to avoid asyncio loop conflict
-    #         # because env.py calls asyncio.run()
-    #         import asyncio
-    #         await asyncio.to_thread(command.upgrade, alembic_cfg, "head")
-    #         logger.info("Database migrations completed successfully!")
-    #     else:
-    #         logger.warning("alembic.ini not found! Skipping migrations.")
-    # except Exception as e:
-    #     logger.error(f"Migration failed: {e}")
-    #     # Continue startup
+
     
     logger.info(f"API_V1_STR: {settings.API_V1_STR}")
     logger.info(f"CORS_ORIGINS: {cors_origins}")

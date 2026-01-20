@@ -267,12 +267,12 @@ class Settings(BaseSettings):
 
     # Vexa (Meeting Bot)
     VEXA_API_URL: str = Field(
-        default="http://localhost:3000",
-        description="URL for Vexa Meeting Bot API (use cloud service or self-hosted)"
+        default="https://api.cloud.vexa.ai",
+        description="URL for Vexa Meeting Bot API"
     )
     VEXA_API_KEY: str = Field(
-        default="vexa_secret_key",
-        description="API Key for Vexa authentication"
+        default="",
+        description="API Key from vexa.ai/dashboard/api-keys"
     )
     
     @property

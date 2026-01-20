@@ -4,12 +4,16 @@ import asyncio
 import json
 import logging
 from typing import Optional, Dict, Any, List
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.models.models import Meeting, Minutes, MinutesStatus
+from app.models.models import Meeting, Minutes, MinutesStatus, ActionItem, ActionItemStatus
 from app.services.document_synthesizer import DocumentSynthesizer
 from app.services.groq_llm_service import get_llm_service
 from datetime import datetime
+import os
+import uuid
+import aiofiles
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +26,15 @@ class VexaService:
         self.api_url = settings.VEXA_API_URL
         self.api_key = settings.VEXA_API_KEY
         self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "X-API-Key": self.api_key,
+            "Authorization": f"Bearer {self.api_key}", 
             "Content-Type": "application/json"
         }
 
-    async def join_meeting(self, meeting_url: str, meeting_id: str, bot_name: str = "Secretariat Bot") -> bool:
+    async def join_meeting(self, meeting_url: str, meeting_id: str, bot_name: str = "Secretariat Bot") -> Optional[Dict[str, str]]:
         """
         Dispatch a bot to join a meeting.
+        Returns dict with session_id, platform, and native_meeting_id if successful.
         """
         url = f"{self.api_url}/bots"
         
@@ -37,19 +43,22 @@ class VexaService:
             platform = "google_meet"
             # Extract meeting code from URL (e.g., abc-defg-hij)
             native_meeting_id = meeting_url.split("/")[-1].split("?")[0]
-        elif "teams.microsoft.com" in meeting_url:
+        elif "teams.microsoft.com" in meeting_url or "teams.live.com" in meeting_url:
             platform = "teams"
-            # For Teams, we'd need the numeric ID and passcode
-            # This is a simplified version
-            native_meeting_id = meeting_url
+            # For Teams, extract numeric ID from URL
+            # Format: https://teams.live.com/meet/9366473044740?p=xxx
+            native_meeting_id = meeting_url.split("/meet/")[-1].split("?")[0]
         else:
             logger.warning(f"Unsupported meeting platform: {meeting_url}")
-            return False
+            return None
             
         payload = {
             "platform": platform,
             "native_meeting_id": native_meeting_id,
-            "bot_name": bot_name
+            "bot_name": bot_name,
+            "metadata": {
+                "meeting_id": meeting_id
+            }
         }
         
         try:
@@ -57,100 +66,211 @@ class VexaService:
                 async with session.post(url, json=payload, headers=self.headers) as response:
                     if response.status in [200, 201]:
                         data = await response.json()
-                        logger.info(f"Vexa Bot dispatched to {meeting_url}. Session ID: {data.get('sessionId')}")
-                        return True
+                        session_id = data.get('sessionId') or data.get('id')
+                        logger.info(f"Vexa Bot dispatched to {meeting_url}. Session ID: {session_id}")
+                        # Return all the info needed to fetch transcript later
+                        return {
+                            "session_id": session_id,
+                            "platform": platform,
+                            "native_meeting_id": native_meeting_id
+                        }
                     else:
                         text = await response.text()
                         logger.error(f"Failed to dispatch Vexa bot: {response.status} - {text}")
-                        return False
+                        return None
         except Exception as e:
             logger.error(f"Error connecting to Vexa API: {e}")
-            return False
+            return None
 
-    async def check_active_sessions(self):
+    async def get_transcript(self, platform: str, native_meeting_id: str) -> Optional[Dict[str, Any]]:
         """
-        Check status of active bots and retrieve transcripts if finished.
-        This could be run periodically by continuous monitor.
+        Fetch transcript using platform and native meeting ID.
+        Returns dict with transcript text and status if ready, None if not ready or error.
         """
-        url = f"{self.api_url}/v1/sessions"
+        transcript_url = f"{self.api_url}/transcripts/{platform}/{native_meeting_id}"
+        logger.debug(f"Fetching transcript from Vexa API: {transcript_url}")
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=self.headers) as response:
-                    if response.status == 200:
-                        sessions = await response.json()
-                        for sess in sessions:
-                            if sess.get('status') == 'completed':
-                                await self._process_completed_session(sess)
-        except Exception as e:
-            logger.error(f"Error checking Vexa sessions: {e}")
-
-    async def _process_completed_session(self, session_data: Dict[str, Any]):
-        """
-        Retrieve final transcript and save as minutes.
-        """
-        session_id = session_data.get('sessionId')
-        meeting_db_id = session_data.get('metadata', {}).get('meeting_id')
-        
-        if not meeting_db_id:
-            logger.warning(f"Completed session {session_id} has no meeting_id metadata.")
-            return
-
-        # Fetch Transcript
-        transcript_url = f"{self.api_url}/v1/sessions/{session_id}/transcript"
-        transcript_text = ""
-        
-        try:
-            async with aiohttp.ClientSession() as sess:
-                async with sess.get(transcript_url, headers=self.headers) as resp:
+                async with session.get(transcript_url, headers=self.headers) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        # Assuming Vexa returns list of segments or full text field
-                        # Simplify: just dumping JSON for now or text field if exists
-                        transcript_text = data.get('text', json.dumps(data)) 
+                        
+                        # Extract meeting status
+                        status = data.get('status', 'unknown')
+                        end_time = data.get('end_time')
+                        is_completed = end_time is not None or status in ['completed', 'finished', 'ended']
+                        
+                        # Try to extract transcript text from various possible formats
+                        transcript_text = None
+                        
+                        # Format 1: Direct text field
+                        if 'text' in data and data['text']:
+                            transcript_text = data['text']
+                        # Format 2: Transcript field
+                        elif 'transcript' in data and data['transcript']:
+                            transcript_text = data['transcript']
+                        # Format 3: Segments array (Vexa's actual format)
+                        elif 'segments' in data and isinstance(data['segments'], list):
+                            segments = data['segments']
+                            if segments:
+                                # Extract text from each segment with speaker identification
+                                segment_texts = []
+                                current_speaker = None
+                                
+                                for segment in segments:
+                                    if isinstance(segment, dict):
+                                        text = segment.get('text', '').strip()
+                                        if not text:
+                                            continue
+                                        
+                                        # Extract speaker information
+                                        # Vexa can provide: speaker, speaker_id, speaker_name, name
+                                        speaker = (
+                                            segment.get('speaker_name') or 
+                                            segment.get('name') or 
+                                            segment.get('speaker') or 
+                                            segment.get('speaker_id')
+                                        )
+                                        
+                                        # Format with speaker label if available and different from previous
+                                        if speaker:
+                                            # Only add speaker label when speaker changes
+                                            if speaker != current_speaker:
+                                                segment_texts.append(f"\n[{speaker}]: {text}")
+                                                current_speaker = speaker
+                                            else:
+                                                segment_texts.append(text)
+                                        else:
+                                            segment_texts.append(text)
+                                    elif isinstance(segment, str):
+                                        segment_texts.append(segment)
+                                
+                                if segment_texts:
+                                    transcript_text = " ".join(segment_texts)
+                                else:
+                                    # Empty segments array - no speech recorded
+                                    logger.info(f"Vexa returned empty segments array for {platform}/{native_meeting_id}")
+                                    return None
+                            else:
+                                # Empty segments array
+                                logger.info(f"Vexa returned empty segments array for {platform}/{native_meeting_id}")
+                                return None
+                        
+                        # If we still don't have text, the meeting might not have any content
+                        if not transcript_text or not transcript_text.strip():
+                            logger.info(f"No transcript content available for {platform}/{native_meeting_id}")
+                            return None
+                        
+                        logger.info(f"✓ Vexa transcript retrieved for {platform}/{native_meeting_id} ({len(transcript_text)} chars, status: {status}, completed: {is_completed})")
+                        
+                        return {
+                            "text": transcript_text,
+                            "status": status,
+                            "is_completed": is_completed,
+                            "end_time": end_time
+                        }
+                    elif resp.status == 404:
+                         # Meeting not found or transcript not ready yet
+                         logger.debug(f"Transcript not ready yet for {platform}/{native_meeting_id} (404)")
+                         return None
                     else:
-                        logger.error(f"Failed to get transcript for {session_id}")
-                        return
+                        error_text = await resp.text()
+                        logger.warning(f"✗ Vexa transcript fetch failed for {platform}/{native_meeting_id}: HTTP {resp.status} - {error_text[:100]}")
+                        return None
         except Exception as e:
-            logger.error(f"Error fetching transcript: {e}")
-            return
+            logger.error(f"✗ Error fetching transcript {platform}/{native_meeting_id}: {e}")
+            return None
 
-        # Save to DB
-        async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
-            stmt = select(Meeting).where(Meeting.id == meeting_db_id)
-            result = await db.execute(stmt)
-            meeting = result.scalar_one_or_none()
-            
-            if meeting:
-                logger.info(f"Saving Vexa transcript for {meeting.title}")
-                meeting.transcript = transcript_text
-                
-                # Auto-generate minutes using Synthesizer (re-using logic from DriveService basically)
-                # For MVP, just saving transcript is huge win.
-                # If we want minutes:
-                try:
-                     synthesizer = DocumentSynthesizer(llm_client=get_llm_service())
-                     minutes_ctx = {
-                         "meeting_title": meeting.title,
-                         "meeting_date": str(meeting.scheduled_at),
-                         "attendees_list": "See transcript (Vexa)"
-                     }
-                     # Blocking call in thread
-                     res = await asyncio.to_thread(synthesizer.synthesize_minutes, transcript_text, minutes_ctx)
+    async def process_transcript_text(self, meeting: Meeting, transcript_text: str, db: AsyncSession):
+        """
+        Generate minutes from transcript text and save to DB.
+        """
+        try:
+             logger.info(f"Generating minutes for {meeting.title}...")
+             
+             # Save transcript to file (for Download button)
+             file_name = f"transcript_{meeting.id}.txt"
+             upload_dir = os.path.join(settings.UPLOAD_DIR, "transcripts")
+             os.makedirs(upload_dir, exist_ok=True)
+             file_path = os.path.join(upload_dir, file_name)
+             
+             async with aiofiles.open(file_path, 'w') as f:
+                 await f.write(transcript_text)
+                 
+             logger.info(f"Transcript saved to disk: {file_path}")
+
+             # Save transcript to meeting
+             meeting.transcript = transcript_text
+             
+             # Generate Minutes
+             synthesizer = DocumentSynthesizer(llm_client=get_llm_service())
+             minutes_ctx = {
+                 "meeting_title": meeting.title,
+                 "meeting_date": str(meeting.scheduled_at),
+                 "attendees_list": "See transcript (Vexa)"
+             }
+             
+             # Blocking call in thread
+             res = await asyncio.to_thread(synthesizer.synthesize_minutes, transcript_text, minutes_ctx)
+             
+             new_minutes = Minutes(
+                meeting_id=meeting.id,
+                content=res['content'],
+                status=MinutesStatus.DRAFT
+             )
+             db.add(new_minutes)
+             meeting.minutes = new_minutes
+             logger.info(f"Generated Minutes for {meeting.title} from Vexa")
+
+             # --- NEW: Extract Action Items Automatically ---
+             try:
+                 logger.info("Extracting action items...")
+                 pillar_val = meeting.twg.pillar.value if meeting.twg else "energy"
+                 
+                 # Run extraction in thread
+                 actions_list = await asyncio.to_thread(
+                     synthesizer.extract_action_items,
+                     res['content'],
+                     pillar_val
+                 )
+                 
+                 action_count = 0
+                 for action in actions_list:
+                     desc = action.get("description")
+                     if not desc: continue
                      
-                     new_minutes = Minutes(
-                        meeting_id=meeting.id,
-                        content=res['content'],
-                        status=MinutesStatus.DRAFT
+                     # Check for duplications? Simple check based on description + meeting
+                     # For now, just insert.
+                     
+                     # Parse Due Date
+                     due_date = None
+                     if action.get("due_date"):
+                         try:
+                             from datetime import datetime
+                             due_date = datetime.strptime(action["due_date"], "%Y-%m-%d").date()
+                         except:
+                             pass
+                     
+                     new_action = ActionItem(
+                         meeting_id=meeting.id,
+                         description=desc,
+                         owner=action.get("owner", "TBD"),
+                         due_date=due_date,
+                         status=ActionItemStatus.PENDING,
+                         # Assign to TWG if possible? ActionItem usually linked to Meeting which is linked to TWG.
                      )
-                     db.add(new_minutes)
-                     meeting.minutes = new_minutes
-                     logger.info(f"Generated Minutes for {meeting.title} from Vexa")
-                except Exception as synth_err:
-                    logger.error(f"Failed to synthesize minutes from Vexa transcript: {synth_err}")
+                     db.add(new_action)
+                     action_count += 1
+                 
+                 if action_count > 0:
+                     logger.info(f"✓ Automatically extracted {action_count} action items from Vexa minutes.")
+             except Exception as ae:
+                 logger.error(f"Failed to auto-extract action items: {ae}")
+             # -----------------------------------------------
 
-                await db.commit()
-            else:
-                logger.warning(f"Meeting DB ID {meeting_db_id} not found for Vexa session.")
+             return file_path # Return path for the Monitor to update Document
+        except Exception as e:
+            logger.error(f"Failed to process transcript for {meeting.title}: {e}")
+            return False
 
 vexa_service = VexaService()

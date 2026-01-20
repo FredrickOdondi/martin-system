@@ -255,10 +255,29 @@ async def download_document(
     if not db_doc:
         raise HTTPException(status_code=404, detail="Document not found")
         
+    # Permission check
     if db_doc.twg_id and not has_twg_access(current_user, db_doc.twg_id):
+        logger.warning(f"Access denied for user {current_user.email} (role: {current_user.role}) to doc {doc_id} (TWG: {db_doc.twg_id})")
         raise HTTPException(status_code=403, detail="Access denied")
         
+    # Handle Transcript Placeholders specifically
+    if db_doc.document_type == "transcript_placeholder":
+        # Create a dynamic status file instead of looking for file on disk
+        status_text = f" Transcript Processing Status\n" \
+                      f"===========================\n\n" \
+                      f"Meeting: {db_doc.title.replace('Vexa Recording - ', '')}\n" \
+                      f"Status: Recording/Processing in progress\n" \
+                      f"Session ID: {db_doc.metadata_json.get('vexa_session_id', 'Unknown')}\n\n" \
+                      f"The audio is currently being transcribed. Once the meeting ends and processing is complete,\n" \
+                      f"this file will be replaced with the final transcript and minutes will be generated.\n\n" \
+                      f"Please come back later."
+        
+        return Response(content=status_text, media_type="text/plain", headers={
+            "Content-Disposition": f"attachment; filename={db_doc.file_name or 'transcript_status.txt'}"
+        })
+
     if not os.path.exists(db_doc.file_path):
+        logger.error(f"File missing on disk: {db_doc.file_path} for doc {doc_id}")
         raise HTTPException(status_code=404, detail="File on disk not found")
         
     return FileResponse(path=db_doc.file_path, filename=db_doc.file_name, media_type=db_doc.file_type)

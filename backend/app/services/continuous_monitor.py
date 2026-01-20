@@ -47,10 +47,10 @@ class ContinuousMonitor:
             
         logger.info("Starting Continuous Monitor...")
         
-        # 1. Temporal Conflict Scan (Every 5 mins)
+        # 1. Temporal Conflict Scan (Every 30 mins)
         self.scheduler.add_job(
             self.scan_scheduling_conflicts,
-            trigger=IntervalTrigger(minutes=5),
+            trigger=IntervalTrigger(minutes=30),
             id="scan_scheduling",
             replace_existing=True
         )
@@ -87,6 +87,14 @@ class ContinuousMonitor:
             id="vexa_dispatch",
             replace_existing=True
         )
+
+        # 6. Check Pending Transcripts (Every 2 min)
+        self.scheduler.add_job(
+            self.check_pending_transcripts,
+            trigger=IntervalTrigger(minutes=2),
+            id="vexa_transcript_check",
+            replace_existing=True
+        )
         
         self.scheduler.start()
         self.is_running = True
@@ -104,10 +112,8 @@ class ContinuousMonitor:
         Check for meetings starting in < 5 mins and dispatch Vexa bot.
         Also checks for completed sessions to retrieve transcripts.
         """
-        # 1. Check for finished sessions
-        await vexa_service.check_active_sessions()
 
-        # 2. Dispatch to upcoming meetings
+        # 1. Dispatch to upcoming meetings
         logger.info("Checking for upcoming meetings to record...")
         async with get_db_session_context() as db:
             try:
@@ -121,34 +127,202 @@ class ContinuousMonitor:
                         Meeting.scheduled_at >= now,
                         Meeting.scheduled_at <= ten_mins_from_now,
                         # Check if we already have a transcript or if cancelled
-                        Meeting.transcript.is_(None), 
+                        or_(Meeting.transcript.is_(None), Meeting.transcript == ""), 
                         Meeting.status != 'cancelled'
                     )
-                )
+                ).options(selectinload(Meeting.participants))
                 result = await db.execute(stmt)
                 meetings = result.scalars().all()
                 
                 for meeting in meetings:
-                     # Simple deduping: 
-                     # Ideally we check if we already dispatched. 
-                     # Vexa allows idempotent joins usually, or we can check a metadata flag on Meeting.
-                     # For MVP, we'll try to join. VexaService should handle duplicates or we add a flag.
+                     # Check if we already dispatched a bot to this meeting
+                     # by looking for an existing placeholder document
+                     existing_placeholder_stmt = select(Document).where(
+                         and_(
+                             Document.meeting_id == meeting.id,
+                             Document.document_type == "transcript_placeholder"
+                         )
+                     )
+                     existing_placeholder_result = await db.execute(existing_placeholder_stmt)
+                     existing_placeholder = existing_placeholder_result.scalar_one_or_none()
                      
-                     if not meeting.meeting_link:
+                     if existing_placeholder:
+                         # Bot already dispatched, skip
+                         logger.debug(f"Bot already dispatched to meeting: {meeting.title} (Session: {existing_placeholder.metadata_json.get('vexa_session_id')})")
+                         continue
+                     
+                     # Check for Google Meet link in 'location' OR 'video_link'
+                     meet_url = None
+                     if meeting.location and "meet.google.com" in meeting.location:
+                         meet_url = meeting.location
+                     elif meeting.video_link and "meet.google.com" in meeting.video_link:
+                         meet_url = meeting.video_link
+                     
+                     if not meet_url:
                          continue
                          
                      logger.info(f"Dispatching Vexa to meeting: {meeting.title}")
-                     success = await vexa_service.join_meeting(
-                         meeting_url=meeting.meeting_link,
+                     bot_info = await vexa_service.join_meeting(
+                         meeting_url=meet_url,
                          meeting_id=str(meeting.id),
-                         bot_name="Martin Secretariat"
+                         bot_name="Martin Ai Meeting Notetaker"
                      )
                      
-                     if success:
-                         logger.info(f"Successfully dispatched bot to {meeting.title}")
-                         # Mark as dispatched? For now relying on loop.
+                     if bot_info:
+                         session_id = bot_info["session_id"]
+                         platform = bot_info["platform"]
+                         native_meeting_id = bot_info["native_meeting_id"]
+                         
+                         logger.info(f"Successfully dispatched bot to {meeting.title}. Session: {session_id}")
+                         # Create Placeholder Document to track session status
+                         
+                         # Hack to get a valid user ID for 'uploaded_by' without triggering lazy loads
+                         # Just fetch the first system user.
+                         res_u = await db.execute(select(User.id).limit(1))
+                         uploader_id = res_u.scalars().first()
+                         
+                         if uploader_id:
+                             # Create Placeholder Document with platform and native_meeting_id
+                             doc = Document(
+                                 twg_id=meeting.twg_id,
+                                 meeting_id=meeting.id,
+                                 file_name=f"Vexa Recording - {meeting.title}",
+                                 file_path="vexa_pending",
+                                 file_type="transcript_placeholder",
+                                 document_type="transcript_placeholder",
+                                 uploaded_by_id=uploader_id,
+                                 metadata_json={
+                                     "vexa_session_id": session_id,
+                                     "platform": platform,
+                                     "native_meeting_id": native_meeting_id,
+                                     "status": "processing"
+                                 }
+                             )
+                             db.add(doc)
+                             logger.info(f"Created placeholder document for Vexa session {session_id}")
+                             await db.commit()
+                     else:
+                         logger.warning(f"Vexa join failed for {meeting.title}")
             except Exception as e:
                 logger.error(f"Error in Vexa dispatch: {e}")
+
+    async def check_pending_transcripts(self):
+        """
+        Poll Vexa for transcripts of ongoing/completed sessions.
+        """
+        logger.info("Checking pending Vexa transcripts...")
+        async with get_db_session_context() as db:
+            try:
+                # Find placeholder documents
+                stmt = select(Document).where(Document.document_type == "transcript_placeholder")
+                result = await db.execute(stmt)
+                docs = result.scalars().all()
+                
+                for doc in docs:
+                    session_id = doc.metadata_json.get("vexa_session_id")
+                    platform = doc.metadata_json.get("platform")
+                    native_meeting_id = doc.metadata_json.get("native_meeting_id")
+                    
+                    if not platform or not native_meeting_id:
+                        logger.warning(f"Document {doc.id} missing platform or native_meeting_id, skipping")
+                        continue
+                        
+                    logger.info(f"Polling Vexa for {platform}/{native_meeting_id} (Session: {session_id}, Meeting: {doc.meeting_id})")
+                    transcript_data = await vexa_service.get_transcript(platform, native_meeting_id)
+                    
+                    if transcript_data:
+                        transcript_text = transcript_data.get("text")
+                        is_completed = transcript_data.get("is_completed", False)
+                        status = transcript_data.get("status", "unknown")
+                        
+                        logger.info(f"✓ Transcript ready for session {session_id}! Length: {len(transcript_text)} chars, Status: {status}, Completed: {is_completed}")
+                        
+                        # IDLE TIMEOUT LOGIC
+                        # Check if transcript has stopped growing for > 5 minutes
+                        from datetime import datetime, timedelta, UTC
+                        
+                        current_length = len(transcript_text)
+                        last_length = doc.metadata_json.get("last_transcript_length", 0)
+                        last_check_time_str = doc.metadata_json.get("last_check_time")
+                        
+                        should_force_complete = False
+                        
+                        if current_length != last_length:
+                            # Transcript is growing, update state
+                            doc.metadata_json["last_transcript_length"] = current_length
+                            doc.metadata_json["last_check_time"] = datetime.now(UTC).isoformat()
+                            # Commit validation updates
+                            await db.commit()
+                        elif last_check_time_str:
+                            # Length hasn't changed, check how long it's been
+                            try:
+                                last_check_time = datetime.fromisoformat(last_check_time_str)
+                                time_diff = datetime.now(UTC) - last_check_time
+                                
+                                # If idle for more than 5 minutes (300 seconds) AND has content
+                                if time_diff.total_seconds() > 300 and current_length > 0:
+                                    logger.warning(f"⚠️ Session {session_id} idle for {int(time_diff.total_seconds())}s. Forcing completion.")
+                                    should_force_complete = True
+                            except Exception as e:
+                                logger.error(f"Error parsing date: {e}")
+                        else:
+                            # First check, init metadata
+                            doc.metadata_json["last_transcript_length"] = current_length
+                            doc.metadata_json["last_check_time"] = datetime.now(UTC).isoformat()
+                            await db.commit()
+
+                        # CRITICAL: Only process transcript if meeting has ended OR timed out
+                        if not is_completed and not should_force_complete:
+                            logger.info(f"⏳ Meeting still active (status: {status}). Waiting for meeting to end before generating minutes.")
+                            continue
+                        
+                        if should_force_complete:
+                            logger.info(f"✓ Forcing minutes generation due to idle timeout ({current_length} chars)")
+                        
+                        # Process it
+                        # Need to fetch Meeting object
+                        stmt_m = select(Meeting).where(Meeting.id == doc.meeting_id)
+                        res_m = await db.execute(stmt_m)
+                        meeting = res_m.scalar_one_or_none()
+                        
+                        if meeting:
+                            logger.info(f"Processing transcript for completed meeting: {meeting.title}")
+                            file_path_or_success = await vexa_service.process_transcript_text(meeting, transcript_text, db)
+                            if file_path_or_success:
+                                # Update Document to be the actual transcript
+                                doc.document_type = "transcript"
+                                doc.file_type = "text/plain" 
+                                # Use the absolute path or relative?
+                                # Usually backend stores relative to UPLOAD_DIR or full path
+                                # vexa_service returns full path.
+                                # Let's store full path for now, or relative to be safe?
+                                # Project uses 'uploads/...'
+                                
+                                # Handle path string
+                                saved_path = str(file_path_or_success)
+                                if "uploads" in saved_path:
+                                    # Try to make it relative for portability if possible, 
+                                    # but absolute key is fine for local.
+                                    pass
+                                
+                                doc.file_path = saved_path
+                                doc.metadata_json["status"] = "completed"
+                                logger.info(f"✓ Transcript processed and saved to {saved_path}")
+                                
+                                # CRITICAL: Commit changes to database
+                                await db.commit()
+                                logger.info(f"✓ Minutes and transcript committed to database for meeting: {meeting.title}")
+                            else:
+                                logger.error(f"✗ Failed to process transcript text for session {session_id}")
+                        else:
+                            logger.error(f"✗ Meeting {doc.meeting_id} not found for document {doc.id}")
+                            await db.delete(doc) # Cleanup orphan
+                            await db.commit()
+                    else:
+                        # Transcript not ready yet
+                        logger.debug(f"Transcript not yet available for session {session_id}")
+            except Exception as e:
+                logger.error(f"Error checking pending transcripts: {e}")
 
     async def scan_scheduling_conflicts(self):
         """
@@ -423,10 +597,8 @@ class ContinuousMonitor:
                 logger.error(f"Error in policy scan: {e}")
 
     async def check_twg_health(self):
-        """
-        Check for stalled TWGs (no activity > 48h).
-        Simulated metric for now.
-        """
+        # Check for stalled TWGs (no activity > 48h).
+        # Simulated metric for now.
         logger.info("Running check_twg_health...")
         async with get_db_session_context() as db:
             try:

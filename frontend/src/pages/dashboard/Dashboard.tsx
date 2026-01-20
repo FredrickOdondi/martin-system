@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { getDashboardStats, getTimeline, exportDashboardReport, DashboardStats, TimelineItem } from '../../services/dashboardService';
+import LiveTimeline from '../../components/dashboard/LiveTimeline';
 
 export default function Dashboard() {
     const navigate = useNavigate();
@@ -310,54 +311,8 @@ export default function Dashboard() {
 
                 {/* Right Column: Timeline & Action Center (Span 1) */}
                 <div className="flex flex-col gap-8">
-                    {/* Upcoming Deadlines */}
-                    <div className="bg-white dark:bg-[#1a202c] rounded-xl border border-[#e7ebf3] dark:border-[#2d3748] shadow-sm p-6 flex-1">
-                        <div className="flex items-center justify-between mb-6">
-                            <h3 className="text-lg font-bold text-[#0d121b] dark:text-white">Live Timeline</h3>
-                            <span className="material-symbols-outlined text-[#4c669a]">schedule</span>
-                        </div>
-                        <div className="space-y-6 relative">
-                            {/* Vertical line */}
-                            <div className="absolute left-[27px] top-4 bottom-4 w-0.5 bg-[#e7ebf3] dark:bg-[#2d3748] -z-0"></div>
-
-                            {timeline.length > 0 ? timeline.slice(0, 5).map((item, index) => {
-                                const date = new Date(item.date);
-                                const month = date.toLocaleString('en-US', { month: 'short' });
-                                const day = date.getDate();
-
-                                return (
-                                    <div key={index} className="flex gap-4 relative z-10">
-                                        <div className="flex flex-col items-center gap-1 w-14 shrink-0 bg-white dark:bg-[#1a202c]">
-                                            <span className={`text-xs font-bold uppercase ${item.status === 'critical' ? 'text-red-500' : 'text-primary'}`}>{month}</span>
-                                            <span className="text-xl font-black text-[#0d121b] dark:text-white">{day}</span>
-                                        </div>
-                                        <div className={`pb-6 ${index !== 4 ? 'border-b border-[#f0f2f5] dark:border-[#2d3748]' : ''} w-full`}>
-                                            <h4 className="font-bold text-[#0d121b] dark:text-white text-sm">{item.title}</h4>
-                                            <p className="text-xs text-[#4c669a] dark:text-[#a0aec0] mt-1">{item.twg}</p>
-                                            <div className="mt-2 flex items-center gap-2">
-                                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-medium ${item.status === 'critical'
-                                                    ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                                                    : 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
-                                                    }`}>
-                                                    {item.status.toUpperCase()}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                );
-                            }) : (
-                                <div className="text-center py-8">
-                                    <p className="text-[#4c669a] text-sm italic">No upcoming events scheduled.</p>
-                                </div>
-                            )}
-                        </div>
-                        <button
-                            onClick={() => navigate('/schedule')}
-                            className="w-full mt-6 py-2 text-sm text-[#0d121b] dark:text-[#a0aec0] font-medium border border-[#e7ebf3] dark:border-[#2d3748] rounded-lg hover:bg-gray-50 dark:hover:bg-[#2d3748] transition-colors"
-                        >
-                            View All Events
-                        </button>
-                    </div>
+                    {/* Live Timeline */}
+                    <LiveTimeline items={timeline} />
 
                     {/* Action Center */}
                     <div className="bg-primary/5 dark:bg-primary/10 rounded-xl border border-primary/20 p-6">

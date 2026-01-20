@@ -17,7 +17,9 @@ export default function MeetingSidebar({ meeting }: MeetingSidebarProps) {
     }
 
     const formatDate = (date: string) => {
-        return new Date(date).toLocaleDateString('en-US', {
+        // Ensure date is treated as UTC if it doesn't have timezone info
+        const dateStr = date.endsWith('Z') ? date : `${date}Z`
+        return new Date(dateStr).toLocaleDateString('en-US', {
             month: 'long',
             day: 'numeric',
             year: 'numeric'
@@ -25,7 +27,9 @@ export default function MeetingSidebar({ meeting }: MeetingSidebarProps) {
     }
 
     const formatTime = (date: string) => {
-        return new Date(date).toLocaleTimeString('en-US', {
+        // Ensure date is treated as UTC if it doesn't have timezone info
+        const dateStr = date.endsWith('Z') ? date : `${date}Z`
+        return new Date(dateStr).toLocaleTimeString('en-US', {
             hour: '2-digit',
             minute: '2-digit'
         })

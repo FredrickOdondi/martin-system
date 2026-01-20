@@ -10,7 +10,7 @@ from app.api.deps import get_current_user
 from app.models.models import User, Conflict, ConflictType, Project, ProjectStatus, ConflictStatus, ConflictSeverity
 from pydantic import BaseModel
 
-router = APIRouter()
+router = APIRouter(prefix="/conflicts", tags=["conflicts"])
 
 # --- Schemas ---
 
