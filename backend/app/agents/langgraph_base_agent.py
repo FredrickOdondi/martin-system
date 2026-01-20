@@ -584,6 +584,13 @@ class LangGraphBaseAgent:
                     import inspect
                     import asyncio
                     
+                    # AUTO-INJECTION: Inject twg_id if tool accepts it and agent is scoped
+                    sig = inspect.signature(func)
+                    if "twg_id" in sig.parameters:
+                        if self.twg_id and "twg_id" not in tool_args:
+                            logger.info(f"[{self.agent_id}] Auto-injecting twg_id={self.twg_id} into {tool_name}")
+                            tool_args["twg_id"] = self.twg_id
+                    
                     if inspect.iscoroutinefunction(func):
                         # Async function - await directly
                         result = await func(**tool_args)

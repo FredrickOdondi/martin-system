@@ -2,464 +2,303 @@
 Negotiation Service
 
 Facilitates automated negotiation between TWG agents to resolve conflicts.
-Handles consensus-building, compromise proposals, and escalation.
+Refactored to support:
+- Database integration (Conflict model)
+- Counter-proposal logic
+- Multi-round debate
+- Context-aware resource trading
 """
 
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, UTC
 from loguru import logger
 from uuid import UUID
+import json
 
-from app.schemas.broadcast_messages import (
-    ConflictAlert,
-    NegotiationRequest,
-    create_negotiation_request
-)
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
+from app.models.models import Conflict, ConflictStatus, Meeting, User, TWG, MeetingParticipant
+from app.services.llm_service import get_llm_service
 
 class NegotiationService:
-    """Service for facilitating agent-to-agent negotiations"""
+    """
+    Orchestrates "True AI Multi-Agent Negotiation" (Debate Pattern).
+    
+    Instead of just voting on pre-defined options, this service facilitates 
+    a counter-proposal loop where agents can:
+    1. Reject proposals with specific reasons (constraints).
+    2. Offer conditional compromises ("I'll move if you give me the Main Hall").
+    """
 
-    def __init__(self, supervisor_llm: Optional[Any] = None):
-        """
-        Initialize negotiation service.
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.llm_service = get_llm_service()
 
-        Args:
-            supervisor_llm: LLM client for supervisor to facilitate negotiations
-        """
-        self.supervisor_llm = supervisor_llm
-        self._active_negotiations: Dict[UUID, NegotiationRequest] = {}
-        self._negotiation_history: List[NegotiationRequest] = []
-
-    def initiate_negotiation(
+    async def initiate_negotiation(
         self,
-        conflict: ConflictAlert,
-        agents: Dict[str, Any],
-        constraints: Optional[List[str]] = None,
-        max_rounds: int = 3
-    ) -> NegotiationRequest:
+        trigger_user_id: Optional[UUID],
+        topic: str,
+        participating_twg_ids: List[UUID],
+        context_data: Dict[str, Any]
+    ) -> Conflict:
         """
-        Initiate a negotiation to resolve a conflict.
-
-        Args:
-            conflict: The conflict to resolve
-            agents: Dictionary of agent instances
-            constraints: Non-negotiable constraints
-            max_rounds: Maximum negotiation rounds
-
-        Returns:
-            NegotiationRequest object tracking the negotiation
+        Start a new negotiation. Creates or updates a Conflict record.
         """
-        # Create negotiation request
-        negotiation = create_negotiation_request(
-            conflict_id=conflict.alert_id,
-            participating_agents=conflict.agents_involved,
-            issue=conflict.description,
-            positions={
-                agent_id: conflict.conflicting_positions[agent_id]
-                for agent_id in conflict.agents_involved
-            },
-            constraints=constraints or [],
-            success_criteria=[
-                "All agents agree on resolution",
-                "Resolution aligns with Summit objectives",
-                "No new conflicts introduced"
-            ],
-            max_rounds=max_rounds
+        # 1. Resolve TWG names
+        # We need names for the agents_involved list
+        stmt = select(TWG).where(TWG.id.in_(participating_twg_ids))
+        twgs = (await self.db.execute(stmt)).scalars().all()
+        agent_names = [twg.pillar.value for twg in twgs] # e.g. "energy_infrastructure"
+        
+        # 2. Check if active conflict exists for this topic?
+        # For now, always create a new one or use the one passed in context if available
+        conflict_id = context_data.get("conflict_id")
+        
+        if conflict_id:
+            stmt = select(Conflict).where(Conflict.id == UUID(conflict_id))
+            conflict = (await self.db.execute(stmt)).scalar_one_or_none()
+            if conflict:
+                # Reset status if needed
+                if conflict.status in [ConflictStatus.RESOLVED, ConflictStatus.DISMISSED]:
+                    conflict.status = ConflictStatus.NEGOTIATING
+                    conflict.resolution_log = (conflict.resolution_log or []) + [{
+                        "action": "reopened",
+                        "timestamp": datetime.utcnow().isoformat()
+                    }]
+                return conflict
+        
+        # Create new Conflict record if not found
+        import uuid
+        new_conflict = Conflict(
+            id=uuid.uuid4(),
+            conflict_type="schedule_clash", # default, can be updated
+            severity="medium",
+            description=topic,
+            agents_involved=agent_names,
+            conflicting_positions=context_data.get("positions", {}),
+            status=ConflictStatus.NEGOTIATING,
+            metadata_json={"twg_ids": [str(t.id) for t in twgs], **context_data}
         )
+        self.db.add(new_conflict)
+        await self.db.flush()
+        return new_conflict
 
-        self._active_negotiations[negotiation.negotiation_id] = negotiation
-
-        logger.info(
-            f"🤝 Initiated negotiation {negotiation.negotiation_id} "
-            f"between {', '.join(conflict.agents_involved)}"
-        )
-
-        return negotiation
-
-    def run_negotiation(
-        self,
-        negotiation_id: UUID,
-        agents: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def run_negotiation(self, conflict_id: UUID, max_rounds: int = 4) -> Dict[str, Any]:
         """
-        Run a negotiation round between agents.
-
-        Args:
-            negotiation_id: ID of the negotiation
-            agents: Dictionary of agent instances
-
-        Returns:
-            Dict with negotiation results
+        Run the multi-round negotiation loop.
         """
-        if negotiation_id not in self._active_negotiations:
-            raise ValueError(f"Negotiation {negotiation_id} not found")
-
-        negotiation = self._active_negotiations[negotiation_id]
-
-        if negotiation.status == "resolved":
-            return {
-                "status": "already_resolved",
-                "resolution": negotiation.proposals[-1] if negotiation.proposals else None
-            }
-
-        if negotiation.current_round >= negotiation.max_rounds:
-            return self._escalate_negotiation(negotiation, "max_rounds_exceeded")
-
-        # Run negotiation round
-        negotiation.current_round += 1
-        negotiation.status = "in_progress"
-
-        logger.info(
-            f"🔄 Negotiation round {negotiation.current_round}/{negotiation.max_rounds} "
-            f"for {negotiation.negotiation_id}"
-        )
-
-        # 1. Collect proposals from each agent
-        proposals = self._collect_proposals(negotiation, agents)
-
-        # 2. Analyze proposals for consensus
-        analysis = self._analyze_proposals(negotiation, proposals)
-
-        # 3. Determine outcome
-        if analysis["has_consensus"]:
-            # Consensus reached!
-            result = self._finalize_consensus(negotiation, analysis)
-            return result
-
-        elif negotiation.current_round >= negotiation.max_rounds:
-            # No consensus after max rounds - escalate
-            return self._escalate_negotiation(negotiation, "no_consensus")
-
-        else:
-            # Continue negotiation - supervisor provides guidance
-            guidance = self._provide_negotiation_guidance(negotiation, analysis)
-            return {
-                "status": "in_progress",
-                "round": negotiation.current_round,
-                "guidance": guidance,
-                "next_action": "continue"
-            }
-
-    def _collect_proposals(
-        self,
-        negotiation: NegotiationRequest,
-        agents: Dict[str, Any]
-    ) -> Dict[str, str]:
-        """Collect compromise proposals from each participating agent"""
-        proposals = {}
-
-        # Build negotiation context
-        context = self._build_negotiation_context(negotiation)
-
-        for agent_id in negotiation.participating_agents:
-            if agent_id not in agents:
-                logger.warning(f"Agent {agent_id} not available for negotiation")
-                continue
-
-            agent = agents[agent_id]
-
-            # Prompt agent for proposal
-            prompt = f"""{context}
-
-NEGOTIATION ROUND {negotiation.current_round}
-
-Please propose a solution or compromise that:
-1. Addresses the core issue
-2. Respects the constraints listed above
-3. Is acceptable to all parties
-4. Aligns with ECOWAS Summit objectives
-
-Your proposal (2-3 sentences):"""
-
-            try:
-                response = agent.chat(prompt)
-                proposals[agent_id] = response
-                logger.info(f"✓ Received proposal from {agent_id}")
-
-            except Exception as e:
-                logger.error(f"Failed to get proposal from {agent_id}: {e}")
-                proposals[agent_id] = "[No proposal submitted]"
-
-        # Store proposals
-        negotiation.proposals.append({
-            "round": negotiation.current_round,
-            "timestamp": datetime.now(UTC).isoformat(),
-            "proposals": proposals
-        })
-
-        return proposals
-
-    def _build_negotiation_context(self, negotiation: NegotiationRequest) -> str:
-        """Build context string for negotiation prompts"""
-        context = f"""NEGOTIATION IN PROGRESS
-
-ISSUE:
-{negotiation.issue}
-
-CURRENT POSITIONS:
-"""
-        for agent_id, position in negotiation.positions.items():
-            context += f"  • {agent_id.upper()}: {position}\n"
-
-        if negotiation.constraints:
-            context += "\nCONSTRAINTS (Non-negotiable):\n"
-            for i, constraint in enumerate(negotiation.constraints, 1):
-                context += f"{i}. {constraint}\n"
-
-        if negotiation.proposals:
-            context += f"\nPREVIOUS ROUNDS: {len(negotiation.proposals)}\n"
-            # Show last round's proposals
-            last_round = negotiation.proposals[-1]
-            context += "Last proposals:\n"
-            for agent_id, proposal in last_round["proposals"].items():
-                context += f"  • {agent_id}: {proposal[:100]}...\n"
-
-        return context
-
-    def _analyze_proposals(
-        self,
-        negotiation: NegotiationRequest,
-        proposals: Dict[str, str]
-    ) -> Dict[str, Any]:
-        """Analyze proposals to detect consensus or common ground"""
-        # Use supervisor LLM to analyze
-        if not self.supervisor_llm:
-            # Fallback: simple text similarity
-            return self._simple_consensus_check(proposals)
-
-        # LLM-based analysis
-        analysis_prompt = f"""Analyze these negotiation proposals for consensus:
-
-ISSUE: {negotiation.issue}
-
-PROPOSALS:
-"""
-        for agent_id, proposal in proposals.items():
-            analysis_prompt += f"\n{agent_id.upper()}: {proposal}\n"
-
-        analysis_prompt += """
-ANALYSIS REQUIRED:
-1. Is there consensus? (YES/NO)
-2. What is the common ground?
-3. What are remaining differences?
-4. Suggested compromise?
-
-Respond in this format:
-CONSENSUS: [YES/NO]
-COMMON_GROUND: [what they agree on]
-DIFFERENCES: [what they disagree on]
-COMPROMISE: [suggested middle ground]
-"""
-
-        try:
-            response = self.supervisor_llm.chat(analysis_prompt)
-
-            # Parse response
-            has_consensus = "CONSENSUS: YES" in response
-            common_ground = self._extract_field(response, "COMMON_GROUND")
-            differences = self._extract_field(response, "DIFFERENCES")
-            compromise = self._extract_field(response, "COMPROMISE")
-
-            return {
-                "has_consensus": has_consensus,
-                "common_ground": common_ground,
-                "differences": differences,
-                "suggested_compromise": compromise,
+        stmt = select(Conflict).where(Conflict.id == conflict_id)
+        conflict = (await self.db.execute(stmt)).scalar_one_or_none()
+        
+        if not conflict:
+            raise ValueError(f"Conflict {conflict_id} not found")
+        
+        # Load Context (Meetings, VIPs, etc.)
+        context_str = await self._build_deep_context(conflict)
+        
+        # Negotiation State
+        round_num = 1
+        history = []
+        
+        # Start the Loop
+        while round_num <= max_rounds:
+            logger.info(f"🔄 Negotiation Round {round_num} for {conflict_id}")
+            
+            # 1. Generate Proposals / Counter-Proposals
+            proposals = await self._generate_agent_proposals(conflict, context_str, history)
+            
+            # Log this round
+            round_entry = {
+                "round": round_num,
+                "timestamp": datetime.utcnow().isoformat(),
                 "proposals": proposals
             }
-
-        except Exception as e:
-            logger.error(f"LLM analysis failed: {e}")
-            return self._simple_consensus_check(proposals)
-
-    def _simple_consensus_check(
-        self,
-        proposals: Dict[str, str]
-    ) -> Dict[str, Any]:
-        """Simple text similarity check for consensus"""
-        # Convert all proposals to lowercase for comparison
-        normalized = {k: v.lower() for k, v in proposals.items()}
-
-        # Check if all proposals contain similar keywords
-        all_words = set()
-        for proposal in normalized.values():
-            words = set(proposal.split())
-            all_words.update(words)
-
-        # Calculate overlap
-        common_words = set()
-        for word in all_words:
-            if all(word in proposal for proposal in normalized.values()):
-                common_words.add(word)
-
-        # Simple heuristic: if >30% overlap, consider it consensus
-        overlap_ratio = len(common_words) / len(all_words) if all_words else 0
-        has_consensus = overlap_ratio > 0.3
-
-        return {
-            "has_consensus": has_consensus,
-            "common_ground": " ".join(list(common_words)[:10]),
-            "differences": "Automated analysis - human review recommended",
-            "suggested_compromise": "Continue discussion",
-            "proposals": proposals
-        }
-
-    def _extract_field(self, text: str, field_name: str) -> str:
-        """Extract a field from LLM response"""
-        for line in text.split('\n'):
-            if line.startswith(f"{field_name}:"):
-                return line.split(":", 1)[1].strip()
-        return "Not specified"
-
-    def _finalize_consensus(
-        self,
-        negotiation: NegotiationRequest,
-        analysis: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Finalize a successful negotiation"""
-        resolution = analysis.get("common_ground", "Agreement reached")
-
-        negotiation.status = "resolved"
-
-        logger.info(
-            f"✅ Negotiation {negotiation.negotiation_id} resolved! "
-            f"Consensus reached in {negotiation.current_round} rounds"
-        )
-
-        # Move to history
-        self._negotiation_history.append(negotiation)
-        del self._active_negotiations[negotiation.negotiation_id]
-
-        return {
-            "status": "resolved",
-            "resolution": resolution,
-            "rounds": negotiation.current_round,
-            "consensus_achieved": True,
-            "proposals": analysis["proposals"]
-        }
-
-    def _provide_negotiation_guidance(
-        self,
-        negotiation: NegotiationRequest,
-        analysis: Dict[str, Any]
-    ) -> str:
-        """Supervisor provides guidance to continue negotiation"""
-        guidance = f"""SUPERVISOR GUIDANCE - Round {negotiation.current_round}
-
-COMMON GROUND IDENTIFIED:
-{analysis.get('common_ground', 'Still seeking alignment')}
-
-REMAINING DIFFERENCES:
-{analysis.get('differences', 'Multiple positions')}
-
-SUGGESTED PATH FORWARD:
-{analysis.get('suggested_compromise', 'Continue exploring options')}
-
-Please refine your proposals in the next round, focusing on the common ground."""
-
-        return guidance
-
-    def _escalate_negotiation(
-        self,
-        negotiation: NegotiationRequest,
-        reason: str
-    ) -> Dict[str, Any]:
-        """Escalate negotiation to human intervention"""
-        negotiation.status = "escalated"
-
-        logger.warning(
-            f"⚠️  Negotiation {negotiation.negotiation_id} escalated: {reason}"
-        )
-
-        # Move to history
-        self._negotiation_history.append(negotiation)
-        del self._active_negotiations[negotiation.negotiation_id]
-
-        return {
-            "status": "escalated",
-            "reason": reason,
-            "rounds_attempted": negotiation.current_round,
-            "requires_human_intervention": True,
-            "summary": self._generate_escalation_summary(negotiation)
-        }
-
-    def _generate_escalation_summary(
-        self,
-        negotiation: NegotiationRequest
-    ) -> str:
-        """Generate summary for human review"""
-        summary = f"""NEGOTIATION ESCALATION SUMMARY
-
-Issue: {negotiation.issue}
-Participants: {', '.join(negotiation.participating_agents)}
-Rounds Attempted: {negotiation.current_round}
-
-POSITIONS:
-"""
-        for agent_id, position in negotiation.positions.items():
-            summary += f"  • {agent_id.upper()}: {position}\n"
-
-        if negotiation.proposals:
-            summary += f"\nFINAL PROPOSALS (Round {negotiation.current_round}):\n"
-            last_proposals = negotiation.proposals[-1]["proposals"]
-            for agent_id, proposal in last_proposals.items():
-                summary += f"  • {agent_id.upper()}: {proposal}\n"
-
-        summary += "\nRECOMMENDATION: Human coordination meeting required to resolve."
-
-        return summary
-
-    def get_active_negotiations(self) -> List[NegotiationRequest]:
-        """Get all active negotiations"""
-        return list(self._active_negotiations.values())
-
-    def get_negotiation_status(self, negotiation_id: UUID) -> Dict[str, Any]:
-        """Get status of a specific negotiation"""
-        if negotiation_id in self._active_negotiations:
-            negotiation = self._active_negotiations[negotiation_id]
-            return {
-                "negotiation_id": negotiation_id,
-                "status": negotiation.status,
-                "round": negotiation.current_round,
-                "max_rounds": negotiation.max_rounds,
-                "participants": negotiation.participating_agents,
-                "is_active": True
-            }
-
-        # Check history
-        for negotiation in self._negotiation_history:
-            if negotiation.negotiation_id == negotiation_id:
+            history.append(round_entry)
+            
+            # 2. Supervisor Analysis
+            analysis = await self._supervisor_analyze(conflict, context_str, history)
+            
+            if analysis.get("has_consensus"):
+                # Success!
+                await self._finalize_resolution(conflict, analysis, history)
                 return {
-                    "negotiation_id": negotiation_id,
-                    "status": negotiation.status,
-                    "round": negotiation.current_round,
-                    "participants": negotiation.participating_agents,
-                    "is_active": False
+                    "status": "CONSENSUS_REACHED",
+                    "summary": f"Resolved in {round_num} rounds.",
+                    "agreement_text": analysis.get("agreement_text"),
+                    "history": history
                 }
-
-        return {"error": "Negotiation not found"}
-
-    def get_negotiation_summary(self) -> Dict[str, Any]:
-        """Get summary of all negotiations"""
-        active = len(self._active_negotiations)
-        total = len(self._negotiation_history) + active
-
-        by_status = {}
-        for negotiation in self._negotiation_history:
-            status = negotiation.status
-            by_status[status] = by_status.get(status, 0) + 1
-
-        for negotiation in self._active_negotiations.values():
-            status = negotiation.status
-            by_status[status] = by_status.get(status, 0) + 1
-
+            
+            # 3. Guidance for next round (updated into context)
+            guidance = analysis.get("guidance", "Please try to find a middle ground.")
+            context_str += f"\n\n[SUPERVISOR GUIDANCE]: {guidance}"
+            
+            round_num += 1
+            
+        # If loop finishes without consensus
+        await self._escalate_conflict(conflict, history)
         return {
-            "total_negotiations": total,
-            "active_negotiations": active,
-            "completed_negotiations": len(self._negotiation_history),
-            "by_status": by_status,
-            "success_rate": (
-                by_status.get("resolved", 0) / total if total > 0 else 0
-            )
+            "status": "ESCALATED",
+            "summary": "Max rounds reached without consensus.",
+            "history": history
         }
+
+    async def _build_deep_context(self, conflict: Conflict) -> str:
+        """
+        Fetch DB Objects (Meetings, Profiles) to give the LLM 'Reasoning Power'.
+        """
+        context = f"CONFLICT: {conflict.description}\n"
+        
+        # Extract meeting IDs from metadata/positions
+        # Assuming positions format: {'agent_name': {'meeting_id': 'uuid'}}
+        # or metadata: {'meeting_ids': ['uuid', 'uuid']}
+        meeting_ids = []
+        
+        # Look in metadata first (more reliable if we populate it)
+        if conflict.metadata_json and "meeting_ids" in conflict.metadata_json:
+             meeting_ids = conflict.metadata_json["meeting_ids"]
+        
+        # Use positions as fallback
+        elif conflict.conflicting_positions:
+             for pos in conflict.conflicting_positions.values():
+                 if isinstance(pos, dict) and "meeting_id" in pos:
+                     meeting_ids.append(pos["meeting_id"])
+
+        if meeting_ids:
+            # Query DB
+            stmt = select(Meeting).where(
+                Meeting.id.in_([UUID(mid) for mid in meeting_ids])
+            ).options(
+                selectinload(Meeting.participants).selectinload(MeetingParticipant.user).selectinload(User.vip_profile),
+                selectinload(Meeting.twg)
+            )
+            res = (await self.db.execute(stmt)).scalars().all()
+            
+            context += "\nINVOLVED EVENTS:\n"
+            for m in res:
+                vip_names = [
+                    f"{p.user.full_name} ({p.user.vip_profile.title})" 
+                    for p in m.participants 
+                    if p.user and p.user.vip_profile
+                ]
+                context += f"- Event: {m.title}\n"
+                context += f"  Time: {m.scheduled_at}\n"
+                context += f"  Location: {m.location}\n"
+                context += f"  Owner: {m.twg.name} TWG\n"
+                context += f"  VIPs: {', '.join(vip_names) if vip_names else 'None'}\n"
+                context += f"  Duration: {m.duration_minutes} mins\n\n"
+                
+        return context
+
+    async def _generate_agent_proposals(self, conflict: Conflict, context: str, history: List[Dict]) -> Dict[str, str]:
+        """
+        Ask each agent for their move.
+        """
+        proposals = {}
+        
+        history_text = ""
+        if history:
+            history_text = "\nNEGOTIATION HISTORY:\n"
+            for h in history:
+                history_text += f"\nRound {h['round']}:\n"
+                for agent, prop in h['proposals'].items():
+                    history_text += f"  {agent}: {prop}\n"
+        
+        for agent_name in conflict.agents_involved:
+            # Persona Prompt
+            system_prompt = f"""You are the {agent_name} Agent for the ECOWAS Summit.
+You are in a high-stakes negotiation to resolve a conflict.
+
+Your Goal:
+1. Protect your key constraints (VIPs, deadlines).
+2. BE CREATIVE. Propose specific trades (e.g. "I move to 4pm if I get the big room").
+3. Seeking solution. Do not just say "No". Offer "Yes, if...".
+
+CONTEXT:
+{context}
+
+{history_text}
+"""
+            user_prompt = "What is your proposal for this round? (Be concise, 1-2 sentences)"
+            
+            try:
+                response = self.llm_service.chat(
+                    prompt=user_prompt,
+                    system_prompt=system_prompt
+                )
+                proposals[agent_name] = response
+            except Exception as e:
+                logger.error(f"Agent {agent_name} failed to propose: {e}")
+                proposals[agent_name] = "Abstain due to error."
+                
+        return proposals
+
+    async def _supervisor_analyze(self, conflict: Conflict, context: str, history: List[Dict]) -> Dict[str, Any]:
+        """
+        The Supervisor judges if the latest proposals converge.
+        """
+        last_round = history[-1]
+        
+        system_prompt = """You are the Secretariat Martin (Supervisor).
+Review the latest negotiation proposals.
+Determine if CONSENSUS has been reached.
+
+Consensus Rules:
+- All parties successfully agreed to a specific plan.
+- Or one party conceded and the other accepted.
+- No "open questions" remain.
+
+Output JSON:
+{
+    "has_consensus": boolean,
+    "agreement_text": "text summary of the deal" or null,
+    "guidance": "advice for next round if not resolved"
+}
+"""
+        user_prompt = f"""CONTEXT:
+{context}
+
+LATEST ROUND PROPOSALS:
+{json.dumps(last_round['proposals'], indent=2)}
+"""
+        response = self.llm_service.chat(
+            prompt=user_prompt,
+            system_prompt=system_prompt
+        )
+        
+        # Parse JSON
+        try:
+            # Clean markdown code blocks if any
+            clean_res = response.replace("```json", "").replace("```", "").strip()
+            return json.loads(clean_res)
+        except Exception:
+            logger.warning(f"Failed to parse Supervisor JSON: {response}")
+            return {"has_consensus": False, "guidance": "Keep talking."}
+
+    async def _finalize_resolution(self, conflict: Conflict, analysis: Dict[str, Any], history: List[Dict]):
+        """
+        Save the win.
+        """
+        conflict.status = ConflictStatus.RESOLVED
+        conflict.resolved_at = datetime.utcnow()
+        conflict.resolution_log = (conflict.resolution_log or []) + [{
+            "action": "resolved",
+            "agreement": analysis.get("agreement_text"),
+            "history": history,
+            "timestamp": datetime.utcnow().isoformat()
+        }]
+        await self.db.commit()
+
+    async def _escalate_conflict(self, conflict: Conflict, history: List[Dict]):
+        """
+        Give up and call a human.
+        """
+        conflict.status = ConflictStatus.ESCALATED
+        conflict.human_action_required = True
+        conflict.resolution_log = (conflict.resolution_log or []) + [{
+            "action": "escalated_max_rounds",
+            "history": history,
+            "timestamp": datetime.utcnow().isoformat()
+        }]
+        await self.db.commit()

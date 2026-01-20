@@ -99,26 +99,26 @@ class NotificationType(str, enum.Enum):
     TASK = "task"
 
 class ConflictType(str, enum.Enum):
-    SCHEDULE_CLASH = "schedule_clash"
-    RESOURCE_CONSTRAINT = "resource_constraint"
-    POLICY_MISALIGNMENT = "policy_misalignment"
-    DEPENDENCY_BLOCKER = "dependency_blocker"
-    VIP_AVAILABILITY = "vip_availability" 
-    PROJECT_DEPENDENCY_CONFLICT = "project_dependency_conflict"
-    DUPLICATE_PROJECT_CONFLICT = "duplicate_project_conflict"
+    SCHEDULE_CLASH = "SCHEDULE_CLASH"
+    RESOURCE_CONSTRAINT = "RESOURCE_CONSTRAINT"
+    POLICY_MISALIGNMENT = "POLICY_MISALIGNMENT"
+    DEPENDENCY_BLOCKER = "DEPENDENCY_BLOCKER"
+    VIP_AVAILABILITY = "VIP_AVAILABILITY"
+    PROJECT_DEPENDENCY_CONFLICT = "PROJECT_DEPENDENCY_CONFLICT"
+    DUPLICATE_PROJECT_CONFLICT = "DUPLICATE_PROJECT_CONFLICT"
 
 class ConflictSeverity(str, enum.Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
 
 class ConflictStatus(str, enum.Enum):
-    DETECTED = "detected"
-    NEGOTIATING = "negotiating"
-    ESCALATED = "escalated"
-    RESOLVED = "resolved"
-    DISMISSED = "dismissed"
+    DETECTED = "DETECTED"
+    NEGOTIATING = "NEGOTIATING"
+    ESCALATED = "ESCALATED"
+    RESOLVED = "RESOLVED"
+    DISMISSED = "DISMISSED"
 
 class DependencyStatus(str, enum.Enum):
     PENDING = "pending"

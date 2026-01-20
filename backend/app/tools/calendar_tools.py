@@ -3,19 +3,22 @@ from datetime import datetime, timedelta
 import json
 from app.services.calendar_service import calendar_service
 
-async def get_schedule(days: int = 7) -> str:
+
+async def get_schedule(days: int = 7, twg_id: Optional[str] = None) -> str:
     """
     Fetch the calendar schedule for the next N days from the internal database.
     
     Args:
         days: Number of days to look ahead (default: 7)
+        twg_id: Optional TWG ID to filter meetings by.
         
     Returns:
         JSON string of calendar events
     """
     from app.core.database import AsyncSessionLocal
     from app.models.models import Meeting
-    from sqlalchemy import select
+    from sqlalchemy import select, and_
+    import uuid
     
     try:
         # Calculate time range
@@ -23,16 +26,30 @@ async def get_schedule(days: int = 7) -> str:
         end_date = now + timedelta(days=days)
         
         async with AsyncSessionLocal() as session:
-            query = select(Meeting).where(
+            # Build query with optional TWG filter
+            conditions = [
                 Meeting.scheduled_at >= now,
                 Meeting.scheduled_at <= end_date
-            ).order_by(Meeting.scheduled_at)
+            ]
+            
+            if twg_id:
+                try:
+                    # Validate UUID format
+                    twg_uuid = uuid.UUID(twg_id)
+                    conditions.append(Meeting.twg_id == twg_uuid)
+                except ValueError:
+                    return json.dumps({"error": f"Invalid TWG ID format: {twg_id}"})
+            
+            query = select(Meeting).where(and_(*conditions)).order_by(Meeting.scheduled_at)
             
             result = await session.execute(query)
             meetings = result.scalars().all()
             
             if not meetings:
-                return json.dumps({"message": "No upcoming meetings found in the database."})
+                msg = "No upcoming meetings found"
+                if twg_id:
+                    msg += f" for TWG {twg_id}"
+                return json.dumps({"message": msg + "."})
             
             formatted_events = []
             for meeting in meetings:
@@ -65,6 +82,10 @@ GET_SCHEDULE_TOOL_DEF = {
                     "type": "integer",
                     "description": "Number of days to look ahead (default 7)",
                     "default": 7
+                },
+                "twg_id": {
+                    "type": "string",
+                    "description": "Optional TWG UUID to filter meetings by. If not provided, returns all meetings (Supervisor only)."
                 }
             },
             "required": []

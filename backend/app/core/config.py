@@ -264,6 +264,16 @@ class Settings(BaseSettings):
     CHUNK_SIZE: int = Field(default=500, description="Document chunk size")
     CHUNK_OVERLAP: int = Field(default=50, description="Document chunk overlap")
     MAX_CHUNKS_PER_DOC: int = Field(default=1000, description="Maximum chunks per document")
+
+    # Vexa (Meeting Bot)
+    VEXA_API_URL: str = Field(
+        default="http://localhost:3000",
+        description="URL for Vexa Meeting Bot API (use cloud service or self-hosted)"
+    )
+    VEXA_API_KEY: str = Field(
+        default="vexa_secret_key",
+        description="API Key for Vexa authentication"
+    )
     
     @property
     def cors_origins_list(self) -> list:

@@ -22,9 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 
 from app.core.database import get_db_session_context
-from app.models.models import Meeting, Conflict, TWG, ConflictStatus, Notification, NotificationType, Document, User, MeetingParticipant, VipProfile
+from app.models.models import (
+    Meeting, Conflict, TWG, ConflictStatus, Notification, NotificationType, Document, User, MeetingParticipant, VipProfile,
+    ConflictType, ConflictSeverity
+)
 from app.services.conflict_detector import ConflictDetector
 from app.services.reconciliation_service import get_reconciliation_service
+from app.services.vexa_service import vexa_service
 
 class ContinuousMonitor:
     """
@@ -67,11 +71,20 @@ class ContinuousMonitor:
             replace_existing=True
         )
         
+        
         # 4. Project Conflict Scan (Every 6 hours)
         self.scheduler.add_job(
             self.scan_project_conflicts,
             trigger=IntervalTrigger(hours=6),
             id="scan_projects",
+            replace_existing=True
+        )
+
+        # 5. Vexa Meeting Dispatch (Every 1 min)
+        self.scheduler.add_job(
+            self.check_upcoming_meetings,
+            trigger=IntervalTrigger(minutes=1),
+            id="vexa_dispatch",
             replace_existing=True
         )
         
@@ -85,6 +98,57 @@ class ContinuousMonitor:
             self.scheduler.shutdown()
             self.is_running = False
             logger.info("Continuous Monitor stopped.")
+
+    async def check_upcoming_meetings(self):
+        """
+        Check for meetings starting in < 5 mins and dispatch Vexa bot.
+        Also checks for completed sessions to retrieve transcripts.
+        """
+        # 1. Check for finished sessions
+        await vexa_service.check_active_sessions()
+
+        # 2. Dispatch to upcoming meetings
+        logger.info("Checking for upcoming meetings to record...")
+        async with get_db_session_context() as db:
+            try:
+                # Find meetings starting in next 5-10 mins
+                now = datetime.utcnow()
+                five_mins_from_now = now + timedelta(minutes=5)
+                ten_mins_from_now = now + timedelta(minutes=10)
+                
+                stmt = select(Meeting).where(
+                    and_(
+                        Meeting.scheduled_at >= now,
+                        Meeting.scheduled_at <= ten_mins_from_now,
+                        # Check if we already have a transcript or if cancelled
+                        Meeting.transcript.is_(None), 
+                        Meeting.status != 'cancelled'
+                    )
+                )
+                result = await db.execute(stmt)
+                meetings = result.scalars().all()
+                
+                for meeting in meetings:
+                     # Simple deduping: 
+                     # Ideally we check if we already dispatched. 
+                     # Vexa allows idempotent joins usually, or we can check a metadata flag on Meeting.
+                     # For MVP, we'll try to join. VexaService should handle duplicates or we add a flag.
+                     
+                     if not meeting.meeting_link:
+                         continue
+                         
+                     logger.info(f"Dispatching Vexa to meeting: {meeting.title}")
+                     success = await vexa_service.join_meeting(
+                         meeting_url=meeting.meeting_link,
+                         meeting_id=str(meeting.id),
+                         bot_name="Martin Secretariat"
+                     )
+                     
+                     if success:
+                         logger.info(f"Successfully dispatched bot to {meeting.title}")
+                         # Mark as dispatched? For now relying on loop.
+            except Exception as e:
+                logger.error(f"Error in Vexa dispatch: {e}")
 
     async def scan_scheduling_conflicts(self):
         """
@@ -118,19 +182,19 @@ class ContinuousMonitor:
                         
                         if (m1.scheduled_at < m2_end) and (m1_end > m2.scheduled_at):
                             reason = ""
-                            severity = "low"
+                            severity = ConflictSeverity.LOW
                             
                             # Physical Venue Conflict? (Exclude virtual venues - unlimited capacity)
                             if (m1.location and m2.location and 
                                 m1.location == m2.location and 
                                 m1.location.lower() not in ['virtual', 'online', 'remote']):
                                 reason = f"Venue conflict at {m1.location}"
-                                severity = "high"
+                                severity = ConflictSeverity.HIGH
                             
                             # Same TWG Double Booking? (Check independently - applies to both physical and virtual)
                             if m1.twg_id == m2.twg_id:
                                 reason = "Double booking for TWG"
-                                severity = "medium"
+                                severity = ConflictSeverity.MEDIUM
 
                             # Shared Participants / VIP Conflict
                             # Get sets of user IDs to find intersection
@@ -143,7 +207,12 @@ class ContinuousMonitor:
                                 participant_severity, description = self._calculate_severity(shared_users)
                                 
                                 # Escalate if participant severity is higher
-                                severity_levels = {"low": 1, "medium": 2, "high": 3, "critical": 4}
+                                severity_levels = {
+                                    ConflictSeverity.LOW: 1, 
+                                    ConflictSeverity.MEDIUM: 2, 
+                                    ConflictSeverity.HIGH: 3, 
+                                    ConflictSeverity.CRITICAL: 4
+                                }
                                 if severity_levels.get(participant_severity, 1) > severity_levels.get(severity, 1):
                                     severity = participant_severity
                                     reason = f"{reason}; {description}" if reason else description
@@ -161,7 +230,7 @@ class ContinuousMonitor:
                                     db_session=db, 
                                     conflict_data = {
                                         "description": f"{reason} between {m1.title} and {m2.title}",
-                                        "conflict_type": "schedule_clash",
+                                        "conflict_type": ConflictType.SCHEDULE_CLASH,
                                         "severity": severity,
                                         "conflicting_positions": {
                                             "meeting_1": str(m1.id),
@@ -208,21 +277,21 @@ class ContinuousMonitor:
             
         if ministers:
             names = ", ".join([u.full_name for u in ministers])
-            return "critical", f"Minister(s) double-booked: {names}"
+            return ConflictSeverity.CRITICAL, f"Minister(s) double-booked: {names}"
         
         if directors:
              names = ", ".join([u.full_name for u in directors])
-             return "high", f"Director(s)/High-level VIPs double-booked: {names}"
+             return ConflictSeverity.HIGH, f"Director(s)/High-level VIPs double-booked: {names}"
              
         if len(shared_participants) > 10:
-             return "high", f"Large group overlap ({len(shared_participants)} participants)"
+             return ConflictSeverity.HIGH, f"Large group overlap ({len(shared_participants)} participants)"
              
         if len(shared_participants) > 3:
-             return "medium", f"Multiple participants overlap ({len(shared_participants)} people)"
+             return ConflictSeverity.MEDIUM, f"Multiple participants overlap ({len(shared_participants)} people)"
              
         # confirmed overlap <= 3 regular people
         names = ", ".join([u.full_name for u in shared_participants])
-        return "low", f"Participant overlap: {names}"
+        return ConflictSeverity.LOW, f"Participant overlap: {names}"
 
     async def _handle_detected_conflicts(
         self, 
