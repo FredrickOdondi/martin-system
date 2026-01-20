@@ -69,6 +69,7 @@ weasyprint>=60.0.0
 # HTTP Client
 httpx==0.26.0
 aiohttp==3.9.3
+aiofiles>=23.2.1
 
 # Date/Time Handling
 python-dateutil==2.8.2
