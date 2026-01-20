@@ -1,0 +1,12 @@
+FROM vexaai/vexa-lite:latest
+
+# Railway will provide DATABASE_URL automatically if you add a Postgres service
+# Set these as environment variables in Railway dashboard:
+# - DATABASE_URL (auto-provided by Railway Postgres)
+# - ADMIN_API_TOKEN
+# - DEVICE_TYPE=cpu
+# - WHISPER_MODEL_SIZE=tiny
+
+EXPOSE 8056
+
+CMD ["/entrypoint.sh", "supervisord", "-c", "/etc/supervisor/supervisord.conf"]

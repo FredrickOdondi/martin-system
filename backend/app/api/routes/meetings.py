@@ -2434,7 +2434,7 @@ Example format:
 
 Return ONLY valid JSON, no markdown or other text."""
 
-    response = agent.chat(prompt)
+    response = await agent.chat(prompt)
     
     # Parse the JSON from response
     try:

@@ -1,57 +1,62 @@
 """
-Groq LLM Service for Fast Inference
+GitHub Models LLM Service
 
-This service provides an interface to Groq's ultra-fast LLM API.
+This service provides an interface to GitHub Models API using OpenAI-compatible client.
+Supports models like GPT-4o, GPT-4o-mini, and other Azure OpenAI models.
 """
 
 import os
 from typing import List, Dict, Optional, Any
 from loguru import logger
-from groq import Groq
+from openai import OpenAI
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
 
-class GroqLLMService:
-    """Service for interacting with Groq LLM API"""
+class GitHubModelsLLMService:
+    """Service for interacting with GitHub Models API"""
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "llama-3.3-70b-versatile",
+        model: str = "gpt-4o-mini",
         temperature: float = 0.7,
         max_tokens: int = 4000,
         timeout: int = 600
     ):
         """
-        Initialize the Groq LLM service.
+        Initialize the GitHub Models LLM service.
 
         Args:
-            api_key: Groq API key (falls back to GROQ_API_KEY env var)
-            model: Model name to use
+            api_key: GitHub token (falls back to GITHUB_TOKEN env var)
+            model: Model name to use (e.g., gpt-4o-mini, gpt-4o)
             temperature: Sampling temperature (0-1)
             max_tokens: Maximum tokens in response
             timeout: Request timeout in seconds
         """
-        self.api_key = api_key or os.getenv("GROQ_API_KEY")
+        self.api_key = api_key or os.getenv("GITHUB_TOKEN")
         if not self.api_key:
-            raise ValueError("Groq API key is required. Set GROQ_API_KEY environment variable.")
+            raise ValueError("GitHub token is required. Set GITHUB_TOKEN environment variable.")
 
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
 
-        # Initialize Groq client
-        self.client = Groq(api_key=self.api_key, timeout=timeout)
+        # Initialize OpenAI client pointing to GitHub Models endpoint
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url="https://models.inference.ai.azure.com",
+            timeout=timeout
+        )
 
-        logger.info(f"Initialized Groq LLM Service: {self.model} (timeout: {timeout}s)")
+        logger.info(f"Initialized GitHub Models LLM Service: {self.model} (timeout: {timeout}s)")
 
     def check_connection(self) -> bool:
         """
-        Check if Groq API is accessible.
+        Check if GitHub Models API is accessible.
 
         Returns:
             bool: True if API is accessible, False otherwise
@@ -65,7 +70,7 @@ class GroqLLMService:
             )
             return True
         except Exception as e:
-            logger.error(f"Groq connection check failed: {e}")
+            logger.error(f"GitHub Models connection check failed: {e}")
             return False
 
     def chat(
@@ -105,7 +110,7 @@ class GroqLLMService:
         })
 
         try:
-            logger.debug(f"Sending request to Groq: {prompt[:100]}...")
+            logger.debug(f"Sending request to GitHub Models: {prompt[:100]}...")
             
             kwargs = {
                 "model": self.model,
@@ -127,7 +132,7 @@ class GroqLLMService:
             return response.choices[0].message.content.strip()
 
         except Exception as e:
-            logger.error(f"Groq API error: {e}")
+            logger.error(f"GitHub Models API error: {e}")
             raise Exception(f"LLM API error: {str(e)}")
 
     def chat_with_history(
@@ -201,22 +206,22 @@ class GroqLLMService:
 _llm_service = None
 
 
-def get_llm_service() -> GroqLLMService:
+def get_llm_service() -> GitHubModelsLLMService:
     """
-    Get or create the Groq LLM service singleton.
+    Get or create the GitHub Models LLM service singleton.
 
     Returns:
-        GroqLLMService: The LLM service instance
+        GitHubModelsLLMService: The LLM service instance
     """
     global _llm_service
     if _llm_service is None:
-        api_key = os.getenv("GROQ_API_KEY")
-        model = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
+        api_key = os.getenv("GITHUB_TOKEN")
+        model = os.getenv("LLM_MODEL", "gpt-4o-mini")
         temperature = float(os.getenv("LLM_TEMPERATURE", "0.7"))
         max_tokens = int(os.getenv("LLM_MAX_TOKENS", "4000"))
         timeout = int(os.getenv("LLM_TIMEOUT", "600"))
 
-        _llm_service = GroqLLMService(
+        _llm_service = GitHubModelsLLMService(
             api_key=api_key,
             model=model,
             temperature=temperature,

@@ -174,7 +174,7 @@ class SupervisorGlobalState:
                 conflict_type=conflict.conflict_type.value,
                 severity=conflict.severity,
                 description=conflict.description,
-                agents_involved=conflict.agents_involved,
+                agents_involved=[str(a) for a in conflict.agents_involved if a is not None] if conflict.agents_involved else [],
                 status=conflict.status,
                 detected_at=conflict.detected_at
             ))
