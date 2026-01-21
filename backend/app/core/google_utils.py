@@ -59,9 +59,29 @@ def setup_google_credentials():
     if token_json:
         try:
             logger.info("Found GOOGLE_TOKEN_JSON. Restoring 'token.json'...")
+            
+            # Validate JSON
+            try:
+                parsed_token = json.loads(token_json)
+                logger.info(f"Token JSON parsed successfully. Keys: {list(parsed_token.keys())}")
+                if 'expiry' in parsed_token:
+                    logger.info(f"Token expiry: {parsed_token['expiry']}")
+            except json.JSONDecodeError as e:
+                logger.error(f"GOOGLE_TOKEN_JSON is not valid JSON: {e}")
+                return
+            
             with open("token.json", "w") as f:
                 f.write(token_json)
+            
+            # Verify file was created
+            if os.path.exists("token.json"):
+                file_size = os.path.getsize("token.json")
+                logger.info(f"✓ token.json created successfully ({file_size} bytes)")
+            else:
+                logger.error("✗ Failed to create token.json file")
+                
         except Exception as e:
             logger.error(f"Failed to restore token.json: {e}")
     else:
         logger.info("No GOOGLE_TOKEN_JSON env var found.")
+
