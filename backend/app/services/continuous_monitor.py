@@ -250,14 +250,14 @@ class ContinuousMonitor:
                         if current_length != last_length:
                             # Transcript is growing, update state
                             doc.metadata_json["last_transcript_length"] = current_length
-                            doc.metadata_json["last_check_time"] = datetime.now(UTC).isoformat()
+                            doc.metadata_json["last_check_time"] = datetime.utcnow().isoformat()
                             # Commit validation updates
                             await db.commit()
                         elif last_check_time_str:
                             # Length hasn't changed, check how long it's been
                             try:
                                 last_check_time = datetime.fromisoformat(last_check_time_str)
-                                time_diff = datetime.now(UTC) - last_check_time
+                                time_diff = datetime.utcnow() - last_check_time
                                 
                                 # If idle for more than 5 minutes (300 seconds) AND has content
                                 if time_diff.total_seconds() > 300 and current_length > 0:
@@ -268,7 +268,7 @@ class ContinuousMonitor:
                         else:
                             # First check, init metadata
                             doc.metadata_json["last_transcript_length"] = current_length
-                            doc.metadata_json["last_check_time"] = datetime.now(UTC).isoformat()
+                            doc.metadata_json["last_check_time"] = datetime.utcnow().isoformat()
                             await db.commit()
 
                         # CRITICAL: Only process transcript if meeting has ended OR timed out
