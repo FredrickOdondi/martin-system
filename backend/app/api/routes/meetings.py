@@ -105,10 +105,6 @@ async def create_meeting(
             .where(Meeting.id == db_meeting.id)
         )
         db_meeting = result.scalar_one()
-        
-        # Ensure returned date is aware UTC
-        if db_meeting.scheduled_at and db_meeting.scheduled_at.tzinfo is None:
-            db_meeting.scheduled_at = db_meeting.scheduled_at.replace(tzinfo=timezone.utc)
             
         return db_meeting
     except Exception as e:
@@ -153,11 +149,6 @@ async def list_meetings(
     result = await db.execute(query)
     meetings_list = result.scalars().all()
     
-    # Ensure returned dates are aware UTC
-    for m in meetings_list:
-        if m.scheduled_at and m.scheduled_at.tzinfo is None:
-            m.scheduled_at = m.scheduled_at.replace(tzinfo=timezone.utc)
-            
     return meetings_list
 
 @router.get("/{meeting_id}", response_model=MeetingRead)
@@ -194,10 +185,6 @@ async def get_meeting(
     # Check access
     if not has_twg_access(current_user, db_meeting.twg_id):
         raise HTTPException(status_code=403, detail="Access denied")
-        
-    # Ensure returned date is aware UTC
-    if db_meeting.scheduled_at and db_meeting.scheduled_at.tzinfo is None:
-        db_meeting.scheduled_at = db_meeting.scheduled_at.replace(tzinfo=timezone.utc)
         
     return db_meeting
 
@@ -280,10 +267,6 @@ async def update_meeting(
         print(traceback.format_exc())
         await db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error during update: {str(e)}")
-        
-    # Ensure returned date is aware UTC
-    if db_meeting.scheduled_at and db_meeting.scheduled_at.tzinfo is None:
-        db_meeting.scheduled_at = db_meeting.scheduled_at.replace(tzinfo=timezone.utc)
         
     return db_meeting
 
