@@ -53,7 +53,7 @@ class ConflictDetector:
                     "target", "goal", "%", "by 2026", "by 2030",
                     "achieve", "reach", "increase", "reduce"
                 ],
-                "severity": "high"
+                "severity": "HIGH"
             },
             ConflictType.RESOURCE_CONSTRAINT.value: {
                 "description": "Competing resource allocation needs",
@@ -61,7 +61,7 @@ class ConflictDetector:
                     "budget", "funding", "investment", "allocation",
                     "priority", "million", "billion"
                 ],
-                "severity": "medium"
+                "severity": "MEDIUM"
             },
             ConflictType.SCHEDULE_CLASH.value: {
                 "description": "Overlapping or conflicting session proposals",
@@ -69,7 +69,7 @@ class ConflictDetector:
                     "session", "panel", "presentation", "workshop",
                     "same time", "concurrent", "parallel"
                 ],
-                "severity": "low"
+                "severity": "LOW"
             },
             # Merging policy direction into MISALIGNMENT but keeping unique keywords could be tricky if keys must be unique.
             # I will assume we can reuse the type OR I should have reduced the patterns.
@@ -82,7 +82,7 @@ class ConflictDetector:
                     "must", "should", "require", "mandate",
                     "prohibit", "ban", "allow", "permit"
                 ],
-                "severity": "high"
+                "severity": "HIGH"
             },
             "technology_choice": {
                 "type": ConflictType.POLICY_MISALIGNMENT.value,
@@ -91,7 +91,7 @@ class ConflictDetector:
                     "technology", "platform", "standard", "protocol",
                     "system", "infrastructure"
                 ],
-                "severity": "medium"
+                "severity": "MEDIUM"
             }
         }
 
@@ -264,7 +264,7 @@ class ConflictDetector:
             # Potential conflict detected
             return create_conflict_alert(
                 conflict_type=ConflictType.POLICY_MISALIGNMENT.value,
-                severity="high",
+                severity="HIGH",
                 agents_involved=[agent_a, agent_b],
                 description=f"{agent_a.upper()} promotes renewable energy targets while {agent_b.upper()} includes fossil fuel infrastructure",
                 conflicting_positions={
@@ -272,7 +272,7 @@ class ConflictDetector:
                     agent_b: "Includes fossil fuel infrastructure"
                 },
                 impact="Policy inconsistency may confuse investors and member states",
-                urgency="high",
+                urgency="HIGH",
                 suggested_resolution="Clarify energy mix strategy or phase-out timeline for fossil fuels",
                 requires_negotiation=True,
                 requires_human_intervention=False
@@ -315,7 +315,7 @@ class ConflictDetector:
                     agent_b: " ".join(sentences_b[:2])
                 },
                 impact=f"May cause confusion in {pattern_type} coordination",
-                urgency="medium",
+                urgency="MEDIUM",
                 requires_negotiation=True
             )
 
@@ -412,7 +412,7 @@ If no conflicts, respond with: NO CONFLICT
         try:
             # Extract conflict details from response
             conflict_type = "unknown"
-            severity = "medium"
+            severity = "MEDIUM"
             description = "Conflict detected by LLM"
             impact = "Needs review"
 
@@ -433,7 +433,7 @@ If no conflicts, respond with: NO CONFLICT
                     }
                     conflict_type = type_map.get(raw_type, ConflictType.POLICY_MISALIGNMENT.value) # Default safe
                 elif line.startswith("SEVERITY:"):
-                    severity = line.split(":", 1)[1].strip().lower()
+                    severity = line.split(":", 1)[1].strip().upper()
                 elif line.startswith("DESCRIPTION:"):
                     description = line.split(":", 1)[1].strip()
                 elif line.startswith("IMPACT:"):
@@ -449,7 +449,7 @@ If no conflicts, respond with: NO CONFLICT
                     agent_b: output_b[:200]
                 },
                 impact=impact,
-                urgency="medium",
+                urgency="MEDIUM",
                 requires_negotiation=True
             )
 
