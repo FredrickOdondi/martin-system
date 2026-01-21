@@ -67,7 +67,8 @@ class VexaService:
                     if response.status in [200, 201]:
                         data = await response.json()
                         session_id = data.get('sessionId') or data.get('id')
-                        logger.info(f"Vexa Bot dispatched to {meeting_url}. Session ID: {session_id}")
+                        logger.info(f"✓ Vexa Bot dispatched to {meeting_url}. Session ID: {session_id}")
+                        logger.debug(f"Full Vexa response: {json.dumps(data, indent=2)}")
                         # Return all the info needed to fetch transcript later
                         return {
                             "session_id": session_id,
@@ -76,10 +77,16 @@ class VexaService:
                         }
                     else:
                         text = await response.text()
-                        logger.error(f"Failed to dispatch Vexa bot: {response.status} - {text}")
+                        logger.error(f"✗ Failed to dispatch Vexa bot: HTTP {response.status}")
+                        logger.error(f"Response body: {text}")
+                        logger.error(f"Request payload: {json.dumps(payload, indent=2)}")
                         return None
         except Exception as e:
-            logger.error(f"Error connecting to Vexa API: {e}")
+            logger.error(f"✗ Error connecting to Vexa API: {e}")
+            logger.error(f"API URL: {url}")
+            logger.error(f"Request payload: {json.dumps(payload, indent=2)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
 
     async def get_transcript(self, platform: str, native_meeting_id: str) -> Optional[Dict[str, Any]]:
