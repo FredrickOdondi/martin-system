@@ -72,13 +72,14 @@ export default function CreateMeetingModal({ isOpen, onClose, twgId, onSuccess, 
         setLoading(true);
 
         try {
-            // Combine date and time
-            const scheduledAt = new Date(`${formData.date}T${formData.time}:00`);
+            // Treat the input date/time as UTC directly (no timezone conversion)
+            // This ensures the time the user enters is the time stored in the database
+            const scheduledAt = `${formData.date}T${formData.time}:00.000Z`;
 
             await meetings.create({
                 title: formData.title,
                 twg_id: twgId || selectedTwgId || undefined,
-                scheduled_at: scheduledAt.toISOString(),
+                scheduled_at: scheduledAt,
                 duration_minutes: parseInt(formData.duration),
                 location: formData.location,
                 meeting_type: formData.type
