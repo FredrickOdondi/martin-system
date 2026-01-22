@@ -49,20 +49,7 @@ export default function SummitSchedule() {
 
     return (
         <div className="max-w-7xl mx-auto space-y-6 h-[calc(100vh-100px)] flex flex-col">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 shrink-0">
-                <div>
-                    <h1 className="text-3xl font-display font-bold text-slate-900 dark:text-white transition-colors">Summit Schedule</h1>
-                    <p className="text-sm text-slate-500 dark:text-slate-400">ECOWAS Economic Development Summit 2026 • Abuja, Nigeria</p>
-                </div>
 
-                <div className="flex items-center gap-4">
-                    <button className="btn-primary text-sm whitespace-nowrap px-4 py-2 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition" onClick={loadMeetings}>
-                        Refresh
-                    </button>
-                    {/* Month Nav is now inside Grid, but we keep Refresh external or can move it in if desired */}
-                </div>
-            </div>
 
             {/* Calendar Grid Reused */}
             <div className="flex-1 overflow-hidden">
