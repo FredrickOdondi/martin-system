@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc, or_, and_
@@ -453,41 +453,31 @@ async def propose_conflict_resolution(
     The Mediator Role: Get AI-proposed resolutions for a conflict.
     Part of the "Debate Pattern" where agents negotiate before human intervention.
     """
-    from app.models.models import Conflict, UserRole
-    from app.services.reconciliation_service import get_reconciliation_service
-    import uuid
+    """
+    The Mediator Role: Get AI-proposed resolutions for a conflict.
     
-    is_allowed = current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]
-    if not is_allowed:
-        raise HTTPException(status_code=403, detail="Only admins/secretariat can propose resolutions")
-    
-    result = await db.execute(select(Conflict).where(Conflict.id == uuid.UUID(conflict_id)))
-    conflict = result.scalar_one_or_none()
-    
-    if not conflict:
-        raise HTTPException(status_code=404, detail="Conflict not found")
-    
-    service = get_reconciliation_service(db)
-    proposals = await service.propose_resolution(conflict)
-    
-    return proposals
+    DEPRECATED: Now uses NegotiationService which runs fully autonomously.
+    """
+    return {
+        "options": [],
+        "message": "Please use Auto-Negotiate. The AI now uses real-time debate to find solutions."
+    }
 
 
 @router.post("/conflicts/{conflict_id}/auto-negotiate")
 async def auto_negotiate_conflict(
     conflict_id: str,
+    prompt: Optional[str] = Body(None, embed=True),
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_active_user)
 ):
     """
     Trigger automated agent negotiation for a conflict.
     The Supervisor attempts to resolve the conflict through the "Debate Pattern".
-    
-    High-confidence resolutions may be auto-applied.
-    Low-confidence resolutions are flagged for human review.
+    Safeguard: Changes are NOT applied immediately; they require user approval.
     """
-    from app.models.models import Conflict, UserRole
-    from app.services.reconciliation_service import get_reconciliation_service
+    from app.services.negotiation_service import NegotiationService
+    from app.models.models import UserRole, Conflict # Restore missing imports
     import uuid
     
     is_allowed = current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]
@@ -500,17 +490,66 @@ async def auto_negotiate_conflict(
     if not conflict:
         raise HTTPException(status_code=404, detail="Conflict not found")
     
-    service = get_reconciliation_service(db)
-    negotiation_result = await service.run_automated_negotiation(conflict)
+    # Use the Ferrari Engine
+    service = NegotiationService(db)
+    # HITL Mode: apply_immediately=False
+    negotiation_data = await service.run_negotiation(conflict.id, user_feedback=prompt, apply_immediately=False)
+    
+    # Map result to expected frontend format
+    # "negotiation_result" top-level determines the modal header state
+    
+    final_status = "escalated_to_human"
+    if negotiation_data.get("status") == "CONSENSUS_REACHED":
+        # Check sub-status
+        overview = negotiation_data.get("overview", {})
+        if overview.get("status") == "pending_approval":
+            final_status = "pending_approval"
+        else:
+            final_status = "auto_resolved"
+    
+    result_payload = {
+        "negotiation_result": final_status,
+        "proposals_considered": negotiation_data.get("proposals_considered"),
+        "overview": negotiation_data.get("overview"),
+        "raw_data": negotiation_data
+    }
     
     # Broadcast result
     await ws_manager.broadcast({
         "type": "negotiation_complete",
         "conflict_id": conflict_id,
-        "result": negotiation_result["negotiation_result"]
+        "result": final_status
     })
     
-    return negotiation_result
+    return result_payload
+
+@router.post("/conflicts/{conflict_id}/approve-resolution")
+async def approve_resolution(
+    conflict_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user = Depends(get_current_active_user)
+):
+    """
+    Apply a pending resolution for a conflict.
+    """
+    from app.services.negotiation_service import NegotiationService
+    from app.models.models import UserRole
+    import uuid
+    
+    is_allowed = current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]
+    if not is_allowed:
+        raise HTTPException(status_code=403, detail="Permission denied")
+        
+    service = NegotiationService(db)
+    try:
+        result = await service.apply_pending_resolution(uuid.UUID(conflict_id))
+        
+        # Broadcast update
+        await ws_manager.broadcast({"type": "conflict_resolved", "id": conflict_id})
+        
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.post("/weekly-packet")
 async def generate_weekly_packet(
@@ -749,7 +788,9 @@ async def force_reconciliation(
                 "meeting_id": str(meeting.id),
                 "title": meeting.title,
                 "start": meeting.scheduled_at,
-                "end": meeting.scheduled_at + datetime.timedelta(minutes=meeting.duration_minutes)
+                "end": meeting.scheduled_at + datetime.timedelta(minutes=meeting.duration_minutes),
+                "twg_id": str(meeting.twg_id) if meeting.twg_id else None,
+                "twg_name": meeting.twg.name if meeting.twg else None 
             })
     
     for email, bookings in participant_schedule.items():
@@ -774,13 +815,17 @@ async def force_reconciliation(
                             description=conflict_desc,
                             severity=ConflictSeverity.HIGH,
                             status=ConflictStatus.DETECTED,
-                            agents_involved=[email],
                             conflicting_positions={
                                 "meeting_1": b1["meeting_id"],
                                 "meeting_2": b2["meeting_id"],
                                 b1["title"]: "Conflict",
                                 b2["title"]: "Conflict"
                             },
+                            # Correction: Use TWG IDs/Names instead of Email
+                            agents_involved=[
+                                b1.get("twg_name") or b1.get("twg_id") or "Unknown TWG",
+                                b2.get("twg_name") or b2.get("twg_id") or "Unknown TWG"
+                            ],
                             detected_at=datetime.datetime.utcnow()
                         )
                         db.add(new_conflict)

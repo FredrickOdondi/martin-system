@@ -124,8 +124,14 @@ export const generateWeeklyPacket = async (): Promise<any> => {
     return response.data;
 };
 
-export const autoNegotiateConflict = async (conflictId: string): Promise<any> => {
-    const response = await api.post(`/dashboard/conflicts/${conflictId}/auto-negotiate`);
+export const autoNegotiateConflict = async (conflictId: string, prompt?: string): Promise<any> => {
+    const body = prompt ? { prompt } : undefined;
+    const response = await api.post(`/dashboard/conflicts/${conflictId}/auto-negotiate`, body);
+    return response.data;
+};
+
+export const approveResolution = async (conflictId: string): Promise<any> => {
+    const response = await api.post(`/dashboard/conflicts/${conflictId}/approve-resolution`);
     return response.data;
 };
 

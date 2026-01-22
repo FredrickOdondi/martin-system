@@ -235,6 +235,115 @@ class CalendarService:
             logger.error(f"Error adding attendees to meeting {meeting_id}: {e}")
             return False
 
+    def update_meeting_event(self, meeting_id: str, new_start_time: datetime.datetime = None, 
+                             new_duration_minutes: int = None, new_location: str = None) -> bool:
+        """
+        Updates an existing Google Calendar event's time or location.
+        Used when conflicts are resolved via auto-negotiation.
+        """
+        if not self.service:
+            logger.warning("Calendar service not available for update.")
+            return False
+
+        if not self._credentials_valid:
+            logger.warning("Calendar credentials invalid, skipping event update.")
+            return False
+
+        try:
+            # 1. Find the event by meeting_id
+            events_result = self.service.events().list(
+                calendarId='primary',
+                privateExtendedProperty=f"meeting_id={meeting_id}",
+                singleEvents=True
+            ).execute()
+
+            events = events_result.get('items', [])
+            if not events:
+                logger.warning(f"No calendar event found for meeting_id {meeting_id} to update")
+                return False
+
+            event = events[0]
+            event_id = event['id']
+            
+            # 2. Build patch body
+            patch_body = {}
+            
+            if new_start_time:
+                # Calculate end time based on duration
+                duration = new_duration_minutes or 60  # Default 60 mins if not specified
+                end_time = new_start_time + datetime.timedelta(minutes=duration)
+                
+                patch_body['start'] = {
+                    'dateTime': new_start_time.isoformat(),
+                    'timeZone': 'UTC'
+                }
+                patch_body['end'] = {
+                    'dateTime': end_time.isoformat(),
+                    'timeZone': 'UTC'
+                }
+                
+            if new_location:
+                patch_body['location'] = new_location
+            
+            if not patch_body:
+                logger.info("No changes to apply to calendar event")
+                return True
+            
+            # 3. Patch the event
+            self.service.events().patch(
+                calendarId='primary',
+                eventId=event_id,
+                body=patch_body,
+                sendUpdates='all'  # Send notification to attendees
+            ).execute()
+            
+            logger.info(f"Updated calendar event {event_id} for meeting {meeting_id}")
+            return True
+
+        except Exception as e:
+            error_str = str(e)
+            if 'invalid_grant' in error_str or 'expired' in error_str.lower():
+                if self._credentials_valid:
+                    logger.warning("Google Calendar credentials expired during update.")
+                    self._credentials_valid = False
+            else:
+                logger.error(f"Error updating calendar event for meeting {meeting_id}: {e}")
+            return False
+
+    def cancel_meeting_event(self, meeting_id: str) -> bool:
+        """
+        Cancels a Google Calendar event (sets status to 'cancelled').
+        """
+        if not self.service or not self._credentials_valid:
+            return False
+
+        try:
+            events_result = self.service.events().list(
+                calendarId='primary',
+                privateExtendedProperty=f"meeting_id={meeting_id}",
+                singleEvents=True
+            ).execute()
+
+            events = events_result.get('items', [])
+            if not events:
+                logger.warning(f"No calendar event found for meeting_id {meeting_id} to cancel")
+                return False
+
+            event_id = events[0]['id']
+            
+            self.service.events().delete(
+                calendarId='primary',
+                eventId=event_id,
+                sendUpdates='all'  # Notify attendees of cancellation
+            ).execute()
+            
+            logger.info(f"Cancelled calendar event {event_id} for meeting {meeting_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error cancelling calendar event for meeting {meeting_id}: {e}")
+            return False
+
 # Singleton instance
 calendar_service = CalendarService()
 

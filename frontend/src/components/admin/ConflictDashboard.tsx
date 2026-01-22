@@ -1,7 +1,7 @@
 import { Card, Badge } from '../../components/ui';
 
 import { useEffect, useState } from 'react';
-import { getConflicts, ConflictAlert, getDashboardStats, forceReconciliation, ReconciliationResult, generateWeeklyPacket, autoNegotiateConflict, dismissConflict, resolveConflictManually } from '../../services/dashboardService';
+import { getConflicts, ConflictAlert, getDashboardStats, forceReconciliation, ReconciliationResult, generateWeeklyPacket, autoNegotiateConflict, dismissConflict, resolveConflictManually, approveResolution } from '../../services/dashboardService';
 import ManualResolutionModal from '../modals/ManualResolutionModal';
 
 export default function ConflictDashboard() {
@@ -14,6 +14,7 @@ export default function ConflictDashboard() {
     const [showResolutionModal, setShowResolutionModal] = useState(false);
     const [showHistoryModal, setShowHistoryModal] = useState(false);
     const [historyConflicts, setHistoryConflicts] = useState<ConflictAlert[]>([]);
+    const [negotiationPrompt, setNegotiationPrompt] = useState("");
 
     const handleShowHistory = async () => {
         try {
@@ -416,64 +417,99 @@ export default function ConflictDashboard() {
             {/* Negotiation Results Modal */}
             {showNegotiationModal && negotiationLog && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
-                        <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
+                    <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+                        <div className="p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-800/50">
                             <div>
-                                <h2 className="text-xl font-bold text-slate-900 dark:text-white">🤖 AI Negotiation Complete</h2>
-                                <p className="text-sm text-slate-500">
-                                    {negotiationLog.negotiation_result === 'auto_resolved'
-                                        ? '✅ Conflict resolved automatically!'
-                                        : '⚠️ Escalated to human review'}
+                                <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                                    {negotiationLog.negotiation_result === 'pending_approval' ? (
+                                        <>
+                                            <span className="text-2xl">🗳️</span>
+                                            <span>Proposal Ready for Review</span>
+                                        </>
+                                    ) : negotiationLog.negotiation_result === 'auto_resolved' ? (
+                                        <>
+                                            <span className="text-2xl">✅</span>
+                                            <span>Conflict Resolved</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <span className="text-2xl">⚠️</span>
+                                            <span>Negotiation Escalated</span>
+                                        </>
+                                    )}
+                                </h2>
+                                <p className="text-sm text-slate-500 mt-1">
+                                    {negotiationLog.negotiation_result === 'pending_approval'
+                                        ? 'Review the outcome below. Approve to apply, or provide feedback to renegotiate.'
+                                        : negotiationLog.negotiation_result === 'auto_resolved'
+                                            ? 'The AI agents have reached consensus and resolved the issue.'
+                                            : 'The AI agents could not reach consensus.'}
                                 </p>
                             </div>
-                            <button onClick={() => setShowNegotiationModal(false)} className="text-slate-400 hover:text-slate-600">
+                            <button onClick={() => setShowNegotiationModal(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
                                 <span className="material-symbols-outlined">close</span>
                             </button>
                         </div>
-                        <div className="p-6 overflow-y-auto max-h-[60vh] space-y-4">
-                            {(negotiationLog.winning_proposal || negotiationLog.proposal) && (
+
+                        <div className="p-6 overflow-y-auto flex-1 space-y-6">
+                            {/* Negotiation Rounds */}
+                            {negotiationLog.overview?.history && (
+                                <div className="space-y-4">
+                                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider">Negotiation Process</h3>
+                                    {negotiationLog.overview.history.map((round: any, idx: number) => (
+                                        <div key={idx} className="border border-slate-200 dark:border-slate-700 rounded-xl p-4 bg-slate-50 dark:bg-slate-800/20">
+                                            <div className="flex items-center gap-2 mb-3">
+                                                <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-xs font-bold rounded">
+                                                    Round {round.round}
+                                                </span>
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-2">
+                                                {Object.entries(round.proposals || {}).map(([agent, proposal]: [string, any]) => (
+                                                    <div key={agent} className="p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-100 dark:border-slate-700">
+                                                        <p className="font-bold text-sm text-slate-700 dark:text-slate-300 mb-1">{agent}</p>
+                                                        <p className="text-xs text-slate-600 dark:text-slate-400 italic">"{proposal}"</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
+                            {/* Final Agreement */}
+                            {negotiationLog.overview?.agreement_text && (
+                                <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-6 border-2 border-emerald-200 dark:border-emerald-800 shadow-sm">
+                                    <h3 className="text-sm font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                                        <span className="material-symbols-outlined text-[18px]">handshake</span>
+                                        Proposed Agreement
+                                    </h3>
+                                    <p className="text-slate-800 dark:text-slate-200 font-medium text-lg leading-relaxed">
+                                        "{negotiationLog.overview.agreement_text}"
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Summary */}
+                            {negotiationLog.overview?.summary && (
                                 <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4">
-                                    <h3 className="text-sm font-bold text-blue-600 uppercase tracking-wider mb-2">Resolved Resolution</h3>
+                                    <h3 className="text-sm font-bold text-blue-600 uppercase tracking-wider mb-2">Summary</h3>
+                                    <p className="text-slate-700 dark:text-slate-300">
+                                        {negotiationLog.overview.summary}
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Fallback for Legacy/Escalation */}
+                            {!negotiationLog.overview && (negotiationLog.winning_proposal || negotiationLog.proposal) && (
+                                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4">
+                                    <h3 className="text-sm font-bold text-blue-600 uppercase tracking-wider mb-2">Resolved Resolution (Legacy)</h3>
                                     <p className="text-slate-700 dark:text-slate-300 font-medium">
                                         {(negotiationLog.winning_proposal || negotiationLog.proposal).action}
                                     </p>
-                                    {(negotiationLog.winning_proposal || negotiationLog.proposal).rationale && (
-                                        <p className="text-sm text-slate-500 mt-2 italic">
-                                            "{(negotiationLog.winning_proposal || negotiationLog.proposal).rationale}"
-                                        </p>
-                                    )}
                                 </div>
                             )}
 
-                            {(negotiationLog.votes || negotiationLog.approvals) && (
-                                <div>
-                                    <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Agent Positions</h3>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        {Object.entries(negotiationLog.votes || negotiationLog.approvals).map(([agent, voterData]: [string, any]) => {
-                                            // Handle both old boolean format and new object format
-                                            const isApproved = typeof voterData === 'boolean'
-                                                ? voterData
-                                                : (voterData.choice === negotiationLog.winning_proposal?.id);
-
-                                            return (
-                                                <div key={agent} className={`p-3 rounded-lg flex items-center gap-3 ${isApproved ? 'bg-emerald-50 border border-emerald-200' : 'bg-red-50 border border-red-200'}`}>
-                                                    <span className={`material-symbols-outlined ${isApproved ? 'text-emerald-500' : 'text-red-500'}`}>
-                                                        {isApproved ? 'check_circle' : 'cancel'}
-                                                    </span>
-                                                    <div>
-                                                        <p className="font-bold text-slate-700 text-sm">{agent}</p>
-                                                        <p className="text-xs text-slate-500 line-clamp-1">
-                                                            {typeof voterData === 'object' ? voterData.reason : (isApproved ? 'Approved' : 'Rejected')}
-                                                        </p>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Fallback if it was escalated but we have proposals */}
+                            {/* Unresolved Options if Escalated */}
                             {negotiationLog.negotiation_result === 'escalated_to_human' && negotiationLog.proposals_considered && (
                                 <div className="space-y-3">
                                     <h3 className="text-sm font-bold text-amber-600 uppercase tracking-wider">Unresolved Options (Escalated)</h3>
@@ -486,9 +522,113 @@ export default function ConflictDashboard() {
                                 </div>
                             )}
                         </div>
-                        <div className="p-4 border-t flex justify-end">
-                            <button onClick={() => setShowNegotiationModal(false)} className="px-4 py-2 bg-slate-900 text-white rounded-xl text-sm font-bold">Close</button>
-                        </div>
+
+                        {/* Footer Actions for Approval */}
+                        {negotiationLog.negotiation_result === 'pending_approval' ? (
+                            <div className="p-6 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30">
+                                <div className="flex flex-col gap-4">
+                                    <div className="flex items-center gap-4">
+                                        <button
+                                            disabled={loading}
+                                            onClick={async () => {
+                                                if (!activeConflict) return;
+                                                setLoading(true);
+                                                try {
+                                                    await approveResolution(activeConflict.id);
+                                                    setShowNegotiationModal(false);
+                                                    const newConflicts = await getConflicts();
+                                                    setConflicts(newConflicts);
+                                                } catch (e) { console.error(e); }
+                                                finally { setLoading(false); }
+                                            }}
+                                            className={`flex-1 py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-emerald-600/50 disabled:cursor-wait text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/20 active:scale-95 flex items-center justify-center gap-2 transition-all`}
+                                        >
+                                            {loading ? (
+                                                <>
+                                                    <span className="material-symbols-outlined animate-spin">progress_activity</span>
+                                                    Processing...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="material-symbols-outlined">check_circle</span>
+                                                    Approve & Execute Resolution
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+
+                                    <div className="relative py-2">
+                                        <div className="absolute inset-0 flex items-center" aria-hidden="true">
+                                            <div className="w-full border-t border-slate-200 dark:border-slate-700"></div>
+                                        </div>
+                                        <div className="relative flex justify-center">
+                                            <span className="bg-slate-50 dark:bg-slate-800/30 px-2 text-xs text-slate-400 uppercase tracking-widest font-semibold">Or Request Changes</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-2">
+                                        <div className="flex-1 relative">
+                                            <input
+                                                type="text"
+                                                placeholder="Example: 'Do not move the workshop to 9am, find another venue instead.'"
+                                                className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl pl-4 pr-10 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
+                                                value={negotiationPrompt}
+                                                onChange={(e) => setNegotiationPrompt(e.target.value)}
+                                                onKeyDown={async (e) => {
+                                                    if (e.key === 'Enter' && negotiationPrompt && activeConflict) {
+                                                        setLoading(true);
+                                                        try {
+                                                            const result = await autoNegotiateConflict(activeConflict.id, negotiationPrompt);
+                                                            setNegotiationLog(result);
+                                                            setNegotiationPrompt("");
+                                                        } catch (e) { console.error(e); }
+                                                        finally { setLoading(false); }
+                                                    }
+                                                }}
+                                            />
+                                            {negotiationPrompt && (
+                                                <button
+                                                    onClick={() => setNegotiationPrompt("")}
+                                                    className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                                                >
+                                                    <span className="material-symbols-outlined text-sm">close</span>
+                                                </button>
+                                            )}
+                                        </div>
+                                        <button
+                                            disabled={!negotiationPrompt || loading}
+                                            onClick={async () => {
+                                                if (!activeConflict) return;
+                                                setLoading(true);
+                                                try {
+                                                    const result = await autoNegotiateConflict(activeConflict.id, negotiationPrompt);
+                                                    setNegotiationLog(result);
+                                                    setNegotiationPrompt("");
+                                                } catch (e) { console.error(e); }
+                                                finally { setLoading(false); }
+                                            }}
+                                            className={`px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-500/20 active:scale-95 transition-all flex items-center gap-2`}
+                                        >
+                                            {loading ? (
+                                                <>
+                                                    <span className="material-symbols-outlined animate-spin">progress_activity</span>
+                                                    Renegotiating...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <span className="material-symbols-outlined">refresh</span>
+                                                    Renegotiate
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex justify-end bg-white dark:bg-slate-900">
+                                <button onClick={() => setShowNegotiationModal(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-xl text-sm font-bold transition-all">Close</button>
+                            </div>
+                        )}
                     </div>
                 </div>
             )}

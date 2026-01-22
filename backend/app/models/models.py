@@ -119,6 +119,7 @@ class ConflictStatus(str, enum.Enum):
     ESCALATED = "ESCALATED"
     RESOLVED = "RESOLVED"
     DISMISSED = "DISMISSED"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
 
 class DependencyStatus(str, enum.Enum):
     PENDING = "pending"
