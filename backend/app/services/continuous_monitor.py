@@ -27,7 +27,6 @@ from app.models.models import (
     ConflictType, ConflictSeverity
 )
 from app.services.conflict_detector import ConflictDetector
-from app.services.reconciliation_service import get_reconciliation_service
 from app.services.vexa_service import vexa_service
 
 class ContinuousMonitor:
@@ -480,6 +479,22 @@ class ContinuousMonitor:
         3. Trigger auto-negotiation
         """
         try:
+            # DEDUPLICATION CHECK
+            # Check if an active conflict with the same description already exists
+            stmt = select(Conflict).where(
+                and_(
+                    Conflict.description == conflict_data["description"],
+                    Conflict.conflict_type == conflict_data["conflict_type"],
+                    Conflict.status.in_([ConflictStatus.DETECTED, ConflictStatus.NEGOTIATING, ConflictStatus.ESCALATED])
+                )
+            )
+            result = await db_session.execute(stmt)
+            existing_conflict = result.scalars().first()
+
+            if existing_conflict:
+                logger.debug(f"Skipping duplicate conflict: {conflict_data['description']} (ID: {existing_conflict.id})")
+                return
+
             # Create Conflict Record
             conflict = Conflict(
                 conflict_type=conflict_data["conflict_type"],
@@ -528,10 +543,11 @@ class ContinuousMonitor:
             logger.info(f"Triggering auto-negotiation for Conflict {conflict.id}")
             
             # Trigger Auto-Negotiation
-            reconciler = get_reconciliation_service(db_session)
-            result = await reconciler.run_automated_negotiation(conflict)
+            from app.services.negotiation_service import NegotiationService
+            reconciler = NegotiationService(db_session)
+            result = await reconciler.run_negotiation(conflict.id)
             
-            if result.get("negotiation_result") == "auto_resolved":
+            if result.get("status") == "CONSENSUS_REACHED":
                 logger.info(f"Conflict {conflict.id} AUTO-RESOLVED")
             else:
                 logger.warning(f"Conflict {conflict.id} ESCALATED")
