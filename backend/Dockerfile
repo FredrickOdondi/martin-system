@@ -1,5 +1,5 @@
 # Backend Dockerfile for Railway deployment
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -10,12 +10,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app/backend
 
 # Install system dependencies
+# Removed python3-* packages to avoid conflicts with Docker image python
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
     curl \
     build-essential \
-    python3-dev \
     libcairo2 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
