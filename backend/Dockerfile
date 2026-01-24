@@ -4,13 +4,12 @@ FROM python:3.11-slim-bookworm
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/backend
+    PYTHONPATH=/app
 
-# Set work directory to backend
-WORKDIR /app/backend
+# Set work directory
+WORKDIR /app
 
 # Install system dependencies
-# Removed python3-* packages to avoid conflicts with Docker image python
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
@@ -27,22 +26,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
-COPY requirements.txt ./
+COPY backend/requirements.txt ./requirements.txt
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
 # Copy the backend directory contents
-COPY . .
+COPY backend/ ./
 
 # Create uploads directory and set permissions
-RUN mkdir -p /app/backend/uploads && \
-    chmod -R 777 /app/backend/uploads
+RUN mkdir -p /app/uploads && \
+    chmod -R 777 /app/uploads
 
 # Expose port (Railway will set PORT env variable)
 EXPOSE ${PORT:-8000}
 
-# Default command can be overridden by Railway Service settings
-# to run either web server or celery worker
+# Default command - alembic and uvicorn run from /app where app module is located
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
