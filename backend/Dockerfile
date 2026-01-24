@@ -3,7 +3,8 @@ FROM python:3.11-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/backend
 
 # Set work directory to backend
 WORKDIR /app/backend
@@ -15,16 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     build-essential \
     python3-dev \
-    python3-pip \
-    python3-setuptools \
-    python3-wheel \
-    python3-cffi \
     libcairo2 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libgdk-pixbuf-2.0-0 \
     libffi-dev \
     shared-mime-info \
+    tesseract-ocr \
+    tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
@@ -37,18 +36,13 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy the backend directory contents
 COPY . .
 
-# Create uploads directory
-RUN mkdir -p /app/backend/uploads
-
-# Set PYTHONPATH to include the backend directory
-ENV PYTHONPATH=/app/backend
+# Create uploads directory and set permissions
+RUN mkdir -p /app/backend/uploads && \
+    chmod -R 777 /app/backend/uploads
 
 # Expose port (Railway will set PORT env variable)
 EXPOSE ${PORT:-8000}
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
-
-# Default command - run from backend directory where app module is located
+# Default command can be overridden by Railway Service settings
+# to run either web server or celery worker
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
