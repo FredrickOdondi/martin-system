@@ -22,14 +22,16 @@ class TWGPillar(str, enum.Enum):
     RESOURCE_MOBILIZATION = "resource_mobilization"
 
 class MeetingStatus(str, enum.Enum):
-    SCHEDULED = "scheduled"
-    CANCELLED = "cancelled"
-    COMPLETED = "completed"
+    REQUESTED = "REQUESTED"
+    SCHEDULED = "SCHEDULED"
+    IN_PROGRESS = "IN_PROGRESS"
+    CANCELLED = "CANCELLED"
+    COMPLETED = "COMPLETED"
 
 class RsvpStatus(str, enum.Enum):
-    PENDING = "pending"
-    ACCEPTED = "accepted"
-    DECLINED = "declined"
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    DECLINED = "DECLINED"
 
 class MinutesStatus(str, enum.Enum):
     DRAFT = "draft"
@@ -39,10 +41,10 @@ class MinutesStatus(str, enum.Enum):
     FINAL = "final"
 
 class ActionItemStatus(str, enum.Enum):
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    OVERDUE = "overdue"
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    OVERDUE = "OVERDUE"
 
 class ActionItemPriority(str, enum.Enum):
     LOW = "low"
@@ -51,13 +53,13 @@ class ActionItemPriority(str, enum.Enum):
     URGENT = "urgent"
 
 class ProjectStatus(str, enum.Enum):
-    IDENTIFIED = "identified"
-    VETTING = "vetting"
-    DUE_DILIGENCE = "due_diligence"
-    FINANCING = "financing"
-    DEAL_ROOM = "deal_room"
-    BANKABLE = "bankable"
-    PRESENTED = "presented"
+    IDENTIFIED = "IDENTIFIED"
+    VETTING = "VETTING"
+    DUE_DILIGENCE = "DUE_DILIGENCE"
+    FINANCING = "FINANCING"
+    DEAL_ROOM = "DEAL_ROOM"
+    BANKABLE = "BANKABLE"
+    PRESENTED = "PRESENTED"
 
 class NotificationType(str, enum.Enum):
     INFO = "info"

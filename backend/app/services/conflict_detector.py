@@ -742,6 +742,97 @@ If no conflicts, respond with: NO CONFLICT
                     
         return conflicts
 
+    async def detect_live_conflict(self, chunk_text: str, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Sub-second check for conflicts in a live transcript chunk.
+        Checks against current context (other TWG targets).
+        """
+        if not self.llm:
+            return None
+
+        # Short, aggressive prompt for real-time feedback
+        prompt = f"""
+        LIVE MEETING MONITOR:
+        Meeting Context: {context.get('twg_name', 'General')} - {context.get('meeting_title', 'Meeting')}
+        Transcript Segment: "{chunk_text}"
+        
+        CRITICAL TASK: Does this statement conflict with known ECOWAS policies or other TWG targets (e.g., Energy vs Environment)?
+        
+        If CONFLICT exists, return VALID JSON:
+        {{
+            "is_conflict": true,
+            "severity": "high|medium|low",
+            "reason": "short explanation",
+            "suggestion": "what to say to the chair"
+        }}
+        Otherwise return: {{"is_conflict": false}}
+        """
+        
+        try:
+            # Note: We should ideally use a very fast model here
+            response_str = self.llm.chat(prompt, max_tokens=200)
+            
+            # Clean json
+            if "```json" in response_str:
+                response_str = response_str.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_str:
+                 response_str = response_str.split("```")[1].split("```")[0].strip()
+                 
+            analysis = json.loads(response_str)
+            if analysis.get("is_conflict"):
+                return analysis
+        except Exception as e:
+            logger.error(f"Live conflict detection failed: {e}")
+            
+        return None
+
+    async def analyze_live_agenda(self, chunk_text: str, agenda_content: str, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Proactively analyze a transcript chunk to track agenda progress and decisions.
+        """
+        if not self.llm:
+            return None
+
+        prompt = f"""
+        LIVE AGENDA MONITOR:
+        Meeting: {context.get('meeting_title', 'General')}
+        Official Agenda: {agenda_content}
+        
+        Transcript Chunk: "{chunk_text}"
+        
+        TASK:
+        1. Identify what is currently being discussed (Current Focus).
+        2. Extract any explicit decisions reached in this chunk.
+        3. Determine which agenda item(s) are being covered or were just completed.
+        
+        Return VALID JSON:
+        {{
+            "current_focus": "string (short)",
+            "decisions": ["string"],
+            "completed_items_indices": [integer (0-based)],
+            "insight_summary": "string (very short summary of the chunk action)"
+        }}
+        
+        Rules:
+        - If no clear focus or decision, return null for those fields.
+        - indices refer to the bullets in the Official Agenda starting from 0.
+        """
+
+        try:
+            response_str = self.llm.chat(prompt, max_tokens=300)
+            
+            # Clean json
+            if "```json" in response_str:
+                response_str = response_str.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_str:
+                 response_str = response_str.split("```")[1].split("```")[0].strip()
+                 
+            analysis = json.loads(response_str)
+            return analysis
+        except Exception as e:
+            logger.error(f"Live agenda analysis failed: {e}")
+            return None
+
     def _cosine_similarity(self, v1: List[float], v2: List[float]) -> float:
         """Calculate cosine similarity between two vectors"""
         dot_product = sum(a * b for a, b in zip(v1, v2))

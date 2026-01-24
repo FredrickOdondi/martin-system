@@ -1,10 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Request, WebSocket, WebSocketDisconnect, Query
 from app.services.audit_service import audit_service
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
+from sqlalchemy import select, text, and_, or_
 from typing import List, Optional
 import uuid
-from datetime import timezone
+from datetime import datetime, timedelta, timezone
+import asyncio
+import json
+import redis
+import logging
+import traceback
 
 from app.core.database import get_db
 from app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesStatus, MeetingParticipant, RsvpStatus, ActionItem, ActionItemStatus, TWG, Document, MeetingStatus, MeetingDependency, DependencyType
@@ -22,8 +27,56 @@ from app.core.config import settings
 from sqlalchemy.orm import selectinload
 from app.services.document_synthesizer import DocumentSynthesizer
 from app.services.llm_service import llm_service
+from app.utils.security import verify_token
+from app.core.ws_manager import ws_manager
+from app.services.vexa_service import VexaService
+from app.core.database import get_db, get_db_session_context
 
 router = APIRouter(prefix="/meetings", tags=["Meetings"])
+
+@router.get("/active")
+async def get_active_meeting(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Returns the currently active meeting (status=IN_PROGRESS) for the user's TWGs.
+    """
+    # Find a meeting that is currently happening (In Progress)
+    # Using status if existing, or just based on time
+    stmt = select(Meeting).where(
+        and_(
+            Meeting.status == MeetingStatus.IN_PROGRESS,
+            # Or simplified for now: starts within last 2 hours and hasn't ended
+        )
+    ).order_by(Meeting.scheduled_at.desc()).limit(1)
+    
+    # Actually, let's look for meetings that have a transcript placeholder active
+    # as that's what Vexa is recording.
+    stmt = select(Meeting).join(Document, Meeting.id == Document.meeting_id).where(
+        Document.document_type == "transcript_placeholder"
+    ).order_by(Meeting.scheduled_at.desc()).limit(1)
+    
+    result = await db.execute(stmt)
+    meeting = result.scalar_one_or_none()
+    
+    if not meeting:
+        # Fallback: find any meeting scheduled for now
+        now = datetime.utcnow()
+        stmt = select(Meeting).where(
+            and_(
+                Meeting.scheduled_at <= now,
+                Meeting.scheduled_at >= now - timedelta(hours=2),
+                Meeting.status != 'cancelled'
+            )
+        ).order_by(Meeting.scheduled_at.desc()).limit(1)
+        result = await db.execute(stmt)
+        meeting = result.scalar_one_or_none()
+
+    if not meeting:
+        raise HTTPException(status_code=404, detail="No active meeting found")
+    
+    return meeting
 
 @router.post("/", response_model=MeetingRead, status_code=status.HTTP_201_CREATED)
 async def create_meeting(
@@ -2691,3 +2744,160 @@ Example: "Energy TWG Session 2: Infrastructure Assessment Review"
         "message": "Draft meeting created. Review and finalize using the scheduling endpoint.",
         "based_on_meeting": str(meeting_id)
     }
+
+@router.websocket("/{meeting_id}/live")
+async def live_meeting_websocket(
+    websocket: WebSocket,
+    meeting_id: str,
+    token: Optional[str] = Query(None)
+):
+    # 1. ALWAYS ACCEPT FIRST
+    # This prevents the browser from thinking the connection was rejected
+    await websocket.accept()
+    
+    # 2. Authenticate
+    user_id = "anonymous"
+    ws_token = token or websocket.query_params.get("token")
+    
+    if ws_token:
+        try:
+            payload = verify_token(ws_token, "access")
+            if payload:
+                user_id = payload.get("sub", "anonymous")
+        except Exception:
+            pass
+    
+    print(f"WS LIVE: user={user_id} meeting={meeting_id}")
+    
+    # Register connection
+    if user_id not in ws_manager.active_connections:
+        ws_manager.active_connections[user_id] = []
+    ws_manager.active_connections[user_id].append(websocket)
+    
+    # 2. Setup Redis Subscription
+    r = None
+    pubsub = None
+    try:
+        # Connect to Redis for real-time stream
+        try:
+            if settings.REDIS_URL:
+                r = redis.from_url(settings.REDIS_URL)
+            elif settings.REDIS_HOST:
+                r = redis.Redis(
+                    host=settings.REDIS_HOST, 
+                    port=settings.REDIS_PORT, 
+                    db=settings.REDIS_DB, 
+                    password=settings.REDIS_PASSWORD
+                )
+        except Exception as re:
+            print(f"WS REDIS CONNECTION FAILED: {re}")
+        
+        if r:
+            pubsub = r.pubsub()
+            pubsub.subscribe("live_meeting_stream")
+            
+        # 3. Handle connection
+        await websocket.send_json({
+            "type": "connected", 
+            "meeting_id": str(meeting_id),
+            "status": "ready"
+        })
+
+        # 4. Load History from Redis
+        if r:
+            try:
+                # lrange returns bytes, reversed to send oldest first
+                history_bytes = r.lrange(f"live_updates:{meeting_id}", 0, -1)
+                for msg_bytes in reversed(history_bytes):
+                    try:
+                        await websocket.send_json(json.loads(msg_bytes.decode('utf-8')))
+                    except Exception as je:
+                        print(f"WS History Parse error: {je}")
+            except Exception as he:
+                print(f"WS History load error: {he}")
+        
+        # Start a background task to listen to Redis
+        async def redis_listener():
+            if not pubsub:
+                return
+            try:
+                # Use a separate thread for the synchronous pubsub blocking calls
+                def get_redis_msg():
+                    try:
+                        return pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                    except Exception:
+                        return None
+
+                while True:
+                    message = await asyncio.to_thread(get_redis_msg)
+                    if message:
+                        try:
+                            data = json.loads(message['data'])
+                            # Filter by meeting_id to ensure privacy
+                            if data.get("meeting_id") == str(meeting_id):
+                                await websocket.send_json(data)
+                        except Exception as je:
+                            print(f"Error parsing Redis message: {je}")
+                    await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                print(f"Redis listener error for {meeting_id}: {e}")
+
+        listener_task = asyncio.create_task(redis_listener())
+        
+        try:
+            while True:
+                # Keep connection alive and receive incoming pings/commands
+                try:
+                    raw_data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                    if raw_data == "ping":
+                        await websocket.send_text("pong")
+                        continue
+                    
+                    # Handle JSON commands from Martin Command Center
+                    try:
+                        msg_json = json.loads(raw_data)
+                        if msg_json.get("type") == "live_command":
+                            question = msg_json.get("command")
+                            print(f"Manual command received for {meeting_id}: {question}")
+                            async with get_db_session_context() as db:
+                                await VexaService()._handle_live_command(str(meeting_id), question, db)
+                        
+                        elif msg_json.get("type") == "request_insight":
+                            print(f"Manual insight request for {meeting_id}")
+                            # Trigger a proactive scan using current transcript
+                            async with get_db_session_context() as db:
+                                res_m = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
+                                meeting_obj = res_m.scalar_one_or_none()
+                                if meeting_obj and meeting_obj.transcript:
+                                    # Use analyze_live_chunk on the existing transcript (or just a fresh scan)
+                                    # For manual, we can treat the whole transcript as a 'chunk' or just the last bit.
+                                    # Let's use the last 2000 chars for a quick manual scan.
+                                    chunk = meeting_obj.transcript[-2000:]
+                                    await VexaService().analyze_live_chunk(str(meeting_id), chunk, db)
+                    except Exception as je:
+                        # Not a valid JSON or other parse error, ignore or log
+                        pass
+
+                except asyncio.TimeoutError:
+                    # Heartbeat
+                    try:
+                        await websocket.send_json({"type": "heartbeat", "status": "alive"})
+                    except:
+                        break
+        except WebSocketDisconnect:
+            pass
+        finally:
+            listener_task.cancel()
+            if pubsub:
+                try:
+                    pubsub.unsubscribe("live_meeting_stream")
+                    pubsub.close()
+                except:
+                    pass
+                
+    except Exception as e:
+        print(f"WebSocket error for meeting {meeting_id}: {e}")
+    finally:
+        ws_manager.disconnect(websocket, user_id)

@@ -24,6 +24,7 @@ import AgentAssistant from './pages/assistant/AgentAssistant'
 import SummitSchedule from './pages/schedule/SummitSchedule'
 import MeetingDetail from './pages/schedule/MeetingDetail'
 import LiveMeeting from './pages/schedule/LiveMeeting'
+import ActiveMeetingRedirect from './pages/schedule/ActiveMeetingRedirect'
 import DocumentLibrary from './pages/documents/DocumentLibrary'
 import NotificationCenter from './pages/notifications/NotificationCenter'
 import TeamManagement from './pages/admin/TeamManagement'
@@ -114,6 +115,7 @@ function App() {
                 <Route path="/schedule" element={<SummitSchedule />} />
                 <Route path="/meetings/:id" element={<MeetingDetail />} />
                 <Route path="/meetings/:id/live" element={<LiveMeeting />} />
+                <Route path="/meetings/active/live" element={<ActiveMeetingRedirect />} />
                 <Route path="/knowledge-base" element={<KnowledgeBase />} />
                 <Route path="/conflicts" element={<ProjectConflicts />} />
                 <Route path="/deal-pipeline" element={<DealPipeline />} />

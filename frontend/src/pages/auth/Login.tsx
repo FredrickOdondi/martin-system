@@ -48,7 +48,6 @@ export default function Login() {
         // Function to attempt initialization
         const initializeGoogle = () => {
             if (window.google?.accounts?.id && document.getElementById("googleSync")) {
-                console.log("[DEBUG] Google Script Detected. Initializing...");
                 try {
                     window.google.accounts.id.initialize({
                         client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
@@ -80,7 +79,6 @@ export default function Login() {
             // Safety timeout after 10 seconds
             const timeoutId = setTimeout(() => {
                 clearInterval(intervalId);
-                console.warn("[WARN] Google Sign-In script loading timed out");
             }, 10000);
 
             return () => {

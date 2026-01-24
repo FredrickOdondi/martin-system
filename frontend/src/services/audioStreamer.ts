@@ -9,10 +9,8 @@ type AudioStreamerConfig = {
 };
 
 export class AudioStreamer {
-    private mediaRecorder: MediaRecorder | null = null;
     private socket: WebSocket | null = null;
     private config: AudioStreamerConfig;
-    private stream: MediaStream | null = null;
     private token: string | null = null;
 
     constructor(config: AudioStreamerConfig) {
@@ -22,13 +20,7 @@ export class AudioStreamer {
 
     async start() {
         try {
-            // 1. Get Microphone Access
-            this.stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    channelCount: 1,
-                    sampleRate: 16000, // Deepgram/Google preferred
-                }
-            });
+            // No microphone needed - we rely on Vexa sync
 
             // 2. Connect WebSocket
             // Handle relative API_URL or absolute
@@ -46,13 +38,29 @@ export class AudioStreamer {
 
             this.socket.onopen = () => {
                 this.config.onStatusChange('connected');
-                this.startRecording();
+                // Removed: startRecording()
             };
 
             this.socket.onmessage = (event) => {
                 try {
                     const message = JSON.parse(event.data);
-                    if (message.type === 'transcript') {
+
+                    // Unified handler for live Meeting insights and Vexa transcripts
+                    if (message.type === 'live_meeting_update') {
+                        if (message.source === 'vexa_transcript_sync') {
+                            // Map Vexa chunk to transcript area
+                            this.config.onTranscript({
+                                text: message.content,
+                                is_final: true
+                            });
+                        } else {
+                            // Map other insights (conflicts, answers) to agenda monitor
+                            if (this.config.onAgendaUpdate) {
+                                this.config.onAgendaUpdate(message);
+                            }
+                        }
+                    } else if (message.type === 'transcript') {
+                        // Legacy/Direct support
                         this.config.onTranscript(message.data);
                     } else if (message.type === 'agenda_update') {
                         if (this.config.onAgendaUpdate) {
@@ -68,6 +76,7 @@ export class AudioStreamer {
 
             this.socket.onerror = (e) => {
                 console.error("WebSocket Error", e);
+                this.config.onStatusChange('disconnected');
                 this.config.onError("WebSocket connection failed");
             };
 
@@ -82,41 +91,22 @@ export class AudioStreamer {
         }
     }
 
-    private startRecording() {
-        if (!this.stream || !this.socket) return;
+    // startRecording removed - purely listening to Vexa stream
 
-        // Create MediaRecorder
-        // Use a supported mime type. Chrome supports audio/webm;codecs=opus
-        const mimeType = 'audio/webm;codecs=opus';
-        if (!MediaRecorder.isTypeSupported(mimeType)) {
-            console.warn(`${mimeType} not supported, falling back to default`);
+    sendCommand(data: any) {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            this.socket.send(JSON.stringify(data));
+        } else {
+            console.warn("WebSocket not open, cannot send command");
         }
-
-        this.mediaRecorder = new MediaRecorder(this.stream, {
-            mimeType: MediaRecorder.isTypeSupported(mimeType) ? mimeType : undefined
-        });
-
-        this.mediaRecorder.ondataavailable = async (event) => {
-            if (event.data.size > 0 && this.socket?.readyState === WebSocket.OPEN) {
-                this.socket.send(event.data);
-            }
-        };
-
-        // Send chunks every 250ms
-        this.mediaRecorder.start(250);
-        this.config.onStatusChange('recording');
     }
 
     stop() {
-        if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-            this.mediaRecorder.stop();
-        }
-        if (this.stream) {
-            this.stream.getTracks().forEach(track => track.stop());
-            this.stream = null;
-        }
         if (this.socket) {
-            this.socket.close();
+            // Only attempt to close if not already closed or closing
+            if (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING) {
+                this.socket.close();
+            }
             this.socket = null;
         }
         this.config.onStatusChange('disconnected');

@@ -28,15 +28,16 @@ class TWGPillar(str, enum.Enum):
     resource_mobilization = "resource_mobilization"
 
 class MeetingStatus(str, enum.Enum):
-    REQUESTED = "requested"  # New: Pending Supervisor approval
-    SCHEDULED = "scheduled"
-    CANCELLED = "cancelled"
-    COMPLETED = "completed"
+    REQUESTED = "REQUESTED"  # New: Pending Supervisor approval
+    SCHEDULED = "SCHEDULED"
+    IN_PROGRESS = "IN_PROGRESS" # Added: Currently live/active
+    CANCELLED = "CANCELLED"
+    COMPLETED = "COMPLETED"
 
 class RsvpStatus(str, enum.Enum):
-    PENDING = "pending"
-    ACCEPTED = "accepted"
-    DECLINED = "declined"
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    DECLINED = "DECLINED"
 
 class MinutesStatus(str, enum.Enum):
     DRAFT = "DRAFT"
@@ -46,10 +47,10 @@ class MinutesStatus(str, enum.Enum):
     FINAL = "FINAL"
 
 class ActionItemStatus(str, enum.Enum):
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    OVERDUE = "overdue"
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    OVERDUE = "OVERDUE"
 
 class ActionItemPriority(str, enum.Enum):
     LOW = "low"
@@ -59,26 +60,26 @@ class ActionItemPriority(str, enum.Enum):
 
 class ProjectStatus(str, enum.Enum):
     # Submission Phase
-    DRAFT = "draft"
-    PIPELINE = "pipeline"
-    UNDER_REVIEW = "under_review"
+    DRAFT = "DRAFT"
+    PIPELINE = "PIPELINE"
+    UNDER_REVIEW = "UNDER_REVIEW"
     
     # Decision Phase
-    DECLINED = "declined"
-    NEEDS_REVISION = "needs_revision"
-    SUMMIT_READY = "summit_ready"
+    DECLINED = "DECLINED"
+    NEEDS_REVISION = "NEEDS_REVISION"
+    SUMMIT_READY = "SUMMIT_READY"
     
     # Deal Room Phase
-    DEAL_ROOM_FEATURED = "deal_room_featured"
-    IN_NEGOTIATION = "in_negotiation"
+    DEAL_ROOM_FEATURED = "DEAL_ROOM_FEATURED"
+    IN_NEGOTIATION = "IN_NEGOTIATION"
     
     # Post-Deal Phase
-    COMMITTED = "committed"
-    IMPLEMENTED = "implemented"
+    COMMITTED = "COMMITTED"
+    IMPLEMENTED = "IMPLEMENTED"
     
     # Other
-    ON_HOLD = "on_hold"
-    ARCHIVED = "archived"
+    ON_HOLD = "ON_HOLD"
+    ARCHIVED = "ARCHIVED"
     
     # Legacy Statuses (Mapped to new ones where possible, but kept for safety)
     IDENTIFIED = "identified"      # -> DRAFT or PIPELINE

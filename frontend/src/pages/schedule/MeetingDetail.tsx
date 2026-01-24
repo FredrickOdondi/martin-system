@@ -787,7 +787,17 @@ export default function MeetingDetail() {
                                     <svg className="w-4 h-4 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
                                     </svg>
-                                    Join Video Call
+                                    Join
+                                </button>
+                            )}
+
+                            {['in_progress', 'IN_PROGRESS'].includes(meeting?.status) && (
+                                <button
+                                    onClick={() => navigate(`/meetings/${meetingId}/live`)}
+                                    className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors flex items-center gap-2"
+                                >
+                                    <div className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></div>
+                                    LIVE
                                 </button>
                             )}
 

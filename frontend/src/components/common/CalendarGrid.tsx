@@ -156,6 +156,9 @@ export default function CalendarGrid({
                                         title={`${event.title} (${event.twg_name})`}
                                     >
                                         {event.has_conflicts && <span className="material-symbols-outlined text-[10px] text-amber-500">warning</span>}
+                                        {['in_progress', 'IN_PROGRESS'].includes(event.status || '') && (
+                                            <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" title="Meeting is Live" />
+                                        )}
                                         <span className="font-semibold truncate flex-1">{event.title}</span>
                                         {event.twg_name && (
                                             <span className="text-[8px] opacity-70 uppercase tracking-tighter bg-white/20 px-0.5 rounded ml-1">

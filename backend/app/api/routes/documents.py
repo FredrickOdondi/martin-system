@@ -265,7 +265,7 @@ async def download_document(
         # Create a dynamic status file instead of looking for file on disk
         status_text = f" Transcript Processing Status\n" \
                       f"===========================\n\n" \
-                      f"Meeting: {db_doc.title.replace('Vexa Recording - ', '')}\n" \
+                      f"Meeting: {db_doc.file_name.replace('Vexa Recording - ', '')}\n" \
                       f"Status: Recording/Processing in progress\n" \
                       f"Session ID: {db_doc.metadata_json.get('vexa_session_id', 'Unknown')}\n\n" \
                       f"The audio is currently being transcribed. Once the meeting ends and processing is complete,\n" \

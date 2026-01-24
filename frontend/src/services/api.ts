@@ -18,7 +18,6 @@ if (apiUrl.toLowerCase().includes('railway.app')) {
 }
 
 // Debug logging (will be visible in browser console)
-console.log('[API Config] Final API URL:', apiUrl);
 
 export const API_URL = apiUrl;
 
@@ -32,13 +31,6 @@ const api = axios.create({
 // Request interceptor for adding the auth token
 api.interceptors.request.use(
     (config) => {
-        // Debug: Log the full URL being requested
-        try {
-            const fullUrl = (config.baseURL || '') + (config.url || '');
-            console.log(`[API Request] Method: ${config.method?.toUpperCase()} URL: ${fullUrl}`);
-        } catch (e) {
-            // ignore
-        }
 
         // Try to get token from Redux store first, then fall back to localStorage
         let token = store.getState().auth.token;
@@ -80,6 +72,7 @@ api.interceptors.response.use(
 export default api;
 
 export const meetings = {
+    getActive: () => api.get('/meetings/active'),
     list: (skip = 0, limit = 100) => api.get(`/meetings/?skip=${skip}&limit=${limit}`),
     get: (id: string) => api.get(`/meetings/${id}`),
     create: (data: any) => api.post('/meetings/', data),

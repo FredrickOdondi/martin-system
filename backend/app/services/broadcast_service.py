@@ -155,6 +155,44 @@ class BroadcastService:
         except Exception as e:
             logger.error(f"Failed to push notification to Redis for {agent_id}: {e}")
 
+    async def notify_live_meeting(
+        self,
+        meeting_id: str,
+        content: str,
+        source: str = "live_insight",
+        original_question: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None
+    ):
+        """
+        Notify the live meeting dashboard of a new insight or response.
+        """
+        if not self.redis_client:
+            logger.warning("Redis client not initialized, skipping live notification")
+            return
+
+        payload = {
+            "type": "live_meeting_update",
+            "meeting_id": str(meeting_id),
+            "source": source,
+            "content": content,
+            "original_question": original_question,
+            "metadata": metadata,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        try:
+            # 1. Push to a list for persistence/polling
+            queue_key = f"live_updates:{meeting_id}"
+            self.redis_client.lpush(queue_key, json.dumps(payload))
+            self.redis_client.ltrim(queue_key, 0, 49) # Keep last 50 updates
+            
+            # 2. Publish for real-time WebSocket clients
+            self.redis_client.publish("live_meeting_stream", json.dumps(payload))
+            
+            logger.info(f"✓ Post LIVE UPDATE for meeting {meeting_id} from {source}")
+        except Exception as e:
+            logger.error(f"Failed to push live update to Redis: {e}")
+
     def _log_broadcast(self, doc_id: str, recipients: List[str]):
         """Log the broadcast event."""
         logger.info(f"[BROADCAST_LOG] Doc: {doc_id} -> Agents: {recipients}")

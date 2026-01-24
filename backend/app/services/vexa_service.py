@@ -1,13 +1,15 @@
-
+import re
 import aiohttp
 import asyncio
 import json
 import logging
 from typing import Optional, Dict, Any, List
+from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.models.models import Meeting, Minutes, MinutesStatus, ActionItem, ActionItemStatus
+from app.models.models import Meeting, Minutes, MinutesStatus, ActionItem, ActionItemStatus, MeetingStatus, Agenda
 from app.services.document_synthesizer import DocumentSynthesizer
 from app.services.groq_llm_service import get_llm_service
 from datetime import datetime
@@ -25,6 +27,7 @@ class VexaService:
     def __init__(self):
         self.api_url = settings.VEXA_API_URL
         self.api_key = settings.VEXA_API_KEY
+        self.time_cache = {} # Cache for stable segment timestamps
         self.headers = {
             "X-API-Key": self.api_key,
             "Authorization": f"Bearer {self.api_key}", 
@@ -124,36 +127,48 @@ class VexaService:
                                 segment_texts = []
                                 current_speaker = None
                                 
-                                for segment in segments:
+                                for i, segment in enumerate(segments):
                                     if isinstance(segment, dict):
                                         text = segment.get('text', '').strip()
                                         if not text:
                                             continue
                                         
                                         # Extract speaker information
-                                        # Vexa can provide: speaker, speaker_id, speaker_name, name
                                         speaker = (
                                             segment.get('speaker_name') or 
                                             segment.get('name') or 
                                             segment.get('speaker') or 
-                                            segment.get('speaker_id')
+                                            segment.get('speaker_id') or
+                                            "Unknown Speaker"
                                         )
                                         
-                                        # Format with speaker label if available and different from previous
-                                        if speaker:
-                                            # Only add speaker label when speaker changes
-                                            if speaker != current_speaker:
-                                                segment_texts.append(f"\n[{speaker}]: {text}")
-                                                current_speaker = speaker
-                                            else:
-                                                segment_texts.append(text)
+                                        # Stability Key: use segment ID or platform/id/index
+                                        segment_key = segment.get('id') or f"{platform}_{native_meeting_id}_{i}"
+                                        
+                                        if segment_key in self.time_cache:
+                                            time_label = self.time_cache[segment_key]
                                         else:
-                                            segment_texts.append(text)
+                                            # Generate stable timestamp once
+                                            time_label = datetime.now().strftime("%I:%M %p")
+                                            
+                                            seg_time = segment.get('time') or segment.get('timestamp') or segment.get('startTime')
+                                            if seg_time:
+                                                try:
+                                                    if isinstance(seg_time, str):
+                                                        time_label = datetime.fromisoformat(seg_time.replace('Z', '+00:00')).strftime("%I:%M %p")
+                                                    elif isinstance(seg_time, (int, float)) and seg_time > 1000000000:
+                                                        time_label = datetime.fromtimestamp(seg_time).strftime("%I:%M %p")
+                                                except: pass
+                                            
+                                            self.time_cache[segment_key] = time_label
+                                        
+                                        formatted_block = f"{time_label}\n{speaker}:\n{text}"
+                                        segment_texts.append(formatted_block)
                                     elif isinstance(segment, str):
                                         segment_texts.append(segment)
                                 
                                 if segment_texts:
-                                    transcript_text = " ".join(segment_texts)
+                                    transcript_text = "\n".join(segment_texts)
                                 else:
                                     # Empty segments array - no speech recorded
                                     logger.info(f"Vexa returned empty segments array for {platform}/{native_meeting_id}")
@@ -187,6 +202,117 @@ class VexaService:
         except Exception as e:
             logger.error(f"✗ Error fetching transcript {platform}/{native_meeting_id}: {e}")
             return None
+
+    async def analyze_live_chunk(self, meeting_id: str, chunk_text: str, db: AsyncSession):
+        """
+        Analyze a live transcript chunk for:
+        1. "Hey Martin" / "Secretariat Bot" command triggers
+        2. Real-time conflict detection against KB
+        """
+        try:
+            logger.info(f"Analyzing live chunk for meeting {meeting_id}...")
+            
+            # 1. Command Detection (regex)
+            # Pattern: Hey Martin, [question/command]
+            command_pattern = r"(?i)(hey martin|secretariat bot),?\s*(.*)"
+            match = re.search(command_pattern, chunk_text)
+            
+            if match:
+                question = match.group(2).strip()
+                logger.info(f"✓ Detected live command/question: {question}")
+                await self._handle_live_command(meeting_id, question, db)
+            
+            # 2. Live Analysis (Conflict & Agenda)
+            try:
+                from app.services.conflict_detector import ConflictDetector
+                detector = ConflictDetector(llm_client=get_llm_service())
+                
+                # Fetch meeting with TWG and Agenda
+                stmt_m = select(Meeting).where(Meeting.id == meeting_id).options(
+                    selectinload(Meeting.twg),
+                    selectinload(Meeting.agenda)
+                )
+                res_m = await db.execute(stmt_m)
+                meeting = res_m.scalar_one_or_none()
+                
+                if meeting:
+                    twg_name = meeting.twg.name if meeting.twg else "General"
+                    context = {
+                        "twg_name": twg_name,
+                        "meeting_title": meeting.title
+                    }
+                    
+                    from app.services.broadcast_service import get_broadcast_service
+                    broadcast = get_broadcast_service()
+                    
+                    # 2a. Live Conflict Detection
+                    live_conflict = await detector.detect_live_conflict(chunk_text, context)
+                    if live_conflict:
+                        logger.warning(f"⚠️ LIVE CONFLICT DETECTED: {live_conflict['reason']}")
+                        await broadcast.notify_live_meeting(
+                            meeting_id=meeting_id,
+                            content=f"**POTENTIAL CONFLICT:** {live_conflict['reason']}\n\n*Suggestion:* {live_conflict['suggestion']}",
+                            source="live_conflict_detector"
+                        )
+                    
+                    # 2b. Proactive Agenda Monitoring
+                    if meeting.agenda:
+                        logger.info(f"Running proactive agenda analysis for {meeting.title}...")
+                        agenda_insight = await detector.analyze_live_agenda(
+                            chunk_text=chunk_text,
+                            agenda_content=meeting.agenda.content,
+                            context=context
+                        )
+                        
+                        if agenda_insight and (agenda_insight.get('decisions') or agenda_insight.get('current_focus')):
+                            logger.info(f"✓ New Agenda Insight: {agenda_insight.get('insight_summary')}")
+                            # Send the whole payload for the specialized frontend component
+                            await broadcast.notify_live_meeting(
+                                meeting_id=meeting_id,
+                                content=agenda_insight.get('insight_summary') or "Progress update",
+                                source="agenda_monitor",
+                                # Extra data for the frontend
+                                metadata=agenda_insight
+                            )
+
+            except Exception as ce:
+                logger.error(f"Error in live analysis: {ce}")
+                import traceback
+                logger.error(traceback.format_exc())
+
+        except Exception as e:
+            logger.error(f"Failed to analyze live chunk for meeting {meeting_id}: {e}")
+
+    async def _handle_live_command(self, meeting_id: str, question: str, db: AsyncSession):
+        """
+        Process a "Hey Martin" question during a live meeting.
+        """
+        try:
+            from app.services.project_insights_service import ProjectInsightsService
+            from app.services.broadcast_service import get_broadcast_service
+            
+            llm = get_llm_service()
+            broadcast = get_broadcast_service()
+            
+            # 1. RAG Answer
+            context_prompt = f"The following question was asked during a live ECOWAS meeting. Provide a concise, factual answer based on the knowledge base: \n\nQuestion: {question}"
+            answer = await asyncio.to_thread(llm.chat, context_prompt)
+            
+            logger.info(f"Martin real-time response: {answer}")
+            
+            # 2. Notify the Live Dashboard
+            # In a production environment, this would be a WebSocket push.
+            # For now, we use the BroadcastService to send a "live_insight" notification.
+            if hasattr(broadcast, "notify_live_meeting"):
+                await broadcast.notify_live_meeting(
+                    meeting_id=meeting_id,
+                    content=answer,
+                    source="live_command",
+                    original_question=question
+                )
+            
+        except Exception as e:
+            logger.error(f"Error handling live command: {e}")
 
     async def process_transcript_text(self, meeting: Meeting, transcript_text: str, db: AsyncSession):
         """

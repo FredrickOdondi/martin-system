@@ -271,7 +271,12 @@ export default function TwgWorkspace() {
                                                         .map((m, i) => (
                                                             <tr key={m.id || i} className="hover:bg-slate-50 dark:hover:bg-slate-800/20 transition-colors group">
                                                                 <td className="px-6 py-4">
-                                                                    <div className="font-bold text-slate-900 dark:text-white group-hover:text-blue-600 transition-colors">{m.title}</div>
+                                                                    <div className="flex items-center gap-2">
+                                                                        <div className="font-bold text-slate-900 dark:text-white group-hover:text-blue-600 transition-colors">{m.title}</div>
+                                                                        {['in_progress', 'IN_PROGRESS'].includes(m.status) && (
+                                                                            <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" title="Meeting is Live" />
+                                                                        )}
+                                                                    </div>
                                                                     <div className="text-[10px] text-slate-400 uppercase font-black">
                                                                         {new Date(m.scheduled_at).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                                                     </div>
