@@ -104,7 +104,12 @@ tqdm==4.66.1
 
 # WebSocket Support
 websockets==12.0
-apscheduler
+apscheduler==3.10.4
+
+# Background Task Queue (Production)
+celery[redis]==5.3.4
+redis==5.0.1
+flower==2.0.1
 
 # Text Extraction & OCR
 PyMuPDF==1.23.8        # PDF text extraction

@@ -15,16 +15,18 @@ from datetime import datetime, timedelta, UTC
 from loguru import logger
 from typing import List, Optional, Tuple
 import asyncio
+from uuid import UUID
 
 
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.core.database import get_db_session_context
 from app.models.models import (
     Meeting, Conflict, TWG, ConflictStatus, Notification, NotificationType, Document, User, MeetingParticipant, VipProfile,
-    ConflictType, ConflictSeverity
+    ConflictType, ConflictSeverity, MeetingStatus
 )
 from app.services.conflict_detector import ConflictDetector
 from app.services.vexa_service import vexa_service
@@ -54,10 +56,10 @@ class ContinuousMonitor:
             replace_existing=True
         )
         
-        # 2. Semantic Analysis (Every 15 mins)
+        # 2. Semantic Conflict Scan (Every 60 mins to reduce API calls)
         self.scheduler.add_job(
             self.scan_policy_divergences,
-            trigger=IntervalTrigger(minutes=15),
+            trigger=IntervalTrigger(minutes=60),
             id="scan_policy",
             replace_existing=True
         )
@@ -87,10 +89,10 @@ class ContinuousMonitor:
             replace_existing=True
         )
 
-        # 6. Check Pending Transcripts (Every 2 min)
+        # 6. Check Pending Transcripts (Every 10 seconds for real-time sync)
         self.scheduler.add_job(
             self.check_pending_transcripts,
-            trigger=IntervalTrigger(minutes=2),
+            trigger=IntervalTrigger(seconds=10),
             id="vexa_transcript_check",
             replace_existing=True
         )
@@ -127,7 +129,7 @@ class ContinuousMonitor:
                         Meeting.scheduled_at <= ten_mins_from_now,
                         # Check if we already have a transcript or if cancelled
                         or_(Meeting.transcript.is_(None), Meeting.transcript == ""), 
-                        Meeting.status != 'cancelled'
+                        Meeting.status != MeetingStatus.CANCELLED
                     )
                 ).options(selectinload(Meeting.participants))
                 result = await db.execute(stmt)
@@ -222,6 +224,22 @@ class ContinuousMonitor:
                     platform = doc.metadata_json.get("platform")
                     native_meeting_id = doc.metadata_json.get("native_meeting_id")
                     
+                    # CRITICAL: Skip documents that have failed permanently
+                    doc_status = doc.metadata_json.get("status", "")
+                    if doc_status == "failed":
+                        logger.debug(f"Skipping session {session_id} - marked as FAILED")
+                        continue
+                    
+                    # CRITICAL: Skip documents in backoff period
+                    next_retry_after = doc.metadata_json.get("next_retry_after")
+                    if next_retry_after:
+                        from datetime import datetime as dt
+                        next_retry_time = dt.fromisoformat(next_retry_after)
+                        if dt.utcnow() < next_retry_time:
+                            time_remaining = (next_retry_time - dt.utcnow()).total_seconds() / 60
+                            logger.debug(f"Skipping session {session_id} - in backoff period ({time_remaining:.1f} min remaining)")
+                            continue
+                    
                     if not platform or not native_meeting_id:
                         logger.warning(f"Document {doc.id} missing platform or native_meeting_id, skipping")
                         continue
@@ -235,6 +253,15 @@ class ContinuousMonitor:
                         status = transcript_data.get("status", "unknown")
                         
                         logger.info(f"✓ Transcript ready for session {session_id}! Length: {len(transcript_text)} chars, Status: {status}, Completed: {is_completed}")
+                        
+                        # UPDATE MEETING STATUS TO IN_PROGRESS
+                        # This ensures the dashboard "unlocks" live sync and detail page shows "LIVE"
+                        res_m = await db.execute(select(Meeting).where(Meeting.id == doc.meeting_id))
+                        meeting_obj = res_m.scalar_one_or_none()
+                        if meeting_obj and meeting_obj.status != MeetingStatus.IN_PROGRESS and not is_completed:
+                            logger.warning(f"Updating meeting {meeting_obj.id} status to IN_PROGRESS (Vexa active)")
+                            meeting_obj.status = MeetingStatus.IN_PROGRESS
+                            await db.commit()
                         
                         # IDLE TIMEOUT LOGIC
                         # Check if transcript has stopped growing for > 5 minutes
@@ -251,6 +278,7 @@ class ContinuousMonitor:
                             doc.metadata_json["last_transcript_length"] = current_length
                             doc.metadata_json["last_check_time"] = datetime.utcnow().isoformat()
                             # Commit validation updates
+                            flag_modified(doc, "metadata_json")
                             await db.commit()
                         elif last_check_time_str:
                             # Length hasn't changed, check how long it's been
@@ -268,15 +296,61 @@ class ContinuousMonitor:
                             # First check, init metadata
                             doc.metadata_json["last_transcript_length"] = current_length
                             doc.metadata_json["last_check_time"] = datetime.utcnow().isoformat()
+                            flag_modified(doc, "metadata_json")
                             await db.commit()
+
+                        # REAL-TIME INCREMENTAL PROCESSING
+                        # Check if transcript has grown since last pulse
+                        last_processed_pos = doc.metadata_json.get("last_processed_pos", 0)
+                        
+                        if current_length > last_processed_pos:
+                             # Extract the new chunk
+                             new_chunk = transcript_text[last_processed_pos:]
+                             logger.info(f"Processing NEW TRANSCRIPT CHUNK ({len(new_chunk)} chars) for meeting {doc.meeting_id}")
+                             
+                             # 1. ALWAYS SYNC TO FRONTEND (Regardless of AI status)
+                             try:
+                                 from app.services.broadcast_service import get_broadcast_service
+                                 broadcast = get_broadcast_service()
+                                 await broadcast.notify_live_meeting(
+                                     meeting_id=doc.meeting_id,
+                                     content=new_chunk,
+                                     source="vexa_transcript_sync"
+                                 )
+                                 
+                                 # Sync the full currently available transcript to the Meeting record
+                                 if meeting_obj:
+                                     meeting_obj.transcript = transcript_text
+                             except Exception as be:
+                                 logger.error(f"Failed to broadcast transcript chunk: {be}")
+
+                             # 2. RUN AI ANALYSIS (Fails gracefully)
+                             try:
+                                 await vexa_service.analyze_live_chunk(
+                                     meeting_id=doc.meeting_id,
+                                     chunk_text=new_chunk,
+                                     db=db
+                                 )
+                             except Exception as ae:
+                                 logger.error(f"AI analysis failed for chunk: {ae}")
+                                 
+                             # 3. ALWAYS MARK AS PROCESSED
+                             # We update this even on AI failure to avoid infinite re-tries of same chunk
+                             doc.metadata_json["last_processed_pos"] = current_length
+                             flag_modified(doc, "metadata_json")
+                             await db.commit()
+
+                        # ---------------------------------------------------------
+                        # COMPLETION LOGIC (Only generate minutes when finished/timeout)
+                        # ---------------------------------------------------------
 
                         # CRITICAL: Only process transcript if meeting has ended OR timed out
                         if not is_completed and not should_force_complete:
-                            logger.info(f"⏳ Meeting still active (status: {status}). Waiting for meeting to end before generating minutes.")
+                            logger.info(f"⏳ Meeting still active (status: {status}). Still monitoring for live insights.")
                             continue
                         
                         if should_force_complete:
-                            logger.info(f"✓ Forcing minutes generation due to idle timeout ({current_length} chars)")
+                            logger.info(f"✓ Forcing final minutes generation due to idle timeout ({current_length} chars)")
                         
                         # Process it
                         # Need to fetch Meeting object
@@ -308,11 +382,44 @@ class ContinuousMonitor:
                                 doc.metadata_json["status"] = "completed"
                                 logger.info(f"✓ Transcript processed and saved to {saved_path}")
                                 
+                                # CRITICAL: Update meeting status to COMPLETED
+                                meeting.status = MeetingStatus.COMPLETED
+                                logger.info(f"✓ Meeting {meeting.title} status updated to COMPLETED")
+                                
                                 # CRITICAL: Commit changes to database
                                 await db.commit()
                                 logger.info(f"✓ Minutes and transcript committed to database for meeting: {meeting.title}")
                             else:
+                                # CRITICAL FIX: Track failed attempts to prevent infinite retries
                                 logger.error(f"✗ Failed to process transcript text for session {session_id}")
+                                
+                                # Initialize retry tracking if not present
+                                if "retry_count" not in doc.metadata_json:
+                                    doc.metadata_json["retry_count"] = 0
+                                if "last_retry_at" not in doc.metadata_json:
+                                    doc.metadata_json["last_retry_at"] = None
+                                
+                                # Increment retry count
+                                doc.metadata_json["retry_count"] += 1
+                                doc.metadata_json["last_retry_at"] = datetime.utcnow().isoformat()
+                                
+                                # Exponential backoff: 5min, 15min, 30min, 1hr, then give up
+                                retry_count = doc.metadata_json["retry_count"]
+                                if retry_count >= 5:
+                                    doc.metadata_json["status"] = "failed"
+                                    doc.metadata_json["failure_reason"] = "Max retries exceeded (rate limit)"
+                                    logger.warning(f"⚠️ Marking session {session_id} as FAILED after {retry_count} attempts")
+                                else:
+                                    # Calculate next retry time (exponential backoff)
+                                    backoff_minutes = [5, 15, 30, 60][min(retry_count - 1, 3)]
+                                    doc.metadata_json["next_retry_after"] = (
+                                        datetime.utcnow() + timedelta(minutes=backoff_minutes)
+                                    ).isoformat()
+                                    logger.info(f"⏳ Will retry session {session_id} after {backoff_minutes} minutes (attempt {retry_count}/5)")
+                                
+                                # Mark the field as modified and commit
+                                flag_modified(doc, "metadata_json")
+                                await db.commit()
                         else:
                             logger.error(f"✗ Meeting {doc.meeting_id} not found for document {doc.id}")
                             await db.delete(doc) # Cleanup orphan
@@ -511,34 +618,53 @@ class ContinuousMonitor:
             
             # NOTIFICATION LOGIC (Supervisor -> TWG Feedback)
             logger.info(f"Notifying agents for Conflict {conflict.id}")
-            for twg_id_str in agents_involved:
+            resolved_agents_involved = []
+            
+            for agent_id_str in agents_involved:
                 try:
-                    # Resolve TWG UUID
-                    twg_uuid = twg_id_str
+                    # Resolve TWG UUID or Name
+                    twg_obj = None
+                    try:
+                        # Try parsing as UUID first
+                        val_uuid = UUID(agent_id_str)
+                        stmt = select(TWG).where(TWG.id == val_uuid)
+                        result = await db_session.execute(stmt)
+                        twg_obj = result.scalar_one_or_none()
+                    except (ValueError, TypeError):
+                        # Not a valid UUID, try resolving by name
+                        stmt = select(TWG).where(TWG.name == agent_id_str)
+                        result = await db_session.execute(stmt)
+                        twg_obj = result.scalar_one_or_none()
                     
-                    # Fetch TWG to get Technical Lead
-                    stmt = select(TWG).where(TWG.id == twg_uuid)
-                    result = await db_session.execute(stmt)
-                    twg = result.scalar_one_or_none()
-                    
-                    if twg and twg.technical_lead_id:
-                        # Create Notification
-                        notification = Notification(
-                            user_id=twg.technical_lead_id,
-                            type=NotificationType.ALERT,
-                            title="Supervisor Insight: Conflict Detected",
-                            content=f"The Supervisor has detected a {conflict.conflict_type} that affects your TWG: {conflict.description}",
-                            link=f"/conflicts/{conflict.id}",
-                            is_read=False,
-                            created_at=datetime.utcnow()
-                        )
-                        db_session.add(notification)
-                        logger.info(f"Notification queued for TWG {twg.name} (Lead: {twg.technical_lead_id})")
+                    if twg_obj:
+                        resolved_agents_involved.append(str(twg_obj.id))
+                        if twg_obj.technical_lead_id:
+                            # Create Notification
+                            notification = Notification(
+                                user_id=twg_obj.technical_lead_id,
+                                type=NotificationType.ALERT,
+                                title="Supervisor Insight: Conflict Detected",
+                                content=f"The Supervisor has detected a {conflict.conflict_type} that affects your TWG: {conflict.description}",
+                                link=f"/conflicts/{conflict.id}",
+                                is_read=False,
+                                created_at=datetime.utcnow()
+                            )
+                            db_session.add(notification)
+                            logger.info(f"Notification queued for TWG {twg_obj.name} (Lead: {twg_obj.technical_lead_id})")
+                        else:
+                            logger.warning(f"Could not notify TWG {twg_obj.name}: Lead not found")
                     else:
-                        logger.warning(f"Could not notify TWG {twg_id_str}: Lead not found")
+                        logger.warning(f"Could not resolve agent identifier: {agent_id_str}")
+                        # Keep original string if resolution fails, though it might cause issues later
+                        resolved_agents_involved.append(agent_id_str)
                         
                 except Exception as ex:
-                    logger.error(f"Failed to notify agent {twg_id_str}: {ex}")
+                    logger.error(f"Failed to process agent identifier {agent_id_str}: {ex}")
+
+            # Update conflict with resolved UUIDs if they changed
+            if resolved_agents_involved != conflict.agents_involved:
+                conflict.agents_involved = resolved_agents_involved
+                flag_modified(conflict, "agents_involved")
 
             logger.info(f"Triggering auto-negotiation for Conflict {conflict.id}")
             

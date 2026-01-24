@@ -1,35 +1,106 @@
+"""
+Celery Application Configuration
+
+Production-ready task queue for background jobs with:
+- Job isolation (separate worker processes)
+- Rate limiting
+- Automatic retries with exponential backoff
+- Scalability (add more workers as needed)
+"""
+
 from celery import Celery
+from celery.schedules import crontab
 from app.core.config import settings
 
+# Build broker URL
 if settings.REDIS_URL:
     broker_url = settings.REDIS_URL
+    result_backend = settings.REDIS_URL
 else:
     broker_url = f"redis://:{settings.REDIS_PASSWORD}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}"
+    result_backend = broker_url
 
-celery_app = Celery("martin_worker", broker=broker_url)
+# Initialize Celery app
+celery_app = Celery(
+    "martin_system",
+    broker=broker_url,
+    backend=result_backend,
+)
 
-celery_app.conf.task_routes = {
-    "app.services.tasks.send_meeting_reminders": "periodic",
-    "app.services.tasks.sync_rsvps": "periodic",
-    "app.services.tasks.generate_project_pdf": "formatting",
-    "app.services.scoring_tasks.rescore_project_async": "scoring",
-}
-
-celery_app.conf.beat_schedule = {
-    "send-meeting-reminders-every-30-mins": {
-        "task": "app.services.tasks.send_meeting_reminders",
-        "schedule": 1800.0, # 30 minutes
-    },
-    "sync-rsvps-every-15-mins": {
-        "task": "app.services.tasks.sync_rsvps",
-        "schedule": 900.0, # 15 minutes
-    },
-}
-
+# Celery Configuration
 celery_app.conf.update(
+    # Task serialization
     task_serializer="json",
     accept_content=["json"],
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    
+    # Task execution
+    task_acks_late=True,  # Acknowledge task after completion
+    task_reject_on_worker_lost=True,  # Retry if worker dies
+    
+    # Rate limiting (default for all tasks)
+    task_default_rate_limit="10/m",  # 10 tasks per minute
+    
+    # Retry configuration
+    task_autoretry_for=(Exception,),  # Auto-retry on any exception
+    task_retry_kwargs={"max_retries": 3},
+    task_default_retry_delay=60,  # Wait 60s before retry
+    
+    # Result backend
+    result_expires=3600,  # Results expire after 1 hour
+    
+    # Worker configuration
+    worker_prefetch_multiplier=1,  # Fetch one task at a time (fair distribution)
+    worker_max_tasks_per_child=1000,  # Restart worker after 1000 tasks (prevent memory leaks)
+    
+    # Task routes (organize tasks by queue)
+    task_routes={
+        "app.tasks.monitoring_tasks.*": {"queue": "monitoring"},
+        "app.tasks.negotiation_tasks.*": {"queue": "negotiations"},
+        "app.services.tasks.send_meeting_reminders": {"queue": "periodic"},
+        "app.services.tasks.sync_rsvps": {"queue": "periodic"},
+        "app.services.tasks.generate_project_pdf": {"queue": "formatting"},
+        "app.services.scoring_tasks.rescore_project_async": {"queue": "scoring"},
+    },
 )
+
+# Periodic Task Schedule (Celery Beat)
+celery_app.conf.beat_schedule = {
+    # Existing tasks
+    "send-meeting-reminders-every-30-mins": {
+        "task": "app.services.tasks.send_meeting_reminders",
+        "schedule": 1800.0,  # 30 minutes
+    },
+    "sync-rsvps-every-15-mins": {
+        "task": "app.services.tasks.sync_rsvps",
+        "schedule": 900.0,  # 15 minutes
+    },
+    
+    # New monitoring tasks (will be created)
+    "scan-scheduling-conflicts": {
+        "task": "app.tasks.monitoring_tasks.scan_scheduling_conflicts",
+        "schedule": crontab(minute="*/30"),  # Every 30 minutes
+    },
+    "scan-policy-divergences": {
+        "task": "app.tasks.monitoring_tasks.scan_policy_divergences",
+        "schedule": crontab(minute="0"),  # Every hour
+    },
+    "check-twg-health": {
+        "task": "app.tasks.monitoring_tasks.check_twg_health",
+        "schedule": crontab(minute="0"),  # Every hour
+    },
+    "scan-project-conflicts": {
+        "task": "app.tasks.monitoring_tasks.scan_project_conflicts",
+        "schedule": crontab(minute="0", hour="*/6"),  # Every 6 hours
+    },
+    "check-upcoming-meetings": {
+        "task": "app.tasks.monitoring_tasks.check_upcoming_meetings",
+        "schedule": crontab(minute="*"),  # Every minute
+    },
+    "check-pending-transcripts": {
+        "task": "app.tasks.monitoring_tasks.check_pending_transcripts",
+        "schedule": 10.0,  # Every 10 seconds
+    },
+}
