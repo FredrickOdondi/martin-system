@@ -84,6 +84,16 @@ class Settings(BaseSettings):
     GITHUB_TOKEN: Optional[str] = None
     GITHUB_MODEL: str = "gpt-4o-mini"
     GITHUB_BASE_URL: str = "https://models.inference.ai.azure.com"
+
+    # Custom / Self-Hosted LLM (Lightning AI, Ollama on Cloud, etc.)
+    CUSTOM_LLM_API_KEY: str = "EMPTY"
+    CUSTOM_LLM_MODEL: str = "zai-org/GLM-4.7-Flash"
+    CUSTOM_LLM_BASE_URL: Optional[str] = None
+
+    # Lightning AI
+    LIGHTNING_API_KEY: Optional[str] = None
+    LIGHTNING_MODEL: str = "llama-3-70b-instruct"  # Default high-quality free model
+    LIGHTNING_BASE_URL: str = "https://api.lightning.ai/v1"
     
     # Message Bus Settings
     MESSAGE_BUS_ENABLED: bool = Field(
