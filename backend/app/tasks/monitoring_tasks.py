@@ -109,17 +109,49 @@ def check_upcoming_meetings():
 
 @shared_task(
     name="app.tasks.monitoring_tasks.check_pending_transcripts",
-    rate_limit="360/h",  # Max 360 per hour (6 per minute, every 10 seconds)
-    max_retries=1,
+    bind=True,
+    max_retries=1  # Don't retry real-time checks too much
 )
-def check_pending_transcripts():
-    """Poll Vexa for pending transcripts"""
-    logger.info("Celery task: check_pending_transcripts started")
+def check_pending_transcripts(self):
+    """
+    Celery wrapper for checking pending transcripts.
+    Ideally run every 10-30 seconds via Beat.
+    """
+    # Simply fire-and-forget the async check
+    async def _run():
+        monitor = ContinuousMonitor()
+        await monitor.check_pending_transcripts()
+    
     try:
         import asyncio
-        asyncio.run(monitor.check_pending_transcripts())
-        logger.info("Celery task: check_pending_transcripts completed")
-        return {"status": "success"}
+        asyncio.run(_run())
     except Exception as e:
-        logger.error(f"Celery task: check_pending_transcripts failed: {e}")
+        logger.error(f"Error in check_pending_transcripts task: {e}")
+
+@shared_task(
+    name="app.tasks.monitoring_tasks.scan_policy_divergences_task",
+    bind=True,
+    max_retries=1,
+    time_limit=600 # 10 minutes max for heavy LLM work
+)
+def scan_policy_divergences_task(self):
+    """
+    Heavy background task: Semantic Policy Conflict Detection.
+    """
+    async def _run():
+        logger.info("Starting background policy scan...")
+        async with get_db_session_context() as db:
+            monitor = ContinuousMonitor()
+            # We call the method directly. 
+            # Note: ContinuousMonitor methods are instance methods but mostly use internal DB context.
+            # We can instantiate it here.
+            await monitor.scan_policy_divergences()
+            
+    try:
+        import asyncio
+        asyncio.run(_run())
+        logger.info("Background policy scan completed.")
+    except Exception as e:
+        logger.error(f"Error in scan_policy_divergences_task: {e}")
+
         raise

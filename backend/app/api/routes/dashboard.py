@@ -15,6 +15,7 @@ from app.core.ws_manager import ws_manager
 from app.utils.security import verify_token
 
 from app.schemas.schemas import ConflictRead, ManualConflictResolution
+from app.core.cache import cache_service
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -151,6 +152,7 @@ async def manual_resolve_conflict(
     return {"status": "success", "conflict_status": conflict.status}
 
 @router.get("/stats", response_model=Dict[str, Any])
+@cache_service.cached(expire=60) # Cache for 60 seconds
 async def get_dashboard_stats(
     db: AsyncSession = Depends(get_db),
     current_user = Depends(get_current_active_user)
@@ -301,6 +303,7 @@ async def get_dashboard_stats(
     }
 
 @router.get("/timeline", response_model=List[Dict[str, Any]])
+@cache_service.cached(expire=30) # Cache for 30 seconds
 async def get_global_timeline(
     limit: int = 10,
     db: AsyncSession = Depends(get_db),
