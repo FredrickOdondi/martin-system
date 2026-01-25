@@ -29,7 +29,7 @@ class DriveService:
         self.creds = None
         self.service = None
         self.state_file = "processed_transcripts.json"
-        self._setup_credentials()
+        # We now initialize lazily on first use to avoid race conditions with startup credentials restoration
 
     def _load_state(self) -> Dict[str, str]:
         """Load processed files state {file_id: modified_time}"""
@@ -51,6 +51,9 @@ class DriveService:
 
     def _setup_credentials(self):
         """Setup Google Drive credentials"""
+        if self.service:
+            return True
+            
         try:
             # 1. Try OAuth2 User Token (Highest Priority for Bypass)
             if os.path.exists('token.json'):
@@ -68,7 +71,7 @@ class DriveService:
                 
                 self.service = build('drive', 'v3', credentials=self.creds)
                 logger.info("DriveService initialized via token.json.")
-                return
+                return True
 
             # 2. Fallback to Service Account
             creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
@@ -81,11 +84,14 @@ class DriveService:
                 )
                 self.service = build('drive', 'v3', credentials=self.creds)
                 logger.info("DriveService initialized via Service Account.")
+                return True
             else:
-                logger.warning("No Google Credentials found. DriveService will not function.")
+                logger.debug("No Google Credentials found yet.")
+                return False
         except Exception as e:
             logger.warning(f"Failed to initialize DriveService: {e}")
             self.service = None
+            return False
 
     def list_recent_transcripts(self, hours: int = 24) -> List[Dict[str, Any]]:
         """
@@ -93,7 +99,7 @@ class DriveService:
         Searches for files with text/plain mimeType (transcripts) or Google Docs.
         Blocking call - should be run in thread.
         """
-        if not self.service:
+        if not self._setup_credentials():
             return []
 
         # Time filter
@@ -120,7 +126,7 @@ class DriveService:
 
     def download_file_content(self, file_id: str, mime_type: str) -> str:
         """Download text content of a file. Blocking call."""
-        if not self.service:
+        if not self._setup_credentials():
             return ""
 
         try:
