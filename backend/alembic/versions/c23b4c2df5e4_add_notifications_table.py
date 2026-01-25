@@ -20,24 +20,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    from sqlalchemy.exc import ProgrammingError
+    from sqlalchemy import inspect
     
     conn = op.get_bind()
+    inspector = inspect(conn)
     
     # Helper to check if table exists
     def table_exists(name):
-        result = conn.execute(sa.text(
-            f"SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = '{name}')"
-        ))
-        return result.scalar()
+        return inspector.has_table(name)
     
     # Helper to check if column exists
     def column_exists(table, column):
-        result = conn.execute(sa.text(
-            f"SELECT EXISTS (SELECT 1 FROM information_schema.columns "
-            f"WHERE table_name = '{table}' AND column_name = '{column}')"
-        ))
-        return result.scalar()
+        if not inspector.has_table(table):
+            return False
+        columns = [c['name'] for c in inspector.get_columns(table)]
+        return column in columns
     
     # Create enum types for PostgreSQL idempotently
     try:
