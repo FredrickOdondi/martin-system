@@ -37,22 +37,27 @@ def upgrade() -> None:
         return column in columns
     
     # Create enum types for PostgreSQL idempotently
-    try:
-        op.execute("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'notificationtype') THEN CREATE TYPE notificationtype AS ENUM ('INFO', 'SUCCESS', 'WARNING', 'ALERT', 'MESSAGE', 'DOCUMENT', 'TASK'); END IF; END $$;")
-    except Exception:
-        pass
-    
-    try:
-        op.execute("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'minutesstatus') THEN CREATE TYPE minutesstatus AS ENUM ('DRAFT', 'REVIEW', 'APPROVED', 'FINAL'); END IF; END $$;")
-    except Exception:
-        pass
+    if conn.dialect.name == 'postgresql':
+        try:
+            op.execute("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'notificationtype') THEN CREATE TYPE notificationtype AS ENUM ('INFO', 'SUCCESS', 'WARNING', 'ALERT', 'MESSAGE', 'DOCUMENT', 'TASK'); END IF; END $$;")
+        except Exception:
+            pass
+        
+        try:
+            op.execute("DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'minutesstatus') THEN CREATE TYPE minutesstatus AS ENUM ('DRAFT', 'REVIEW', 'APPROVED', 'FINAL'); END IF; END $$;")
+        except Exception:
+            pass
+
+    # Define enums for cross-dialect use
+    notification_type_enum = sa.Enum('INFO', 'SUCCESS', 'WARNING', 'ALERT', 'MESSAGE', 'DOCUMENT', 'TASK', name='notificationtype')
+    minutes_status_enum = sa.Enum('DRAFT', 'REVIEW', 'APPROVED', 'FINAL', name='minutesstatus')
 
     # Create notifications table if it doesn't exist
     if not table_exists('notifications'):
         op.create_table('notifications',
             sa.Column('id', sa.Uuid(), nullable=False),
             sa.Column('user_id', sa.Uuid(), nullable=False),
-            sa.Column('type', postgresql.ENUM('INFO', 'SUCCESS', 'WARNING', 'ALERT', 'MESSAGE', 'DOCUMENT', 'TASK', name='notificationtype', create_type=False), nullable=False),
+            sa.Column('type', notification_type_enum, nullable=False),
             sa.Column('title', sa.String(length=255), nullable=False),
             sa.Column('content', sa.Text(), nullable=False),
             sa.Column('link', sa.String(length=512), nullable=True),
@@ -65,7 +70,7 @@ def upgrade() -> None:
     # Add columns if they don't exist
     if not column_exists('minutes', 'status'):
         try:
-            op.add_column('minutes', sa.Column('status', postgresql.ENUM('DRAFT', 'REVIEW', 'APPROVED', 'FINAL', name='minutesstatus', create_type=False), nullable=True))
+            op.add_column('minutes', sa.Column('status', minutes_status_enum, nullable=True))
         except Exception:
             pass
     
