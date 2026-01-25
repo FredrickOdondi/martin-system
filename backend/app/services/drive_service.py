@@ -52,6 +52,25 @@ class DriveService:
     def _setup_credentials(self):
         """Setup Google Drive credentials"""
         try:
+            # 1. Try OAuth2 User Token (Highest Priority for Bypass)
+            if os.path.exists('token.json'):
+                from google.oauth2.credentials import Credentials
+                from google.auth.transport.requests import Request
+                
+                self.creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+                
+                # Auto-refresh if needed
+                if self.creds and self.creds.expired and self.creds.refresh_token:
+                    logger.info("Refreshing Drive OAuth token...")
+                    self.creds.refresh(Request())
+                    with open('token.json', 'w') as token:
+                        token.write(self.creds.to_json())
+                
+                self.service = build('drive', 'v3', credentials=self.creds)
+                logger.info("DriveService initialized via token.json.")
+                return
+
+            # 2. Fallback to Service Account
             creds_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
             if not creds_path and os.path.exists('google_credentials.json'):
                 creds_path = 'google_credentials.json'
@@ -61,11 +80,11 @@ class DriveService:
                     creds_path, scopes=SCOPES
                 )
                 self.service = build('drive', 'v3', credentials=self.creds)
-                logger.info("DriveService initialized successfully.")
+                logger.info("DriveService initialized via Service Account.")
             else:
                 logger.warning("No Google Credentials found. DriveService will not function.")
         except Exception as e:
-            logger.warning(f"Failed to initialize DriveService (Google Drive integration will be disabled): {e}")
+            logger.warning(f"Failed to initialize DriveService: {e}")
             self.service = None
 
     def list_recent_transcripts(self, hours: int = 24) -> List[Dict[str, Any]]:
