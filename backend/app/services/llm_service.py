@@ -541,6 +541,13 @@ def get_llm_service() -> LLMService:
                 model=getattr(settings, "GEMINI_MODEL", "gemini-2.0-flash"),
                 temperature=settings.LLM_TEMPERATURE
             )
+        elif provider == "custom" and getattr(settings, "CUSTOM_LLM_BASE_URL", None):
+             _llm_service = OpenAILLMService(
+                api_key=settings.CUSTOM_LLM_API_KEY,
+                model=settings.CUSTOM_LLM_MODEL,
+                temperature=settings.LLM_TEMPERATURE,
+                base_url=settings.CUSTOM_LLM_BASE_URL
+            )
         elif provider == "github" and getattr(settings, "GITHUB_TOKEN", None):
              _llm_service = OpenAILLMService(
                 api_key=settings.GITHUB_TOKEN,
