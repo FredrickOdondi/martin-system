@@ -8,11 +8,7 @@ Each task runs in isolation and won't block other tasks.
 from celery import shared_task
 from loguru import logger
 from app.core.database import get_db_session_context
-from app.services.continuous_monitor import ContinuousMonitor
-
-
-# Create a monitor instance for task execution
-monitor = ContinuousMonitor()
+# Note: We import ContinuousMonitor inside tasks to avoid circular imports
 
 
 @shared_task(
@@ -26,6 +22,8 @@ def scan_scheduling_conflicts():
     logger.info("Celery task: scan_scheduling_conflicts started")
     try:
         import asyncio
+        from app.services.continuous_monitor import ContinuousMonitor
+        monitor = ContinuousMonitor()
         asyncio.run(monitor.scan_scheduling_conflicts())
         logger.info("Celery task: scan_scheduling_conflicts completed")
         return {"status": "success"}
@@ -45,6 +43,8 @@ def scan_policy_divergences():
     logger.info("Celery task: scan_policy_divergences started")
     try:
         import asyncio
+        from app.services.continuous_monitor import ContinuousMonitor
+        monitor = ContinuousMonitor()
         asyncio.run(monitor.scan_policy_divergences())
         logger.info("Celery task: scan_policy_divergences completed")
         return {"status": "success"}
@@ -63,6 +63,8 @@ def check_twg_health():
     logger.info("Celery task: check_twg_health started")
     try:
         import asyncio
+        from app.services.continuous_monitor import ContinuousMonitor
+        monitor = ContinuousMonitor()
         asyncio.run(monitor.check_twg_health())
         logger.info("Celery task: check_twg_health completed")
         return {"status": "success"}
@@ -81,6 +83,8 @@ def scan_project_conflicts():
     logger.info("Celery task: scan_project_conflicts started")
     try:
         import asyncio
+        from app.services.continuous_monitor import ContinuousMonitor
+        monitor = ContinuousMonitor()
         asyncio.run(monitor.scan_project_conflicts())
         logger.info("Celery task: scan_project_conflicts completed")
         return {"status": "success"}
@@ -99,6 +103,8 @@ def check_upcoming_meetings():
     logger.info("Celery task: check_upcoming_meetings started")
     try:
         import asyncio
+        from app.services.continuous_monitor import ContinuousMonitor
+        monitor = ContinuousMonitor()
         asyncio.run(monitor.check_upcoming_meetings())
         logger.info("Celery task: check_upcoming_meetings completed")
         return {"status": "success"}
@@ -119,6 +125,7 @@ def check_pending_transcripts(self):
     """
     # Simply fire-and-forget the async check
     async def _run():
+        from app.services.continuous_monitor import ContinuousMonitor
         monitor = ContinuousMonitor()
         await monitor.check_pending_transcripts()
     
@@ -141,6 +148,7 @@ def scan_policy_divergences_task(self):
     async def _run():
         logger.info("Starting background policy scan...")
         async with get_db_session_context() as db:
+            from app.services.continuous_monitor import ContinuousMonitor
             monitor = ContinuousMonitor()
             # We call the method directly. 
             # Note: ContinuousMonitor methods are instance methods but mostly use internal DB context.
