@@ -30,8 +30,8 @@ from app.models.models import (
 )
 from app.services.conflict_detector import ConflictDetector
 from app.services.vexa_service import vexa_service
-from app.tasks.negotiation_tasks import run_negotiation_task
-from app.tasks.monitoring_tasks import scan_policy_divergences_task
+from app.services.conflict_detector import ConflictDetector
+from app.services.vexa_service import vexa_service
 
 class ContinuousMonitor:
     """
@@ -672,6 +672,7 @@ class ContinuousMonitor:
             
             # Trigger Auto-Negotiation (Background Task)
             # We offload this to Celery to avoid blocking the monitor loop
+            from app.tasks.negotiation_tasks import run_negotiation_task
             run_negotiation_task.delay(str(conflict.id))
             logger.info(f"Queued negotiation task for Conflict {conflict.id}")
                 
@@ -685,6 +686,7 @@ class ContinuousMonitor:
         Check for semantic conflicts in recent TWG outputs/documents.
         Offloaded to Celery.
         """
+        from app.tasks.monitoring_tasks import scan_policy_divergences_task
         logger.info("Triggering background scan_policy_divergences task...")
         scan_policy_divergences_task.delay()
 
