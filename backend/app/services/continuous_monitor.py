@@ -30,6 +30,8 @@ from app.models.models import (
 )
 from app.services.conflict_detector import ConflictDetector
 from app.services.vexa_service import vexa_service
+from app.tasks.negotiation_tasks import run_negotiation_task
+from app.tasks.monitoring_tasks import scan_policy_divergences_task
 
 class ContinuousMonitor:
     """
@@ -668,15 +670,10 @@ class ContinuousMonitor:
 
             logger.info(f"Triggering auto-negotiation for Conflict {conflict.id}")
             
-            # Trigger Auto-Negotiation
-            from app.services.negotiation_service import NegotiationService
-            reconciler = NegotiationService(db_session)
-            result = await reconciler.run_negotiation(conflict.id)
-            
-            if result.get("status") == "CONSENSUS_REACHED":
-                logger.info(f"Conflict {conflict.id} AUTO-RESOLVED")
-            else:
-                logger.warning(f"Conflict {conflict.id} ESCALATED")
+            # Trigger Auto-Negotiation (Background Task)
+            # We offload this to Celery to avoid blocking the monitor loop
+            run_negotiation_task.delay(str(conflict.id))
+            logger.info(f"Queued negotiation task for Conflict {conflict.id}")
                 
             await db_session.commit()
             
@@ -686,57 +683,10 @@ class ContinuousMonitor:
     async def scan_policy_divergences(self):
         """
         Check for semantic conflicts in recent TWG outputs/documents.
+        Offloaded to Celery.
         """
-        logger.info("Running scan_policy_divergences...")
-        async with get_db_session_context() as db:
-            try:
-                # Fetch recent documents (e.g. last 24h) or just "Evolving" docs
-                # For this implementation, we check all 'active' documents or scope-tagged ones.
-                # Simplified: fetch latest document for each TWG
-                
-                # We need to map TWG Name -> Document Content
-                # Subquery to find latest doc per TWG
-                # Skipping strict query optimization for prototype simplicity
-                
-                result = await db.execute(select(TWG))
-                twgs = result.scalars().all()
-                
-                twg_contents = {}
-                for twg in twgs:
-                    # Get latest document for this TWG
-                    # Assuming we can filter by type or just grab last upload
-                    stmt = select(Document).where(Document.twg_id == twg.id).order_by(Document.created_at.desc()).limit(1)
-                    doc_res = await db.execute(stmt)
-                    doc = doc_res.scalar_one_or_none()
-                    
-                    if doc:
-                         # Ideally we load content. Using file_name + metadata as proxy if text not in DB
-                         content = doc.file_name
-                         if doc.metadata_json:
-                             content += f" {str(doc.metadata_json)}"
-                         twg_contents[twg.name] = content
-                
-                if len(twg_contents) > 1:
-                    logger.info(f"Analyzing {len(twg_contents)} TWG outputs for conflicts")
-                    conflicts = self.conflict_detector.detect_conflicts(twg_contents)
-                    
-                    if conflicts:
-                        logger.warning(f"Detected {len(conflicts)} policy conflicts")
-                        
-                        for conflict in conflicts:
-                            # Auto-handle conflict
-                            await self._handle_detected_conflicts(
-                                db_session=db,
-                                conflict_data={
-                                    "description": conflict.description,
-                                    "conflict_type": conflict.conflict_type,
-                                    "severity": conflict.severity
-                                },
-                                agents_involved=conflict.agents_involved
-                            )
-                        
-            except Exception as e:
-                logger.error(f"Error in policy scan: {e}")
+        logger.info("Triggering background scan_policy_divergences task...")
+        scan_policy_divergences_task.delay()
 
     async def check_twg_health(self):
         # Check for stalled TWGs (no activity > 48h).

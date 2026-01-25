@@ -57,8 +57,20 @@ celery_app.conf.update(
     
     # Task routes (organize tasks by queue)
     task_routes={
-        "app.tasks.monitoring_tasks.*": {"queue": "monitoring"},
+        # Fast / Real-time Monitoring
+        "app.tasks.monitoring_tasks.check_pending_transcripts": {"queue": "high_priority"},
+        "app.tasks.monitoring_tasks.check_upcoming_meetings": {"queue": "high_priority"},
+        
+        # Negotiations (Critical but can take 10-30s)
         "app.tasks.negotiation_tasks.*": {"queue": "negotiations"},
+        "app.tasks.monitoring_tasks.scan_scheduling_conflicts": {"queue": "negotiations"}, # Medium priority
+        
+        # Heavy Background Tasks
+        "app.tasks.monitoring_tasks.scan_policy_divergences_task": {"queue": "background"},
+        "app.tasks.monitoring_tasks.scan_project_conflicts": {"queue": "background"},
+        "app.tasks.monitoring_tasks.check_twg_health": {"queue": "background"},
+        
+        # Periodic / Default
         "app.services.tasks.send_meeting_reminders": {"queue": "periodic"},
         "app.services.tasks.sync_rsvps": {"queue": "periodic"},
         "app.services.tasks.generate_project_pdf": {"queue": "formatting"},
@@ -84,7 +96,7 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute="*/30"),  # Every 30 minutes
     },
     "scan-policy-divergences": {
-        "task": "app.tasks.monitoring_tasks.scan_policy_divergences",
+        "task": "app.tasks.monitoring_tasks.scan_policy_divergences_task", # Updated task name
         "schedule": crontab(minute="0"),  # Every hour
     },
     "check-twg-health": {
