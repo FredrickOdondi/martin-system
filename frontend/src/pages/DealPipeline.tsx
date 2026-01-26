@@ -6,6 +6,7 @@ import { useAppSelector } from '../hooks/useRedux';
 import { UserRole } from '../types/auth';
 import DealRoomDashboard from './DealRoomDashboard';
 import InvestorDatabase from './InvestorDatabase';
+import ComingSoonOverlay from '../components/common/ComingSoonOverlay';
 
 const DealPipeline: React.FC = () => {
   const navigate = useNavigate();
@@ -158,7 +159,8 @@ const DealPipeline: React.FC = () => {
   const canAccessInvestorDB = user?.role && [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD].includes(user.role);
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="max-w-7xl mx-auto space-y-6 relative">
+      <ComingSoonOverlay />
       {/* Breadcrumbs */}
       <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
         <a href="/dashboard" className="hover:text-primary transition-colors">
