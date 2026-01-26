@@ -66,12 +66,34 @@ async def create_meeting_invite(
     Create a new meeting entry in the database.
     """
     async with AsyncSessionLocal() as session:
+        # Intelligent URL extraction for video links
+        video_link = None
+        cleaned_location = location
+        
+        # Check for common video conference patterns or raw URLs
+        if location and any(x in location.lower() for x in ['http', 'meet.google', 'zoom.us', 'teams.microsoft']):
+            # It's likely a link
+            potential_link = location.strip()
+            
+            # Simple heuristic: if it looks like a URL (no spaces, has dot)
+            if ' ' not in potential_link and '.' in potential_link:
+                if not potential_link.startswith(('http://', 'https://')):
+                    video_link = f"https://{potential_link}"
+                else:
+                    video_link = potential_link
+                
+                # If location was just the link, maybe keep it as "Virtual" or the link?
+                # Let's keep location as is for display, but ensure video_link is populated
+                if location.lower() == 'virtual':
+                    cleaned_location = location
+                
         new_meeting = Meeting(
             twg_id=twg_id,
             title=title,
             scheduled_at=scheduled_at,
-            location=location,
-            duration_minutes=duration
+            location=cleaned_location,
+            duration_minutes=duration,
+            video_link=video_link
         )
         session.add(new_meeting)
         await session.commit()
@@ -80,6 +102,7 @@ async def create_meeting_invite(
         return {
             "meeting_id": str(new_meeting.id),
             "status": "created",
+            "video_link": video_link,
             "invite_text_hint": f"Invitation for {title} on {scheduled_at.strftime('%Y-%m-%d %H:%M')}"
         }
 

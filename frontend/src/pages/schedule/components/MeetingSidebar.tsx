@@ -67,7 +67,12 @@ export default function MeetingSidebar({ meeting }: MeetingSidebarProps) {
                             <div className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Venue</div>
                             <div className="text-sm font-bold text-slate-900 dark:text-white">{meeting.location || 'Virtual'}</div>
                             {meeting.video_link ? (
-                                <a href={meeting.video_link} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mt-1">
+                                <a
+                                    href={meeting.video_link.startsWith('http') ? meeting.video_link : `https://${meeting.video_link}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mt-1"
+                                >
                                     <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
                                     Join Video Call
                                 </a>
