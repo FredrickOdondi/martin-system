@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card } from '../ui';
 import { meetings, twgs } from '../../services/api';
 import { useAppSelector } from '../../hooks/useRedux';
+import { UserRole } from '../../types/auth';
 
 interface CreateMeetingModalProps {
     isOpen: boolean;
@@ -17,7 +18,7 @@ export default function CreateMeetingModal({ isOpen, onClose, twgId, onSuccess, 
 
     // Get user info from Redux
     const user = useAppSelector(state => state.auth.user);
-    const isAdmin = user?.role === 'admin';
+    const isAdmin = user?.role === UserRole.ADMIN;
     const userTwgIds = user?.twg_ids || [];
 
     // Auto-select TWG for non-admins
