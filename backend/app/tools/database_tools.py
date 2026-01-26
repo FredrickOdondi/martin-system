@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional
 import logging
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+import pytz
 
 from app.core.database import AsyncSessionLocal
 from app.models.models import TWG, Meeting, ActionItem, Project, User
@@ -60,37 +61,48 @@ async def create_meeting_invite(
     title: str,
     scheduled_at: datetime,
     location: str = "Virtual",
-    duration: int = 60
+    duration: int = 60,
+    timezone: str = "Africa/Lagos" # Default to ECOWAS HQ
 ) -> Dict[str, Any]:
     """
     Create a new meeting entry in the database.
+    Converts local time (based on 'timezone' param) to UTC for storage.
     """
     async with AsyncSessionLocal() as session:
+        # 1. Timezone Handling: Input -> Local -> UTC
+        try:
+            local_tz = pytz.timezone(timezone)
+            if scheduled_at.tzinfo is None:
+                # Assume input is in local_tz if naive
+                local_dt = local_tz.localize(scheduled_at)
+            else:
+                local_dt = scheduled_at.astimezone(local_tz)
+            
+            # Convert to UTC for storage (Naive UTC)
+            utc_dt = local_dt.astimezone(pytz.UTC).replace(tzinfo=None)
+        except Exception as e:
+            logger.error(f"Timezone conversion error: {e}")
+            utc_dt = scheduled_at if scheduled_at.tzinfo is None else scheduled_at.astimezone(pytz.UTC).replace(tzinfo=None)
+
         # Intelligent URL extraction for video links
         video_link = None
         cleaned_location = location
         
         # Check for common video conference patterns or raw URLs
         if location and any(x in location.lower() for x in ['http', 'meet.google', 'zoom.us', 'teams.microsoft']):
-            # It's likely a link
             potential_link = location.strip()
-            
-            # Simple heuristic: if it looks like a URL (no spaces, has dot)
             if ' ' not in potential_link and '.' in potential_link:
                 if not potential_link.startswith(('http://', 'https://')):
                     video_link = f"https://{potential_link}"
                 else:
                     video_link = potential_link
-                
-                # If location was just the link, maybe keep it as "Virtual" or the link?
-                # Let's keep location as is for display, but ensure video_link is populated
                 if location.lower() == 'virtual':
                     cleaned_location = location
                 
         new_meeting = Meeting(
             twg_id=twg_id,
             title=title,
-            scheduled_at=scheduled_at,
+            scheduled_at=utc_dt, # Store as UTC
             location=cleaned_location,
             duration_minutes=duration,
             video_link=video_link
@@ -103,7 +115,8 @@ async def create_meeting_invite(
             "meeting_id": str(new_meeting.id),
             "status": "created",
             "video_link": video_link,
-            "invite_text_hint": f"Invitation for {title} on {scheduled_at.strftime('%Y-%m-%d %H:%M')}"
+            "scheduled_utc": utc_dt.isoformat(),
+            "invite_text_hint": f"Invitation for {title} on {local_dt.strftime('%Y-%m-%d %H:%M %Z')}"
         }
 
 async def update_action_items_from_minutes(
@@ -183,7 +196,8 @@ DATABASE_TOOLS = [
             "title": "Meeting title",
             "scheduled_at": "ISO formatted datetime string",
             "location": "Optional location or meeting link",
-            "duration": "Duration in minutes (default: 60)"
+            "duration": "Duration in minutes (default: 60)",
+            "timezone": "Timezone string (default: Africa/Lagos)"
         },
         "coroutine": create_meeting_invite
     },
