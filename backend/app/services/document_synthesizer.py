@@ -305,7 +305,7 @@ The meeting bot joined successfully but did not record any speech. This could be
             logger.error(f"Failed to synthesize minutes: {e}")
             raise e
 
-    def extract_action_items(self, minutes_text: str, pillar: str = "energy") -> List[Dict[str, Any]]:
+    async def extract_action_items(self, minutes_text: str, pillar: str = "energy") -> List[Dict[str, Any]]:
         """
         Extract action items from meeting minutes using the appropriate specialist agent.
         """
@@ -364,14 +364,13 @@ Example format:
   {{"description": "Review ECOWAS Vision 2050 alignment", "owner": "TBD", "due_date": null}}
 ]
 """
-            # Use the agent to invoke the prompt
-            # The agent returns a dict with "messages" usually.
-            # We need to parse the response.
-            response = agent.invoke({"messages": [("user", prompt)]})
+            # Use the agent to chat
+            # The agent.chat method for LangGraphBaseAgent returns a dict with "response" 
+            # or the raw state. Looking at LangGraphBaseAgent.chat(...):
+            # return {"response": response_msg.content, "messages": ...}
+            response = await agent.chat(prompt)
             
-            # Extract content from the last message
-            ai_message = response["messages"][-1]
-            content = ai_message.content
+            content = response.get("response", "")
             
             # Parse JSON
             # Clean markdown code blocks if present

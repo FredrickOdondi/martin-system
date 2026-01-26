@@ -5,6 +5,7 @@ import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import Input from '../../components/ui/Input';
 import api from '../../services/api';
+import ComingSoonOverlay from '../../components/common/ComingSoonOverlay';
 
 
 interface Conflict {
@@ -102,7 +103,8 @@ const ProjectConflicts: React.FC = () => {
     };
 
     return (
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-6 relative">
+            <ComingSoonOverlay />
             {/* Header */}
             <div>
                 <h1 className="text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">

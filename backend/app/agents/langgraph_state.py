@@ -5,6 +5,7 @@ Defines the shared state that flows through the agent graph.
 """
 
 from typing import Annotated, TypedDict, List, Dict, Optional, Literal, Sequence
+from operator import add
 from langchain_core.messages import BaseMessage
 
 
@@ -48,3 +49,6 @@ class AgentState(TypedDict):
     
     # Structured Intent from LLM Parser
     directive_intent: Optional[Dict[str, any]]
+    
+    # Structured Citations for frontend
+    citations: Annotated[List[Dict], add]

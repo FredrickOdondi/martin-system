@@ -46,7 +46,69 @@ export function MessageBubble({ message, onActionClick, onFileUpload }: MessageB
         );
 
       default:
-        return <div className="whitespace-pre-wrap">{message.content}</div>;
+        // Extract consulted agent if present
+        let content = message.content;
+        let consultedAgent = null;
+
+        if (typeof content === 'string') {
+          const consultMatch = content.match(/^\[Consulted\s+(\w+)\s+TWG\]\s*/i);
+          if (consultMatch) {
+            consultedAgent = consultMatch[1];
+            content = content.replace(consultMatch[0], '').trim();
+          }
+        }
+
+        // Try to parse JSON responses (e.g., from agent consultations with citations)
+        let parsedResponse = null;
+        try {
+          // Check if content looks like a JSON object
+          if (typeof content === 'string' && content.trim().startsWith('{')) {
+            const parsed = JSON.parse(content);
+            if (parsed.response) {
+              parsedResponse = parsed;
+            }
+          }
+        } catch (e) {
+          // Not JSON, render as plain text
+        }
+
+        return (
+          <div className="space-y-3">
+            {consultedAgent && (
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-purple-500/20 border border-purple-500/30 rounded-full text-xs font-semibold text-purple-300">
+                <span className="material-symbols-outlined text-[14px]">groups</span>
+                {consultedAgent} TWG
+              </div>
+            )}
+
+            {parsedResponse ? (
+              <>
+                <div className="whitespace-pre-wrap">{parsedResponse.response}</div>
+                {parsedResponse.citations && parsedResponse.citations.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-slate-700">
+                    <div className="text-xs font-semibold text-slate-400 mb-2">
+                      📚 Sources ({parsedResponse.citations.length})
+                    </div>
+                    <div className="space-y-1">
+                      {parsedResponse.citations.slice(0, 3).map((citation: any, idx: number) => (
+                        <div key={idx} className="text-xs text-slate-500">
+                          • {citation.source} (Page {citation.page}, Relevance: {(citation.relevance * 100).toFixed(1)}%)
+                        </div>
+                      ))}
+                      {parsedResponse.citations.length > 3 && (
+                        <div className="text-xs text-slate-500 italic">
+                          + {parsedResponse.citations.length - 3} more sources
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="whitespace-pre-wrap">{content}</div>
+            )}
+          </div>
+        );
     }
   };
 
@@ -102,11 +164,10 @@ export function MessageBubble({ message, onActionClick, onFileUpload }: MessageB
         <div className="max-w-[80%]">
           {/* Message bubble */}
           <div
-            className={`rounded-2xl p-4 ${
-              isUser
-                ? 'bg-blue-600 text-white'
-                : 'bg-slate-800/50 text-white border border-slate-700'
-            }`}
+            className={`rounded-2xl p-4 ${isUser
+              ? 'bg-blue-600 text-white'
+              : 'bg-slate-800/50 text-white border border-slate-700'
+              }`}
           >
             {renderContent()}
             {renderActions()}

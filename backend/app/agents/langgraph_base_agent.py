@@ -59,6 +59,9 @@ class AgentConversationState(TypedDict):
     
     # Flag to indicate an approval is pending (stops agent loop)
     approval_pending: Optional[bool]
+    
+    # User's Timezone (e.g., "Africa/Lagos")
+    user_timezone: Optional[str]
 
 
 # =========================================================================
@@ -112,16 +115,15 @@ class LangGraphBaseAgent:
         self.llm = get_llm_service()
         
         # Tools Configuration
-        from app.tools.calendar_tools import GET_SCHEDULE_TOOL_DEF, get_schedule
-        from app.tools.calendar_tools import GET_SCHEDULE_TOOL_DEF, get_schedule
+        from app.tools.calendar_tools import GET_SCHEDULE_TOOL_DEF, get_schedule, UPDATE_MEETING_TOOL_DEF, update_meeting
         from app.tools.email_tools import EMAIL_TOOLS, send_email, create_email_draft
         from app.tools.document_tools import REQUEST_DOCUMENT_APPROVAL_TOOL_DEF, request_document_approval_tool
         import json
         
         # Register default tools available to all agents (or specific ones)
         
-        # 1. Start with standard tools
-        self.tools_def = [GET_SCHEDULE_TOOL_DEF, REQUEST_DOCUMENT_APPROVAL_TOOL_DEF]
+        # 1. Start with standard tools (including update_meeting so agents can actually persist changes)
+        self.tools_def = [GET_SCHEDULE_TOOL_DEF, UPDATE_MEETING_TOOL_DEF, REQUEST_DOCUMENT_APPROVAL_TOOL_DEF]
         
         # 2. Convert and add EMAIL_TOOLS
         for tool in EMAIL_TOOLS:
@@ -199,8 +201,7 @@ class LangGraphBaseAgent:
         # 3. Build Tool Map (only include available tools)
         self.tool_map = {
             "get_schedule": get_schedule,
-            "send_email": send_email,
-            "get_schedule": get_schedule,
+            "update_meeting": update_meeting,
             "send_email": send_email,
             "create_email_draft": create_email_draft,
             "request_document_approval_tool": request_document_approval_tool
@@ -489,10 +490,23 @@ class LangGraphBaseAgent:
             history = sanitized_history
 
             # RAG Context injection (simplified)
-            from datetime import datetime
-            current_time_str = datetime.now().strftime("%A, %B %d, %Y at %I:%M %p")
+            # RAG Context injection (simplified)
+            from datetime import datetime, timezone as tz
+            from zoneinfo import ZoneInfo
             
-            sys_prompt = f"{self.system_prompt}\n\nCurrent Date & Time: {current_time_str}"
+            # Use user's timezone if provided, otherwise default to Nairobi
+            tz_name = state.get("user_timezone") or "Africa/Nairobi"
+            try:
+                user_tz = ZoneInfo(tz_name)
+            except Exception:
+                logger.warning(f"Invalid timezone {tz_name}, falling back to Africa/Nairobi")
+                user_tz = ZoneInfo("Africa/Nairobi")
+                
+            now = datetime.now(user_tz)
+            current_time_str = now.strftime("%A, %B %d, %Y at %I:%M %p")
+            today_date = now.strftime("%Y-%m-%d")
+            
+            sys_prompt = f"{self.system_prompt}\n\nCurrent Date & Time: {current_time_str} ({tz_name})\nToday's date is: {today_date}"
             
             context = state.get("context")
             if context and "retrieved_docs" in context:
@@ -590,6 +604,12 @@ class LangGraphBaseAgent:
                         if self.twg_id and "twg_id" not in tool_args:
                             logger.info(f"[{self.agent_id}] Auto-injecting twg_id={self.twg_id} into {tool_name}")
                             tool_args["twg_id"] = self.twg_id
+                            
+                    # AUTO-INJECTION: Inject user_timezone for calendar tools if available
+                    if "user_timezone" in sig.parameters:
+                        tz_context = state.get("user_timezone")
+                        if tz_context and "user_timezone" not in tool_args:
+                             tool_args["user_timezone"] = tz_context
                     
                     if inspect.iscoroutinefunction(func):
                         # Async function - await directly
@@ -667,7 +687,7 @@ class LangGraphBaseAgent:
         state["messages"].extend(new_messages)
         return state
 
-    async def chat(self, message: str, thread_id: Optional[str] = None) -> Dict[str, any]:
+    async def chat(self, message: str, thread_id: Optional[str] = None, user_timezone: Optional[str] = None) -> Dict[str, any]:
         """
         Chat interface using LangGraph execution (Async).
         """
@@ -727,8 +747,11 @@ class LangGraphBaseAgent:
             "query": message,
             "messages": [HumanMessage(content=message)],
             "agent_id": self.agent_id,
+            "messages": [HumanMessage(content=message)],
+            "agent_id": self.agent_id,
             "session_id": thread_id,
-            "citations": []
+            "citations": [],
+            "user_timezone": user_timezone
         }
         
         try:

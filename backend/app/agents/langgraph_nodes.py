@@ -292,28 +292,39 @@ async def synthesis_node(state: AgentState, supervisor_agent: LangGraphBaseAgent
 
     logger.info(f"[SYNTHESIS] Synthesizing {len(responses)} TWG responses into unified memo")
 
-    # Truncate responses AGGRESSIVELY to prevent 413 errors
+    # Process responses to extract text and collect citations
     truncated_responses = {}
-    for agent_id, response in responses.items():
-        # Limit to 300 characters (~75 tokens) - very aggressive
-        if len(response) > 300:
-            truncated_responses[agent_id] = response[:300] + "..."
+    all_citations = []
+    
+    for agent_id, response_raw in responses.items():
+        response_text = ""
+        if isinstance(response_raw, dict):
+            response_text = response_raw.get("response", "")
+            all_citations.extend(response_raw.get("citations", []))
         else:
-            truncated_responses[agent_id] = response
+            response_text = str(response_raw)
+            
+        # Truncate text for prompt
+        if len(response_text) > 400:
+            truncated_responses[agent_id] = response_text[:400] + "..."
+        else:
+            truncated_responses[agent_id] = response_text
 
-    # Build synthesis prompt for unified memo - keep it SHORT to avoid token limits
+    # Build synthesis prompt for unified memo
     agent_list = ", ".join([agent_id.upper() for agent_id in responses.keys()])
 
     synthesis_prompt = f"""Question: {query}
 
 TWG Inputs ({agent_list}):
 """
-    for agent_id, response in truncated_responses.items():
-        synthesis_prompt += f"\n{agent_id}: {response}\n"
+    for agent_id, response_text in truncated_responses.items():
+        synthesis_prompt += f"\n{agent_id}: {response_text}\n"
 
     synthesis_prompt += f"""
-Write ONE professional memo (max 500 words, NO emojis) synthesizing these TWG inputs.
-Format: Executive Summary, Strategic Rationale, Financial Overview, Regional Impact, Recommendation."""
+Write ONE cohesive professional memo (max 500 words, NO emojis) synthesizing these TWG inputs.
+The inputs may contain raw data or tool outputs - INTEGRATE this data directly into your narrative.
+DO NOT append "Report Generated" sections or repeat the raw data at the end.
+Format: Executive Summary, Operational Briefing, Strategic Analysis, Recommendations, Technical Dispatch."""
 
     # Get supervisor's unified memo
     try:
@@ -348,8 +359,20 @@ Format: Executive Summary, Strategic Rationale, Financial Overview, Regional Imp
 
     state["synthesized_response"] = output
     state["final_response"] = output
+    
+    # Propagate combined citations
+    unique_citations = []
+    if all_citations:
+        # Deduplicate by source and page
+        seen = set()
+        for c in all_citations:
+            key = (c.get('source'), c.get('page'))
+            if key not in seen:
+                unique_citations.append(c)
+                seen.add(key)
+        state["citations"] = unique_citations
 
-    logger.info(f"[SYNTHESIS] Complete - Generated unified memo")
+    logger.info(f"[SYNTHESIS] Complete - Generated unified memo with {len(unique_citations)} unique citations")
 
     return state
 
@@ -369,14 +392,30 @@ def single_agent_response_node(state: AgentState) -> AgentState:
         return state
 
     # Get the single agent's response
-    agent_id, response = list(responses.items())[0]
+    agent_id, response_raw = list(responses.items())[0]
+    
+    # Handle Dict vs Str response
+    response_text = ""
+    citations = []
+    
+    if isinstance(response_raw, dict):
+        response_text = response_raw.get("response", "")
+        citations = response_raw.get("citations", [])
+    else:
+        response_text = str(response_raw)
 
     # Add context header
-    context = f"[Consulted {agent_id.upper()} TWG]\n\n{response}"
+    context = f"[Consulted {agent_id.upper()} TWG]\n\n{response_text}"
 
     state["final_response"] = context
+    
+    # Propagate citations to supervisor state
+    if citations:
+        if "citations" not in state or state["citations"] is None:
+            state["citations"] = []
+        state["citations"] = citations
 
-    logger.info(f"[SINGLE] Formatted response from {agent_id}")
+    logger.info(f"[SINGLE] Formatted response from {agent_id} with {len(citations)} citations")
 
     return state
 

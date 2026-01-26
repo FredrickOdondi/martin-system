@@ -94,20 +94,34 @@ class LangGraphSupervisor:
             Get the unified schedule of all TWG meetings. 
             Useful for checking availability, finding conflicts, or seeing the overall timeline.
             """
+            from app.core.database import get_sync_db_session
+            from app.models.models import Meeting, MeetingStatus
+            from sqlalchemy import select
+            
             try:
-                state = self.state_service.get_state()
-                if not state:
-                    return "Global state not yet initialized. Please try again in a moment."
-                
-                calendar = self.state_service.get_global_calendar()
-                
-                response = f"Global Calendar ({calendar.total_meetings} total, {calendar.upcoming_meetings} upcoming, {calendar.conflicts_detected} conflicts):\n"
-                for m in calendar.meetings:
-                    if m.status == "scheduled":
-                        conflict_mark = "⚠️ " if m.has_conflicts else ""
-                        response += f"- {conflict_mark}{m.scheduled_at.strftime('%Y-%m-%d %H:%M')}: {m.title} ({m.twg_name})\n"
-                
-                return response
+                # Use live DB session to ensure fresh data (fixes hallucination/stale cache)
+                session = get_sync_db_session()
+                try:
+                    stmt = select(Meeting).where(Meeting.status == MeetingStatus.SCHEDULED).order_by(Meeting.scheduled_at)
+                    meetings = session.execute(stmt).scalars().all()
+                    
+                    if not meetings:
+                        return "Global Calendar: No upcoming meetings scheduled."
+                    
+                    response = f"Global Calendar ({len(meetings)} upcoming):\n"
+                    for m in meetings:
+                        # Explicitly mention UTC to avoid timezone confusion
+                        time_str = m.scheduled_at.strftime('%Y-%m-%d %H:%M UTC')
+                        # Use video_link if present, otherwise location
+                        loc = m.location or "TBD"
+                        if m.video_link:
+                             loc += f" (Link: {m.video_link})"
+                             
+                        response += f"- [ID: {m.id}] {time_str}: {m.title} ({m.twg.name if m.twg else 'General'})\n  Location: {loc}\n"
+                    
+                    return response
+                finally:
+                    session.close()
             except Exception as e:
                 return f"Error accessing calendar: {str(e)}"
 
@@ -366,7 +380,7 @@ class LangGraphSupervisor:
                     generated_link = f"meet.google.com/{part1}-{part2}-{part3}"
                     
                     # Append to location if not already there
-                    final_location = f"{final_location} - {generated_link}"
+                    # final_location = f"{final_location} - {generated_link}"
 
                 logger.info(f"[BOOKING_TOOL] Final Location: {final_location} (Virtual: {is_virtual})")
 
@@ -457,8 +471,8 @@ class LangGraphSupervisor:
                     # We will log it and maybe the user will see it in the email draft which uses this info
                     
                     insert_meeting = text("""
-                        INSERT INTO meetings (id, twg_id, title, scheduled_at, duration_minutes, location, status, meeting_type)
-                        VALUES (:id, :twg_id, :title, :scheduled_at, :duration_minutes, :location, :status, :meeting_type)
+                        INSERT INTO meetings (id, twg_id, title, scheduled_at, duration_minutes, location, status, meeting_type, video_link)
+                        VALUES (:id, :twg_id, :title, :scheduled_at, :duration_minutes, :location, :status, :meeting_type, :video_link)
                     """)
                     
                     session.execute(insert_meeting, {
@@ -467,9 +481,10 @@ class LangGraphSupervisor:
                         "title": title,
                         "scheduled_at": start_time,
                         "duration_minutes": duration_minutes,
-                        "location": final_location,
+                        "location": final_location, # Use the clean location text
                         "status": "SCHEDULED",
-                        "meeting_type": meeting_type
+                        "meeting_type": meeting_type,
+                        "video_link": generated_link # Save link separately
                     })
                     
                     if all_participant_ids:
@@ -503,7 +518,99 @@ class LangGraphSupervisor:
                 logger.error(f"[BOOKING_TOOL] Error requesting booking: {e}", exc_info=True)
                 return f"Error requesting booking: {str(e)}"
 
+        def update_meeting_tool(
+            meeting_id: str,
+            new_title: Optional[str] = None,
+            new_location: Optional[str] = None,
+            is_virtual: Optional[bool] = None,
+            new_time_iso: Optional[str] = None,
+            new_duration: Optional[int] = None
+        ) -> str:
+            """
+            Update an existing meeting.
+            Args:
+                meeting_id: ID of the meeting to update (from calendar)
+                new_title: New title (optional)
+                new_location: New venue prompt (e.g. "Virtual" or "Conference Room 1")
+                is_virtual: Whether it should be a virtual meeting (generates link if True)
+                new_time_iso: New start time ISO 8601 (optional) (e.g. "2026-03-15T14:00:00")
+                new_duration: New duration in minutes (optional)
+            """
+            from app.core.database import get_sync_db_session
+            from app.models.models import Meeting
+            from sqlalchemy import select
+            import random, string, datetime
+
+            try:
+                session = get_sync_db_session()
+                try:
+                    stmt = select(Meeting).where(Meeting.id == meeting_id) 
+                    meeting = session.execute(stmt).scalars().first()
+                    
+                    if not meeting:
+                        return f"Error: Meeting ID {meeting_id} not found."
+                    
+                    changes = []
+                    
+                    if new_title:
+                        meeting.title = new_title
+                        changes.append(f"Title -> {new_title}")
+                        
+                    if new_time_iso:
+                        # Parse ISO format
+                        try:
+                            # If only time provided, merge with existing date? No, assume full ISO.
+                            # Usually LLM provides full ISO.
+                            dt = datetime.datetime.fromisoformat(new_time_iso)
+                            meeting.scheduled_at = dt
+                            changes.append(f"Time -> {new_time_iso}")
+                        except ValueError:
+                             return "Error: Invalid ISO format for time. Use YYYY-MM-DDTHH:MM:SS"
+
+                    if new_duration:
+                        meeting.duration_minutes = new_duration
+                        changes.append(f"Duration -> {new_duration}m")
+
+                    # Location Logic
+                    if new_location:
+                        meeting.location = new_location
+                        changes.append(f"Location -> {new_location}")
+                        
+                        # Auto-infer virtual from location keywords if is_virtual not specified
+                        if is_virtual is None:
+                            virtual_keywords = ["virtual", "online", "zoom", "meet", "teams"]
+                            if any(k in new_location.lower() for k in virtual_keywords):
+                                is_virtual = True
+
+                    # Virtual/Link Logic
+                    if is_virtual is True:
+                        if not meeting.video_link:
+                            # Generate link if missing
+                            part1 = ''.join(random.choices(string.ascii_lowercase, k=3))
+                            part2 = ''.join(random.choices(string.ascii_lowercase, k=4))
+                            part3 = ''.join(random.choices(string.ascii_lowercase, k=3))
+                            meeting.video_link = f"meet.google.com/{part1}-{part2}-{part3}"
+                            changes.append("Video Link -> Generated")
+                        
+                        # If location is ambiguous or generic "Virtual", standardize it
+                        if not meeting.location or meeting.location.strip() == "Virtual":
+                             meeting.location = "Virtual (Google Meet)"
+
+                    elif is_virtual is False:
+                        # Switching to physical -> Clear link
+                        meeting.video_link = None
+                        changes.append("Video Link -> Removed (Physical meeting)")
+
+                    session.commit()
+                    return f"✅ Meeting Updated: {', '.join(changes)}"
+                    
+                finally:
+                    session.close()
+            except Exception as e:
+                return f"Error updating meeting: {str(e)}"
+
         if hasattr(self.supervisor_agent, "add_tool"):
+            self.supervisor_agent.add_tool(update_meeting_tool)
             self.supervisor_agent.add_tool(check_availability_tool)
             self.supervisor_agent.add_tool(request_booking_tool)
 
@@ -524,12 +631,12 @@ class LangGraphSupervisor:
         from app.agents.langgraph_resource_mobilization_agent import create_langgraph_resource_mobilization_agent
 
         agents = {
-            "energy": create_langgraph_energy_agent(keep_history=False),
-            "agriculture": create_langgraph_agriculture_agent(keep_history=False),
-            "minerals": create_langgraph_minerals_agent(keep_history=False),
-            "digital": create_langgraph_digital_agent(keep_history=False),
-            "protocol": create_langgraph_protocol_agent(keep_history=False),
-            "resource_mobilization": create_langgraph_resource_mobilization_agent(keep_history=False)
+            "energy": create_langgraph_energy_agent(keep_history=True),
+            "agriculture": create_langgraph_agriculture_agent(keep_history=True),
+            "minerals": create_langgraph_minerals_agent(keep_history=True),
+            "digital": create_langgraph_digital_agent(keep_history=True),
+            "protocol": create_langgraph_protocol_agent(keep_history=True),
+            "resource_mobilization": create_langgraph_resource_mobilization_agent(keep_history=True)
         }
 
         for agent_id, agent in agents.items():
@@ -736,7 +843,7 @@ class LangGraphSupervisor:
         logger.info("[SUPERVISOR] ✓ LangGraph StateGraph compiled successfully")
         logger.info(f"[SUPERVISOR] Nodes: route_query, supervisor, {', '.join(self._twg_agents.keys())}, synthesis, single_agent_response, dispatch_multiple")
 
-    async def chat(self, message: str, thread_id: Optional[str] = None, twg_id: Optional[str] = None) -> str:
+    async def chat(self, message: str, thread_id: Optional[str] = None, twg_id: Optional[str] = None, user_timezone: Optional[str] = None) -> str:
         """
         Chat interface using LangGraph execution.
 
@@ -810,7 +917,7 @@ class LangGraphSupervisor:
             logger.error(f"[SUPERVISOR:{thread_id}] Error: {e}")
             return f"I apologize, but I encountered an error: {str(e)}"
 
-    async def stream_chat(self, message: str, thread_id: Optional[str] = None, twg_id: Optional[str] = None):
+    async def stream_chat(self, message: str, thread_id: Optional[str] = None, twg_id: Optional[str] = None, user_timezone: Optional[str] = None):
         """
         Stream chat events from LangGraph execution.
         Yields events for each step in the graph.
@@ -833,7 +940,8 @@ class LangGraphSupervisor:
             "delegation_type": "supervisor_only",
             "session_id": self.session_id,
             "user_id": None,
-            "context": {"twg_id": twg_id} if twg_id else None
+            "context": {"twg_id": twg_id, "user_timezone": user_timezone} if twg_id or user_timezone else None,
+            "user_timezone": user_timezone
         }
 
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 30}

@@ -479,8 +479,7 @@ async def generate_minutes(
             # Or just call sync if we accept blocking (current synthesize_minutes is blocking)
             # Let's use thread for safety as it involves another LLM call
             
-            actions_list = await asyncio.to_thread(
-                synthesizer.extract_action_items,
+            actions_list = await synthesizer.extract_action_items(
                 generated_content,
                 pillar_name
             )
