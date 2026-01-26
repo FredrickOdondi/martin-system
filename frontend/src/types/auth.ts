@@ -1,8 +1,8 @@
 export enum UserRole {
-    ADMIN = 'admin',
-    FACILITATOR = 'twg_facilitator',
-    MEMBER = 'twg_member',
-    SECRETARIAT_LEAD = 'secretariat_lead'
+    ADMIN = 'ADMIN',
+    FACILITATOR = 'TWG_FACILITATOR',
+    MEMBER = 'TWG_MEMBER',
+    SECRETARIAT_LEAD = 'SECRETARIAT_LEAD'
 }
 
 export interface User {
