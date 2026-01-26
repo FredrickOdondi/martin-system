@@ -337,16 +337,29 @@ async def get_global_timeline(
             "status": "critical" if "plenary" in m.title.lower() or "summit" in m.title.lower() else "normal"
         })
         
-    # Add some mock deadlines for now if none exist to make it look "real time"
-    # In a real app, we'd fetch from ActionItems or Project metadata
-    if not timeline:
+    # Fetch upcoming Action Items as deadlines
+    q_actions = select(ActionItem).options(selectinload(ActionItem.twg)).where(
+        ActionItem.due_date >= datetime.datetime.utcnow(),
+        ActionItem.status != ActionItemStatus.COMPLETED
+    )
+    
+    if not is_universal_access:
+        q_actions = q_actions.where(ActionItem.twg_id.in_(user_twg_ids))
+        
+    actions_res = await db.execute(q_actions.order_by(ActionItem.due_date).limit(limit))
+    actions = actions_res.scalars().all()
+    
+    for a in actions:
         timeline.append({
             "type": "deadline",
-            "date": datetime.datetime.utcnow() + datetime.timedelta(days=2),
-            "title": "Draft Submission Deadline",
-            "twg": "Trade & Customs",
-            "status": "critical"
+            "date": a.due_date,
+            "title": a.description, # Description often contains the deadline name
+            "twg": a.twg.name if a.twg else "General",
+            "status": "critical" if a.priority in ["HIGH", "URGENT"] else "normal"
         })
+        
+    # Sort combined timeline by date
+    timeline.sort(key=lambda x: x["date"])
 
     return timeline[:limit]
 
