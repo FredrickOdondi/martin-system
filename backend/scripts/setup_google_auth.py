@@ -29,9 +29,14 @@ def main():
     # This should be the 'Client ID' JSON downloaded from Google Console
     creds_file = 'google_credentials.json'
     if not os.path.exists(creds_file):
-        print(f"ERROR: {creds_file} not found!")
-        print("Please download your OAuth 2.0 Client ID JSON and rename it to 'google_credentials.json' in this folder.")
-        return
+        # Fallback to standard name
+        if os.path.exists('credentials.json'):
+            creds_file = 'credentials.json'
+            print(f"Using standard '{creds_file}'...")
+        else:
+            print(f"ERROR: {creds_file} (or credentials.json) not found!")
+            print("Please download your OAuth 2.0 Client ID JSON and rename it to 'google_credentials.json' in this folder.")
+            return
     
     # Run OAuth flow
     print("Starting OAuth flow...")

@@ -522,6 +522,9 @@ class LangGraphBaseAgent:
                 system_prompt=sys_prompt,
                 tools=self.tools_def
             )
+            
+            # DEBUG: Log the full system prompt to verify Timezone injection
+            logger.info(f"[{self.agent_id}] System Prompt Context:\n{sys_prompt[-500:]}") # Log last 500 chars containing time context
 
             # Handle Response
             if hasattr(response_obj, "tool_calls") and response_obj.tool_calls:

@@ -233,7 +233,8 @@ async def supervisor_node(state: AgentState, supervisor_agent: LangGraphBaseAgen
     query = state["query"]
     logger.info(f"[SUPERVISOR] Handling query with general knowledge")
 
-    response = await supervisor_agent.chat(query)
+    user_timezone = state.get("user_timezone")
+    response = await supervisor_agent.chat(query, user_timezone=user_timezone)
 
     state["final_response"] = response
     state["agent_responses"]["supervisor"] = response
@@ -259,8 +260,9 @@ def create_twg_agent_node(agent_id: str, agent: LangGraphBaseAgent):
         query = state["query"]
         logger.info(f"[{_agent_id.upper()}] Processing query")
 
+        user_timezone = state.get("user_timezone")
         try:
-            response = await _agent.chat(query)
+            response = await _agent.chat(query, user_timezone=user_timezone)
             state["agent_responses"][_agent_id] = response
             logger.info(f"[{_agent_id.upper()}] Response generated")
         except GraphInterrupt:

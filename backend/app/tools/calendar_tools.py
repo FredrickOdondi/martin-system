@@ -65,13 +65,16 @@ async def get_schedule(days: int = 7, twg_id: Optional[str] = None) -> str:
             
             for meeting in meetings:
                 # Determine human-readable date label
-                # Assume meeting.scheduled_at is in UTC, convert to user TZ for comparison
+                # CRITICAL: meeting.scheduled_at is stored as naive UTC, convert to user TZ
                 meeting_dt = meeting.scheduled_at
                 if meeting_dt.tzinfo is None:
-                    # Naive datetime - assume it's stored in local time (EAT)
-                    meeting_date = meeting_dt.date()
-                else:
-                    meeting_date = meeting_dt.astimezone(user_tz).date()
+                    # Naive datetime - it's stored as UTC, so add UTC timezone
+                    from datetime import timezone as tz
+                    meeting_dt = meeting_dt.replace(tzinfo=tz.utc)
+                
+                # Convert to user timezone for comparison and display
+                meeting_local = meeting_dt.astimezone(user_tz)
+                meeting_date = meeting_local.date()
                     
                 if meeting_date == today:
                     date_label = "TODAY"
@@ -84,8 +87,8 @@ async def get_schedule(days: int = 7, twg_id: Optional[str] = None) -> str:
                     "id": str(meeting.id),
                     "summary": meeting.title,
                     "date_label": date_label,
-                    "start": meeting.scheduled_at.isoformat(),
-                    "end": (meeting.scheduled_at + timedelta(minutes=meeting.duration_minutes)).isoformat(),
+                    "start": meeting_local.strftime("%Y-%m-%d %I:%M %p EAT"),  # e.g. "2026-01-27 11:18 AM EAT"
+                    "end": (meeting_local + timedelta(minutes=meeting.duration_minutes)).strftime("%I:%M %p EAT"),
                     "status": meeting.status.value if hasattr(meeting.status, 'value') else meeting.status,
                     "meet_link": meeting.video_link,
                     "location": meeting.location,

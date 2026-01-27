@@ -67,15 +67,31 @@ export default function MeetingSidebar({ meeting }: MeetingSidebarProps) {
                             <div className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Venue</div>
                             <div className="text-sm font-bold text-slate-900 dark:text-white">{meeting.location || 'Virtual'}</div>
                             {meeting.video_link ? (
-                                <a
-                                    href={meeting.video_link.startsWith('http') ? meeting.video_link : `https://${meeting.video_link}`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mt-1"
-                                >
-                                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
-                                    Join Video Call
-                                </a>
+                                // Check if link looks like a fake generated link (no https://)
+                                meeting.video_link.startsWith('meet.google.com/') && !meeting.video_link.startsWith('https://') ? (
+                                    <div className="text-xs text-amber-600 dark:text-amber-400 mt-1 flex items-center gap-1">
+                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                        </svg>
+                                        Invalid meeting link - please update
+                                    </div>
+                                ) : (
+                                    <a
+                                        href={meeting.video_link.startsWith('http') ? meeting.video_link : `https://${meeting.video_link}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 mt-1"
+                                        onClick={(e) => {
+                                            // Prevent any duplicate handlers
+                                            e.stopPropagation();
+                                        }}
+                                    >
+                                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                        </svg>
+                                        Join Video Call
+                                    </a>
+                                )
                             ) : (
                                 meeting.location === 'Virtual' && <span className="text-xs text-slate-400 italic">No video link yet</span>
                             )}

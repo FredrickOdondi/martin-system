@@ -97,6 +97,11 @@ class LangGraphSupervisor:
             from app.core.database import get_sync_db_session
             from app.models.models import Meeting, MeetingStatus
             from sqlalchemy import select
+            from datetime import timezone as tz
+            from zoneinfo import ZoneInfo
+            
+            # Default to Africa/Nairobi for ECOWAS context
+            user_tz = ZoneInfo("Africa/Nairobi")
             
             try:
                 # Use live DB session to ensure fresh data (fixes hallucination/stale cache)
@@ -110,8 +115,11 @@ class LangGraphSupervisor:
                     
                     response = f"Global Calendar ({len(meetings)} upcoming):\n"
                     for m in meetings:
-                        # Explicitly mention UTC to avoid timezone confusion
-                        time_str = m.scheduled_at.strftime('%Y-%m-%d %H:%M UTC')
+                        # Convert UTC to user timezone for display
+                        utc_time = m.scheduled_at.replace(tzinfo=tz.utc)
+                        local_time = utc_time.astimezone(user_tz)
+                        time_str = local_time.strftime('%Y-%m-%d %I:%M %p EAT')  # e.g. "2026-01-27 11:18 AM EAT"
+                        
                         # Use video_link if present, otherwise location
                         loc = m.location or "TBD"
                         if m.video_link:
@@ -329,18 +337,21 @@ class LangGraphSupervisor:
             duration_minutes: int,
             vip_names: List[str] = [],
             attendee_emails: List[str] = [],
-            location: str = None
+            location: str = None,
+            user_timezone: str = None
         ) -> str:
             """
             Request to officially book a meeting.
             Args:
                 title: Meeting title
                 twg_name: Name of the hosting TWG (e.g. "Energy", "Minerals")
-                start_time_iso: ISO 8601 Start time
+                start_time_iso: ISO 8601 Start time in UTC (e.g. "2026-03-15T14:00:00" or "2026-03-15T14:00:00Z")
                 duration_minutes: Duration
                 vip_names: VIPs to invite (by name/title)
                 attendee_emails: List of participant emails to invite
                 location: Location (optional). If None/ambiguous, will be inferred.
+            
+            IMPORTANT: start_time_iso must be in UTC. The system stores all times as UTC.
             """
             from loguru import logger
             from app.core.database import SyncSessionLocal
@@ -348,11 +359,48 @@ class LangGraphSupervisor:
             from uuid import uuid4
             import random
             import string
+            from datetime import timezone as tz
             
             try:
                 logger.info(f"[BOOKING_TOOL] Starting booking: {title}")
-                start_time = datetime.fromisoformat(start_time_iso)
                 
+                # CRITICAL FIX: Strip 'Z' suffix if present
+                # The LLM often passes "2026-01-27T10:41:00Z" which Python interprets as UTC
+                # We need to treat this as naive local time and convert using user_timezone
+                clean_time_str = start_time_iso.rstrip('Z')
+                
+                # Parse the ISO datetime string (now guaranteed to be naive)
+                start_time = datetime.fromisoformat(clean_time_str)
+                
+                # CRITICAL: Ensure timezone handling
+                # If it's naive AND user_timezone provided, treat as local time and convert to UTC
+                
+                from zoneinfo import ZoneInfo
+                from datetime import timezone as tz
+                
+                if user_timezone and start_time.tzinfo is None:
+                    # User provided naive time (e.g. "10:00") intending it to be their local time
+                    try:
+                        user_tz = ZoneInfo(user_timezone)
+                        # Localize it
+                        local_dt = start_time.replace(tzinfo=user_tz)
+                        # Convert to UTC
+                        utc_time = local_dt.astimezone(tz.utc).replace(tzinfo=None)
+                        logger.info(f"[BOOKING_TOOL] Converted User Local Time ({start_time_iso} {user_timezone}) -> UTC: {utc_time}")
+                        start_time = utc_time
+                    except Exception as e:
+                        logger.error(f"[BOOKING_TOOL] Timezone conversion failed: {e}. Fallback to UTC assumption.")
+                        logger.info(f"[BOOKING_TOOL] Using naive datetime as UTC: {start_time}")
+                elif start_time.tzinfo is not None:
+                    # Somehow still has timezone info, convert to UTC
+                    start_time = start_time.astimezone(tz.utc).replace(tzinfo=None)
+                    logger.info(f"[BOOKING_TOOL] Converted timezone-aware time to UTC: {start_time}")
+                else:
+                    logger.info(f"[BOOKING_TOOL] Using naive datetime as UTC (No user_timezone provided): {start_time}")
+                
+                # DEBUG: Log the final time
+                logger.info(f"[BOOKING_TOOL] Final UTC Time for DB: {start_time}")
+
                 # Smart Location Inference
                 is_virtual = False
                 generated_link = None
@@ -364,23 +412,25 @@ class LangGraphSupervisor:
                 final_location = location
                 if not final_location:
                     # Default to virtual for safety/accessibility
-                    final_location = "Virtual (Google Meet)"
+                    final_location = "Virtual (Pending Link)"
                     is_virtual = True
                 else:
-                    if any(k in final_location.lower() for k in virtual_keywords):
+                    # BLOCK FAKE LINKS: If location contains a google meet link not generated by us, STRIP IT
+                    if "meet.google.com" in final_location:
+                        logger.warning(f"[BOOKING_TOOL] Stripping potential fake link from location: {final_location}")
+                        final_location = "Virtual (Pending Link)"
+                        is_virtual = True
+                    elif any(k in final_location.lower() for k in virtual_keywords):
                         is_virtual = True
                 
-                # Generate Google Meet link if virtual
+                # NOTE: Real Google Meet link generation requires Google Calendar API integration
+                # For now, we do NOT generate fake links as they don't work
+                # The video_link will remain None unless provided via calendar integration
+                # Users can manually add video links through the meeting update interface
                 if is_virtual and "meet.google.com" not in final_location:
-                    # Generate a realistic-looking mock Google Meet link
-                    # Format: 3-4-3 chars (e.g., abc-defg-hij)
-                    part1 = ''.join(random.choices(string.ascii_lowercase, k=3))
-                    part2 = ''.join(random.choices(string.ascii_lowercase, k=4))
-                    part3 = ''.join(random.choices(string.ascii_lowercase, k=3))
-                    generated_link = f"meet.google.com/{part1}-{part2}-{part3}"
-                    
-                    # Append to location if not already there
-                    # final_location = f"{final_location} - {generated_link}"
+                    # Do not generate fake links - they cause "Invalid meeting code" errors
+                    logger.warning("[BOOKING_TOOL] Virtual meeting requested but no real Meet link available. Set video_link=None")
+                    generated_link = None
 
                 logger.info(f"[BOOKING_TOOL] Final Location: {final_location} (Virtual: {is_virtual})")
 
@@ -501,7 +551,8 @@ class LangGraphSupervisor:
                         guest_msg = f" (Guests added to list: {', '.join(guest_list)})"
 
                     logger.info(f"[BOOKING_TOOL] ✓ Meeting created: {meeting_id}")
-                    return f"✅ Meeting '{title}' SCHEDULED. ID: {meeting_id}\nLocation: {final_location}{guest_msg}"
+                    link_status = "Video Link: Pending (Will be updated via Calendar Integration)" if is_virtual else "Video Link: N/A"
+                    return f"✅ Meeting '{title}' SCHEDULED. ID: {meeting_id}\nLocation: {final_location}\n{link_status}{guest_msg}"
                     
                 except GraphInterrupt:
                     raise
@@ -585,12 +636,10 @@ class LangGraphSupervisor:
                     # Virtual/Link Logic
                     if is_virtual is True:
                         if not meeting.video_link:
-                            # Generate link if missing
-                            part1 = ''.join(random.choices(string.ascii_lowercase, k=3))
-                            part2 = ''.join(random.choices(string.ascii_lowercase, k=4))
-                            part3 = ''.join(random.choices(string.ascii_lowercase, k=3))
-                            meeting.video_link = f"meet.google.com/{part1}-{part2}-{part3}"
-                            changes.append("Video Link -> Generated")
+                            # Do NOT generate fake links - they don't work
+                            # Real links should come from Google Calendar API integration
+                            logger.warning(f"[UPDATE_MEETING] Virtual meeting but no video_link. Keeping as None.")
+                            changes.append("Video Link -> Not available (requires Calendar API integration)")
                         
                         # If location is ambiguous or generic "Virtual", standardize it
                         if not meeting.location or meeting.location.strip() == "Virtual":
@@ -713,7 +762,8 @@ class LangGraphSupervisor:
                     try:
                         agent = self._twg_agents[agent_id]
                         # Await the async chat method
-                        response = await agent.chat(query)
+                        user_timezone = state.get("user_timezone")
+                        response = await agent.chat(query, user_timezone=user_timezone)
                         state["agent_responses"][agent_id] = response
                     except GraphInterrupt:
                         logger.info(f"[DISPATCH] Interrupt from {agent_id} detected in supervisor")
