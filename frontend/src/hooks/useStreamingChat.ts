@@ -67,6 +67,7 @@ export function useStreamingChat() {
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': token ? `Bearer ${token}` : '',
+                        'X-User-Timezone': Intl.DateTimeFormat().resolvedOptions().timeZone,
                     },
                     body: JSON.stringify(request),
                     signal: abortControllerRef.current.signal,

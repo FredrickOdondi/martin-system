@@ -74,9 +74,9 @@ export default function TwgWorkspace() {
 
 
     // Calculate Next Meeting from events
-    const nextMeeting = events.find(m => new Date(m.scheduled_at) > new Date());
+    const nextMeeting = events.find(m => new Date(m.scheduled_at + 'Z') > new Date());
     const nextMeetingDate = nextMeeting
-        ? new Date(nextMeeting.scheduled_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+        ? new Date(nextMeeting.scheduled_at + 'Z').toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
         : 'None Scheduled';
 
     return (
@@ -278,7 +278,8 @@ export default function TwgWorkspace() {
                                                                         )}
                                                                     </div>
                                                                     <div className="text-[10px] text-slate-400 uppercase font-black">
-                                                                        {new Date(m.scheduled_at).toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                                        {/* Convert UTC to local timezone for display */}
+                                                                        {new Date(m.scheduled_at + 'Z').toLocaleString([], { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                                                     </div>
                                                                 </td>
                                                                 <td className="px-6 py-4">

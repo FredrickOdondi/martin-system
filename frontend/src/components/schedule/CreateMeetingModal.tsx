@@ -73,12 +73,19 @@ export default function CreateMeetingModal({ isOpen, onClose, twgId, onSuccess, 
         setLoading(true);
 
         try {
-            // Create a Date object from the user's input (interpreted as local time)
-            // Then convert to UTC for storage
-            const localDateTime = new Date(`${formData.date}T${formData.time}:00`);
+            // TIMEZONE HANDLING:
+            // 1. User enters date/time in their LOCAL timezone (e.g., "2026-01-27" + "14:00")
+            // 2. new Date() interprets this as local time
+            // 3. toISOString() automatically converts to UTC
+            // 4. Backend stores as UTC (naive datetime)
+            // 5. Frontend displays by converting UTC back to local
 
-            // Convert to ISO string (which is in UTC)
+            const localDateTime = new Date(`${formData.date}T${formData.time}:00`);
             const scheduledAtUTC = localDateTime.toISOString();
+
+            console.log('📅 User input (local):', `${formData.date} ${formData.time}`);
+            console.log('🌍 User timezone:', Intl.DateTimeFormat().resolvedOptions().timeZone);
+            console.log('⏰ Sending to backend (UTC):', scheduledAtUTC);
 
             await meetings.create({
                 title: formData.title,

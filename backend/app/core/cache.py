@@ -44,8 +44,17 @@ class CacheService:
     async def set(self, key: str, value: Any, ttl: int = 60):
         if not self.redis:
             return
+        
+        # Custom serializer for datetime objects
+        def json_serial(obj):
+            """JSON serializer for objects not serializable by default json code"""
+            from datetime import date, datetime
+            if isinstance(obj, (datetime, date)):
+                return obj.isoformat()
+            raise TypeError(f"Type {type(obj)} not serializable")
+
         try:
-            await self.redis.setex(key, ttl, json.dumps(value))
+            await self.redis.setex(key, ttl, json.dumps(value, default=json_serial))
         except Exception as e:
             logger.error(f"Cache SET error: {e}")
 
