@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import { RootState } from '../../store';
 import { ChatMessage, ChatMessageType, EnhancedChatRequest, ActionType } from '../../types/agent';
+import { UserRole } from '../../types/auth';
 import { useStreamingChat, StreamEvent } from '../../hooks/useStreamingChat';
 import ReactMarkdown from 'react-markdown';
 
@@ -94,7 +95,7 @@ export default function CopilotChat({ twgId: propTwgId, twgName }: { twgId?: str
         const request: EnhancedChatRequest = {
             message: content,
             conversation_id: conversationId,
-            twg_id: propTwgId || (user?.role !== 'admin' ? user?.twg_ids?.[0] : undefined) // Pass TWG Context
+            twg_id: propTwgId || (user?.role !== UserRole.ADMIN ? user?.twg_ids?.[0] : undefined) // Pass TWG Context
         };
 
         // DEBUG: Log the request details
@@ -130,7 +131,7 @@ export default function CopilotChat({ twgId: propTwgId, twgName }: { twgId?: str
 
     // Fetch TWGs if authorized
     useEffect(() => {
-        const canMention = user?.role === 'admin' || user?.role === 'secretariat_lead';
+        const canMention = user?.role === UserRole.ADMIN || user?.role === UserRole.SECRETARIAT_LEAD;
         if (canMention && twgs.length === 0) {
             import('../../services/twgService').then(mod => {
                 mod.default.listTWGs().then(data => setTwgs(data)).catch(console.error);
@@ -152,7 +153,7 @@ export default function CopilotChat({ twgId: propTwgId, twgName }: { twgId?: str
         const words = val.split(" ");
         const lastWord = words[words.length - 1];
 
-        if ((lastWord.startsWith('@') || lastWord === '@') && (user?.role === 'admin' || user?.role === 'secretariat_lead')) {
+        if ((lastWord.startsWith('@') || lastWord === '@') && (user?.role === UserRole.ADMIN || user?.role === UserRole.SECRETARIAT_LEAD)) {
             setShowMentions(true);
             setMentionQuery(lastWord.slice(1));
             setMentionIndex(0);
@@ -201,7 +202,7 @@ export default function CopilotChat({ twgId: propTwgId, twgName }: { twgId?: str
                         <h3 className="font-bold text-sm text-slate-900 dark:text-white">Martin Copilot</h3>
                         <p className="text-[10px] text-green-500 font-bold uppercase flex items-center gap-1 transition-colors">
                             <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
-                            Online • {twgName ? `${twgName} Martin` : (user?.role === 'admin' ? 'Secretariat Mode' : 'General Context')}
+                            Online • {twgName ? `${twgName} Martin` : (user?.role === UserRole.ADMIN ? 'Secretariat Mode' : 'General Context')}
                         </p>
                     </div>
                 </div>

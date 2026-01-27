@@ -8,10 +8,10 @@ import enum
 # --- Enums (mirrored from models) ---
 
 class UserRole(str, enum.Enum):
-    ADMIN = "admin"
-    TWG_FACILITATOR = "twg_facilitator"
-    TWG_MEMBER = "twg_member"
-    SECRETARIAT_LEAD = "secretariat_lead"
+    ADMIN = "ADMIN"
+    TWG_FACILITATOR = "TWG_FACILITATOR"
+    TWG_MEMBER = "TWG_MEMBER"
+    SECRETARIAT_LEAD = "SECRETARIAT_LEAD"
 
 class TWGPillar(str, enum.Enum):
     ENERGY_INFRASTRUCTURE = "energy_infrastructure"

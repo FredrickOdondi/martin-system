@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Button, Input } from '../../components/ui'
 import { useAppDispatch } from '../../hooks/useRedux'
@@ -19,7 +19,7 @@ export default function Login() {
     const navigate = useNavigate()
     const dispatch = useAppDispatch()
 
-    const handleGoogleLogin = async (response: any) => {
+    const handleGoogleLogin = useCallback(async (response: any) => {
         setIsLoading(true);
         setLoginError(null);
         try {
@@ -42,7 +42,7 @@ export default function Login() {
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [dispatch, navigate]);
 
     useEffect(() => {
         // Function to attempt initialization

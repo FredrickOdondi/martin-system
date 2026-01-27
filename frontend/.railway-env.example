@@ -1,0 +1,15 @@
+# Railway Environment Variables for Frontend Build
+# These should be set in Railway's Variables section
+
+# Backend API URL (e.g., https://your-backend.railway.app)
+VITE_API_URL=https://your-backend-url.railway.app
+
+# Google OAuth Client ID
+VITE_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+
+# App metadata
+VITE_APP_NAME=Martin AI Summit Manager
+VITE_APP_VERSION=1.0.0
+
+# Port (Railway sets this automatically, but you can override)
+PORT=8080

@@ -13,6 +13,7 @@ import EnhancedMessageBubble from '../../components/agent/EnhancedMessageBubble'
 import TypingIndicator from '../../components/agent/TypingIndicator';
 import WorkspaceContextPanel from '../../components/workspace/WorkspaceContextPanel';
 import { CommandAutocompleteResult } from '../../types/agent';
+import { UserRole } from '../../types/auth';
 
 interface Message {
     id: string;
@@ -80,7 +81,7 @@ export default function TwgAgent() {
                 }
             } else {
                 // 2. Fallback: Role-based Default
-                if (user.role === 'admin' || user.role === 'secretariat_lead') {
+                if (user.role === UserRole.ADMIN || user.role === UserRole.SECRETARIAT_LEAD) {
                     setActiveTwg({ id: 'secretariat', name: 'Secretariat' });
                 } else if (user.twgs && user.twgs.length > 0) {
                     // Default to first assigned TWG
@@ -119,6 +120,52 @@ export default function TwgAgent() {
     // Typing state
     const [typingMessage, setTypingMessage] = useState<string | null>(null);
     const [thinkingSteps, setThinkingSteps] = useState<string[]>([]);
+
+    // ========================================================================
+    // CHAT HISTORY PERSISTENCE (localStorage)
+    // ========================================================================
+    const getChatStorageKey = (twgId: string) => `martin_chat_${twgId}`;
+
+    // Load chat history when activeTwg changes
+    useEffect(() => {
+        if (!activeTwg?.id) return;
+
+        const storageKey = getChatStorageKey(activeTwg.id);
+        try {
+            const savedData = localStorage.getItem(storageKey);
+            if (savedData) {
+                const parsed = JSON.parse(savedData);
+                // Restore messages with proper Date objects
+                const restoredMessages: Message[] = parsed.messages.map((m: any) => ({
+                    ...m,
+                    timestamp: new Date(m.timestamp)
+                }));
+                setMessages(restoredMessages);
+                setConversationId(parsed.conversationId);
+                console.log(`[TwgAgent] Restored ${restoredMessages.length} messages from localStorage`);
+            }
+        } catch (error) {
+            console.error('[TwgAgent] Failed to restore chat history:', error);
+        }
+    }, [activeTwg?.id]);
+
+    // Save chat history when messages change
+    useEffect(() => {
+        if (!activeTwg?.id || messages.length === 0) return;
+
+        const storageKey = getChatStorageKey(activeTwg.id);
+        try {
+            const dataToSave = {
+                messages: messages,
+                conversationId: conversationId,
+                savedAt: new Date().toISOString()
+            };
+            localStorage.setItem(storageKey, JSON.stringify(dataToSave));
+        } catch (error) {
+            console.error('[TwgAgent] Failed to save chat history:', error);
+        }
+    }, [messages, conversationId, activeTwg?.id]);
+    // ========================================================================
 
 
     // Helper to get Martin Persona Name
@@ -343,7 +390,7 @@ export default function TwgAgent() {
 
         // Check for mention trigger (@) - RESTRICTED TO ADMINS
         const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
-        if (mentionMatch && user?.role === 'admin') {
+        if (mentionMatch && user?.role === UserRole.ADMIN) {
             const query = '@' + mentionMatch[1];
             try {
                 const response = await api.get(`/agents/mentions/autocomplete`, {
@@ -464,6 +511,13 @@ export default function TwgAgent() {
             setConversationId(undefined);
             setIsLoading(false);
             setTypingMessage(null);
+
+            // Also clear from localStorage
+            if (activeTwg?.id) {
+                const storageKey = getChatStorageKey(activeTwg.id);
+                localStorage.removeItem(storageKey);
+                console.log(`[TwgAgent] Cleared chat history from localStorage for ${activeTwg.id}`);
+            }
         }
     };
 

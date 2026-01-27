@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, AsyncGenerator
@@ -158,7 +158,8 @@ async def handle_mention(supervisor: SupervisorWithTools, parsed: dict, twg_id: 
 @router.post("/chat", response_model=AgentChatResponse)
 async def chat_with_martin(
     chat_in: AgentChatRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    request: Request = None
 ):
     """
     Chat with AI agents - routes based on user role and context.
@@ -169,6 +170,9 @@ async def chat_with_martin(
     from langgraph.errors import GraphInterrupt
     from app.models.models import UserRole
     
+    # Extract user timezone from header
+    user_timezone = request.headers.get("X-User-Timezone") if request else None
+    
     conv_id = chat_in.conversation_id or uuid.uuid4()
 
     try:
@@ -178,7 +182,7 @@ async def chat_with_martin(
             supervisor = get_supervisor()
             twg_context = str(chat_in.twg_id) if chat_in.twg_id else None
             # Call supervisor (now returns dict or str)
-            raw_response = await supervisor.chat_with_tools(chat_in.message, twg_id=twg_context, thread_id=str(conv_id))
+            raw_response = await supervisor.chat_with_tools(chat_in.message, twg_id=twg_context, thread_id=str(conv_id), user_timezone=user_timezone)
             agent_id = "supervisor_v1"
             
         elif current_user.role in [UserRole.TWG_FACILITATOR, UserRole.TWG_MEMBER]:
@@ -201,7 +205,8 @@ async def chat_with_martin(
             raw_response = await supervisor.chat_with_tools(
                 chat_in.message,
                 twg_id=str(chat_in.twg_id),
-                thread_id=str(conv_id)
+                thread_id=str(conv_id),
+                user_timezone=user_timezone
             )
             agent_id = f"twg_{chat_in.twg_id}_agent"
             
@@ -425,7 +430,8 @@ async def enhanced_chat(
 @router.post("/chat/stream")
 async def stream_chat(
     chat_in: EnhancedChatRequest,
-    current_user: User = Depends(get_current_active_user)
+    current_user: User = Depends(get_current_active_user),
+    request: Request = None
 ):
     """
     Streaming chat endpoint that provides real-time updates on agent thinking and tool execution.
@@ -442,9 +448,13 @@ async def stream_chat(
         # Ensure conv_id is always a string for JSON serialization
         conv_id = str(chat_in.conversation_id) if chat_in.conversation_id else str(uuid.uuid4())
         
+        # Extract user timezone from header
+        user_timezone = request.headers.get("X-User-Timezone") if request else None
+        
         # DEBUG: Log the request details
         logger.info(f"[STREAM] Request - Message: {chat_in.message[:50]}...")
         logger.info(f"[STREAM] Request - TWG ID: {chat_in.twg_id} (type: {type(chat_in.twg_id).__name__ if chat_in.twg_id else 'None'})")
+        logger.info(f"[STREAM] Request - User Timezone: {user_timezone}")
 
         try:
             # Send initial event
@@ -535,7 +545,7 @@ async def stream_chat(
                 citations = []
                 
                 # Stream events from LangGraph
-                async for event in supervisor.stream_chat_events(chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=conv_id):
+                async for event in supervisor.stream_chat_events(chat_in.message, twg_id=str(chat_in.twg_id) if chat_in.twg_id else None, thread_id=conv_id, user_timezone=user_timezone):
                     if event["type"] == "node_update":
                         node = event["node"]
                         status_msg = f"Processing step: {node}"
@@ -591,13 +601,23 @@ async def stream_chat(
             interrupt_payload = gi.args[0] if gi.args else {}
             
             # CRITICAL: Link thread_id to approval request for resumption
-            if interrupt_payload.get("type") == "email_approval_required" and "request_id" in interrupt_payload:
-                req_id = interrupt_payload["request_id"]
-                approval_service = get_email_approval_service()
-                if approval_service.update_approval_request_thread(req_id, conv_id):
-                    logger.info(f"[STREAM] Linked thread {conv_id} to approval request {req_id}")
-                else:
-                    logger.warning(f"[STREAM] Failed to link thread {conv_id} to approval request {req_id}")
+            if isinstance(interrupt_payload, dict):
+                if interrupt_payload.get("type") == "email_approval_required" and "request_id" in interrupt_payload:
+                    req_id = interrupt_payload["request_id"]
+                    approval_service = get_email_approval_service()
+                    if approval_service.update_approval_request_thread(req_id, conv_id):
+                        logger.info(f"[STREAM] Linked thread {conv_id} to approval request {req_id}")
+                    else:
+                        logger.warning(f"[STREAM] Failed to link thread {conv_id} to approval request {req_id}")
+            else:
+                # Handle string interrupts (e.g. "Duplicate meeting detected")
+                logger.info(f"[STREAM] Non-dict interrupt detected: {interrupt_payload}")
+                if isinstance(interrupt_payload, str):
+                    # Wrap string in a displayable payload format for frontend
+                    interrupt_payload = {
+                        "type": "info_interrupt",
+                        "message": interrupt_payload
+                    }
             
             # Use jsonable_encoder to handle UUIDs and other types
             from fastapi.encoders import jsonable_encoder

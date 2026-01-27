@@ -120,6 +120,12 @@ async def startup_event():
             replace_existing=True
         )
         logger.info("Supervisor state refresh job added to scheduler.")
+        
+        # Execute immediate refresh to populate state on startup
+        import asyncio
+        asyncio.create_task(refresh_supervisor_state_job())
+        logger.info("Triggered immediate supervisor state refresh.")
+        
     except Exception as e:
         logger.error(f"Failed to add supervisor refresh job: {e}")
 

@@ -60,7 +60,7 @@ export default function LiveTimeline({ items }: LiveTimelineProps) {
             </div>
 
             {/* Timeline Content */}
-            <div className="flex-1 overflow-y-auto no-scrollbar pr-1">
+            <div className="flex-1 overflow-y-auto no-scrollbar pr-1 max-h-[420px]">
                 {Object.entries(groupedItems).length > 0 ? (
                     Object.entries(groupedItems).map(([dateKey, dayItems]) => {
                         const { month, day } = getMonthDay(dateKey);

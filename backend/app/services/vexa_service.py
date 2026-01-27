@@ -360,9 +360,8 @@ class VexaService:
                  logger.info("Extracting action items...")
                  pillar_val = meeting.twg.pillar.value if meeting.twg else "energy"
                  
-                 # Run extraction in thread
-                 actions_list = await asyncio.to_thread(
-                     synthesizer.extract_action_items,
+                 # Run extraction
+                 actions_list = await synthesizer.extract_action_items(
                      res['content'],
                      pillar_val
                  )

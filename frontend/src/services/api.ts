@@ -40,6 +40,17 @@ api.interceptors.request.use(
         if (token) {
             config.headers.Authorization = `Bearer ${token}`;
         }
+
+        // Inject User Timezone
+        try {
+            const userTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            if (userTimezone) {
+                config.headers['X-User-Timezone'] = userTimezone;
+            }
+        } catch (e) {
+            console.warn('[API] Failed to detect user timezone', e);
+        }
+
         return config;
     },
     (error) => {

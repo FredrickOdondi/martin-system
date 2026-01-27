@@ -8,6 +8,7 @@ import { ProjectLifecycleTimeline } from '../components/pipeline/ProjectLifecycl
 import { ProjectHistoryTimeline } from '../components/pipeline/ProjectHistoryTimeline';
 import { UserRole } from '../types/auth';
 import api from '../services/api';
+import ComingSoonOverlay from '../components/common/ComingSoonOverlay';
 
 const ProjectDetails: React.FC = () => {
   const { projectId } = useParams<{ projectId: string }>();
@@ -278,7 +279,8 @@ const ProjectDetails: React.FC = () => {
   }
 
   return (
-    <div className="max-w-[1200px] mx-auto space-y-6">
+    <div className="max-w-[1200px] mx-auto space-y-6 relative">
+      <ComingSoonOverlay />
       {/* Breadcrumbs */}
       <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
         <button onClick={() => navigate('/dashboard')} className="hover:text-primary transition-colors">
