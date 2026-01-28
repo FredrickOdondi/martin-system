@@ -325,9 +325,24 @@ class MinutesUpdate(SchemaBase):
     key_decisions: Optional[str] = None
     status: Optional[MinutesStatus] = None
 
+class MinutesUpdateWithVersion(MinutesUpdate):
+    """Extended update schema that includes change summary for version control"""
+    change_summary: Optional[str] = None
+
 class MinutesRejectionRequest(SchemaBase):
     reason: str
     suggested_changes: Optional[str] = None
+
+class MinutesVersionRead(SchemaBase):
+    """Schema for reading a specific version of minutes"""
+    id: uuid.UUID
+    version_number: int
+    content: str
+    key_decisions: Optional[str] = None
+    change_summary: Optional[str] = None
+    created_by: uuid.UUID
+    created_at: datetime
+    author: Optional["UserSimple"] = None
 
 class MinutesRead(MinutesBase):
     id: uuid.UUID
@@ -335,6 +350,11 @@ class MinutesRead(MinutesBase):
     created_at: datetime
     rejection_reason: Optional[str] = None
     rejected_at: Optional[datetime] = None
+    # Version control fields
+    current_version: int = 1
+    last_edited_by: Optional[uuid.UUID] = None
+    last_edited_at: Optional[datetime] = None
+    editor: Optional["UserSimple"] = None
 
 # --- Action Item Schemas ---
 

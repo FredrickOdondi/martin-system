@@ -14,13 +14,12 @@ import traceback
 from app.core.database import get_db
 from app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesStatus, MeetingParticipant, RsvpStatus, ActionItem, ActionItemStatus, TWG, Document, MeetingStatus, MeetingDependency, DependencyType
 from app.schemas.schemas import (
-    MeetingCreate, MeetingRead, MeetingUpdate,
-    MinutesCreate, MinutesUpdate, MinutesRead,
-    AgendaCreate, AgendaRead, AgendaUpdate,
-    MeetingParticipantRead, MeetingParticipantUpdate, MeetingParticipantCreate,
-    MeetingCancel, MeetingUpdateNotification,
-    MeetingDependencyRead, DependencyType as DependencyTypeSchema
-)
+    MeetingCreate, MeetingRead, MeetingUpdate, MeetingCancel, MeetingUpdateNotification,
+    AgendaCreate, AgendaRead, MinutesCreate, MinutesRead, MinutesUpdate, MinutesRejectionRequest,
+    MinutesVersionRead, MinutesUpdateWithVersion,  # Version control schemas
+    ActionItemCreate, ActionItemRead, MeetingParticipantCreate, MeetingParticipantRead,
+    MeetingParticipantUpdate, User, MeetingDependencyRead
+), DependencyType as DependencyTypeSchema
 from app.api.deps import get_current_active_user, require_facilitator, require_twg_access, has_twg_access
 from app.services.email_service import email_service
 from app.core.config import settings
@@ -332,7 +331,12 @@ async def upsert_minutes(
 ):
     """
     Create or Update meeting minutes.
+    Automatically creates version snapshots for audit trail.
     """
+    from app.models.models import Minutes, MinutesVersion
+    from sqlalchemy import select
+    from datetime import datetime
+    
     # Verify meeting
     result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
     db_meeting = result.scalar_one_or_none()
@@ -347,20 +351,50 @@ async def upsert_minutes(
     db_minutes = result.scalar_one_or_none()
     
     if db_minutes:
-        # Update
+        # CREATE VERSION SNAPSHOT before updating
+        if minutes_in.content and minutes_in.content != db_minutes.content:
+            version = MinutesVersion(
+                minutes_id=db_minutes.id,
+                version_number=db_minutes.current_version,
+                content=db_minutes.content,  # Save OLD content
+                key_decisions=db_minutes.key_decisions,
+                change_summary=getattr(minutes_in, 'change_summary', None),
+                created_by=current_user.id,
+                created_at=datetime.utcnow()
+            )
+            db.add(version)
+            
+            # Increment version
+            db_minutes.current_version += 1
+        
+        # Update current minutes
         update_data = minutes_in.model_dump(exclude_unset=True)
+        # Remove change_summary from minutes update (it's only for version)
+        update_data.pop('change_summary', None)
+        
         for key, value in update_data.items():
             setattr(db_minutes, key, value)
+        
+        # Track editor
+        db_minutes.last_edited_by = current_user.id
+        db_minutes.last_edited_at = datetime.utcnow()
     else:
-        # Create
+        # Create new minutes (version 1)
         if not minutes_in.content:
              raise HTTPException(status_code=400, detail="Content required for creating minutes")
-             
-        minutes_data = minutes_in.model_dump(exclude_unset=True)
-        # partial update schema used for creation, ensure defaults or required
-        db_minutes = Minutes(meeting_id=meeting_id, **minutes_data)
-        db.add(db_minutes)
         
+        minutes_data = minutes_in.model_dump(exclude_unset=True)
+        minutes_data.pop('change_summary', None)  # Remove version-only field
+        
+        db_minutes = Minutes(
+            meeting_id=meeting_id, 
+            **minutes_data,
+            current_version=1,
+            last_edited_by=current_user.id,
+            last_edited_at=datetime.utcnow()
+        )
+        db.add(db_minutes)
+    
     await db.commit()
     await db.refresh(db_minutes)
     return db_minutes
@@ -2900,3 +2934,134 @@ async def live_meeting_websocket(
         print(f"WebSocket error for meeting {meeting_id}: {e}")
     finally:
         ws_manager.disconnect(websocket, user_id)
+# Add these endpoints after upsert_minutes in meetings.py
+
+@router.get("/{meeting_id}/minutes/versions", response_model=List[MinutesVersionRead])
+async def list_minutes_versions(
+    meeting_id: uuid.UUID,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    List all versions of meeting minutes.
+    Returns versions in reverse chronological order (newest first).
+    """
+    from app.models.models import Minutes, MinutesVersion
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    
+    # Get minutes ID
+    result = await db.execute(select(Minutes).where(Minutes.meeting_id == meeting_id))
+    db_minutes = result.scalar_one_or_none()
+    
+    if not db_minutes:
+        raise HTTPException(status_code=404, detail="Minutes not found")
+    
+    # Get all versions
+    stmt = (
+        select(MinutesVersion)
+        .where(MinutesVersion.minutes_id == db_minutes.id)
+        .options(selectinload(MinutesVersion.author))
+        .order_by(MinutesVersion.version_number.desc())
+    )
+    result = await db.execute(stmt)
+    versions = result.scalars().all()
+    
+    return versions
+
+
+@router.get("/{meeting_id}/minutes/versions/{version_number}", response_model=MinutesVersionRead)
+async def get_minutes_version(
+    meeting_id: uuid.UUID,
+    version_number: int,
+    current_user: User = Depends(get_current_active_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a specific version of meeting minutes.
+    """
+    from app.models.models import Minutes, MinutesVersion
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+    
+    # Get minutes ID
+    result = await db.execute(select(Minutes).where(Minutes.meeting_id == meeting_id))
+    db_minutes = result.scalar_one_or_none()
+    
+    if not db_minutes:
+        raise HTTPException(status_code=404, detail="Minutes not found")
+    
+    # Get specific version
+    stmt = (
+        select(MinutesVersion)
+        .where(
+            MinutesVersion.minutes_id == db_minutes.id,
+            MinutesVersion.version_number == version_number
+        )
+        .options(selectinload(MinutesVersion.author))
+    )
+    result = await db.execute(stmt)
+    version = result.scalar_one_or_none()
+    
+    if not version:
+        raise HTTPException(status_code=404, detail=f"Version {version_number} not found")
+    
+    return version
+
+
+@router.post("/{meeting_id}/minutes/versions/{version_number}/restore", response_model=MinutesRead)
+async def restore_minutes_version(
+    meeting_id: uuid.UUID,
+    version_number: int,
+    current_user: User = Depends(require_facilitator),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Restore minutes to a previous version.
+    Creates a new version with the content from the specified version.
+    """
+    from app.models.models import Minutes, MinutesVersion
+    from sqlalchemy import select
+    from datetime import datetime
+    
+    # Get minutes
+    result = await db.execute(select(Minutes).where(Minutes.meeting_id == meeting_id))
+    db_minutes = result.scalar_one_or_none()
+    
+    if not db_minutes:
+        raise HTTPException(status_code=404, detail="Minutes not found")
+    
+    # Get version to restore
+    stmt = select(MinutesVersion).where(
+        MinutesVersion.minutes_id == db_minutes.id,
+        MinutesVersion.version_number == version_number
+    )
+    result = await db.execute(stmt)
+    version_to_restore = result.scalar_one_or_none()
+    
+    if not version_to_restore:
+        raise HTTPException(status_code=404, detail=f"Version {version_number} not found")
+    
+    # Create snapshot of current state before restoring
+    current_snapshot = MinutesVersion(
+        minutes_id=db_minutes.id,
+        version_number=db_minutes.current_version,
+        content=db_minutes.content,
+        key_decisions=db_minutes.key_decisions,
+        change_summary=f"Auto-saved before restoring to v{version_number}",
+        created_by=current_user.id,
+        created_at=datetime.utcnow()
+    )
+    db.add(current_snapshot)
+    
+    # Restore content from old version
+    db_minutes.content = version_to_restore.content
+    db_minutes.key_decisions = version_to_restore.key_decisions
+    db_minutes.current_version += 1
+    db_minutes.last_edited_by = current_user.id
+    db_minutes.last_edited_at = datetime.utcnow()
+    
+    await db.commit()
+    await db.refresh(db_minutes)
+    
+    return db_minutes
