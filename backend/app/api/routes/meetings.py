@@ -361,7 +361,7 @@ async def upsert_minutes(
     Create or Update meeting minutes.
     Automatically creates version snapshots for audit trail.
     """
-    from app.models.models import Minutes, MinutesVersion
+    from app.models.models import Minutes, MinutesVersion, ActionItem
     from sqlalchemy import select
     
     # Verify meeting
@@ -380,12 +380,29 @@ async def upsert_minutes(
     if db_minutes:
         # CREATE VERSION SNAPSHOT before updating
         if minutes_in.content and minutes_in.content != db_minutes.content:
+            # Snapshot Action Items
+            stmt = select(ActionItem).where(ActionItem.meeting_id == meeting_id)
+            ai_result = await db.execute(stmt)
+            current_actions = ai_result.scalars().all()
+            
+            actions_snapshot = [
+                {
+                    "description": item.description,
+                    "owner_id": str(item.owner_id) if item.owner_id else None,
+                    "due_date": item.due_date.isoformat() if item.due_date else None,
+                    "status": item.status.value if item.status else "pending",
+                    "priority": item.priority.value if hasattr(item, 'priority') and item.priority else "medium"
+                }
+                for item in current_actions
+            ]
+            
             version = MinutesVersion(
                 minutes_id=db_minutes.id,
                 version_number=db_minutes.current_version,
                 content=db_minutes.content,  # Save OLD content
                 key_decisions=db_minutes.key_decisions,
                 change_summary=getattr(minutes_in, 'change_summary', None),
+                action_items_snapshot=actions_snapshot,
                 created_by=current_user.id,
                 created_at=datetime.utcnow()
             )
@@ -527,12 +544,29 @@ async def generate_minutes(
              from app.models.models import MinutesVersion
              
              if db_minutes.content: # Only snapshot if there was content
+                 # Snapshot Action Items
+                 stmt = select(ActionItem).where(ActionItem.meeting_id == meeting_id)
+                 ai_result = await db.execute(stmt)
+                 current_actions = ai_result.scalars().all()
+                 
+                 actions_snapshot = [
+                     {
+                         "description": item.description,
+                         "owner_id": str(item.owner_id) if item.owner_id else None,
+                         "due_date": item.due_date.isoformat() if item.due_date else None,
+                         "status": item.status.value if item.status else "pending",
+                         "priority": item.priority.value if hasattr(item, 'priority') and item.priority else "medium"
+                     }
+                     for item in current_actions
+                 ]
+                 
                  version = MinutesVersion(
                     minutes_id=db_minutes.id,
                     version_number=db_minutes.current_version,
                     content=db_minutes.content,
                     key_decisions=db_minutes.key_decisions,
                     change_summary="Auto-archived before AI re-generation",
+                    action_items_snapshot=actions_snapshot,
                     created_by=current_user.id,
                     created_at=datetime.utcnow()
                  )
@@ -566,6 +600,17 @@ async def generate_minutes(
                 pillar_name
             )
             
+            # Create participant mapping for owner resolution
+            user_map = {}
+            for p in db_meeting.participants:
+                if p.user:
+                    if p.user.full_name:
+                        user_map[p.user.full_name.lower()] = p.user.id
+                        # Also map just first name
+                        parts = p.user.full_name.split()
+                        if len(parts) > 0:
+                            user_map[parts[0].lower()] = p.user.id
+            
             action_count = 0
             for action in actions_list:
                 desc = action.get("description")
@@ -579,10 +624,23 @@ async def generate_minutes(
                     except:
                         pass
                 
+                # Resolve Owner
+                owner_name = action.get("owner", "").strip()
+                owner_id = current_user.id # Default to facilitator
+                
+                if owner_name:
+                    if owner_name.lower() in user_map:
+                        owner_id = user_map[owner_name.lower()]
+                    else:
+                        # Try first name matching
+                        parts = owner_name.split()
+                        if len(parts) > 0 and parts[0].lower() in user_map:
+                            owner_id = user_map[parts[0].lower()]
+                
                 new_action = ActionItem(
                     meeting_id=meeting_id,
                     description=desc,
-                    owner=action.get("owner", "TBD"),
+                    owner_id=owner_id,
                     due_date=due_date,
                     status=ActionItemStatus.PENDING
                 )
@@ -3067,8 +3125,8 @@ async def restore_minutes_version(
     Restore minutes to a previous version.
     Creates a new version with the content from the specified version.
     """
-    from app.models.models import Minutes, MinutesVersion
-    from sqlalchemy import select
+    from app.models.models import Minutes, MinutesVersion, ActionItem, ActionItemStatus, ActionItemPriority
+    from sqlalchemy import select, delete
     from datetime import datetime
     
     # Get minutes
@@ -3089,21 +3147,67 @@ async def restore_minutes_version(
     if not version_to_restore:
         raise HTTPException(status_code=404, detail=f"Version {version_number} not found")
     
-    # Create snapshot of current state before restoring
+    # --- Create snapshot of current state before restoring ---
+    # Snapshot Action Items
+    stmt = select(ActionItem).where(ActionItem.meeting_id == meeting_id)
+    ai_result = await db.execute(stmt)
+    current_actions = ai_result.scalars().all()
+    
+    actions_snapshot = [
+        {
+            "description": item.description,
+            "owner_id": str(item.owner_id) if item.owner_id else None,
+            "due_date": item.due_date.isoformat() if item.due_date else None,
+            "status": item.status.value if item.status else "pending",
+            "priority": item.priority.value if hasattr(item, 'priority') and item.priority else "medium"
+        }
+        for item in current_actions
+    ]
+
     current_snapshot = MinutesVersion(
         minutes_id=db_minutes.id,
         version_number=db_minutes.current_version,
         content=db_minutes.content,
         key_decisions=db_minutes.key_decisions,
         change_summary=f"Auto-saved before restoring to v{version_number}",
+        action_items_snapshot=actions_snapshot,
         created_by=current_user.id,
         created_at=datetime.utcnow()
     )
     db.add(current_snapshot)
     
-    # Restore content from old version
+    # --- Restore content using snapshot if available ---
     db_minutes.content = version_to_restore.content
     db_minutes.key_decisions = version_to_restore.key_decisions
+    
+    # Restore Action Items if snapshot exists
+    if version_to_restore.action_items_snapshot:
+        # Delete current items
+        await db.execute(delete(ActionItem).where(ActionItem.meeting_id == meeting_id))
+        
+        # Recreate from snapshot
+        for item in version_to_restore.action_items_snapshot:
+             # Handle Enums safely
+            try:
+                status_enum = ActionItemStatus(item.get("status", "pending"))
+            except:
+                status_enum = ActionItemStatus.PENDING
+                
+            try:
+                priority_enum = ActionItemPriority(item.get("priority", "medium"))
+            except:
+                priority_enum = ActionItemPriority.MEDIUM
+
+            new_action = ActionItem(
+                meeting_id=meeting_id,
+                description=item["description"],
+                owner_id=uuid.UUID(item["owner_id"]) if item["owner_id"] else None,
+                due_date=datetime.fromisoformat(item["due_date"]).date() if item["due_date"] else None,
+                status=status_enum,
+                priority=priority_enum
+            )
+            db.add(new_action)
+            
     db_minutes.current_version += 1
     db_minutes.last_edited_by = current_user.id
     db_minutes.last_edited_at = datetime.utcnow()

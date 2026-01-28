@@ -387,6 +387,7 @@ class MinutesVersion(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     key_decisions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     change_summary: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    action_items_snapshot: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     
