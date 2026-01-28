@@ -496,14 +496,35 @@ async def generate_minutes(
         db_minutes = min_result.scalar_one_or_none()
         
         if db_minutes:
+             # CREATE VERSION SNAPSHOT before updating
+             # Even for AI regeneration, we should save the previous version
+             from app.models.models import MinutesVersion
+             
+             if db_minutes.content: # Only snapshot if there was content
+                 version = MinutesVersion(
+                    minutes_id=db_minutes.id,
+                    version_number=db_minutes.current_version,
+                    content=db_minutes.content,
+                    key_decisions=db_minutes.key_decisions,
+                    change_summary="Auto-archived before AI re-generation",
+                    created_by=current_user.id,
+                    created_at=datetime.utcnow()
+                 )
+                 db.add(version)
+                 db_minutes.current_version += 1
+             
              db_minutes.content = generated_content
-             # Keep status as whatever it was, or reset to DRAFT? Usually reset to DRAFT if re-generated.
              db_minutes.status = MinutesStatus.DRAFT
+             db_minutes.last_edited_by = current_user.id
+             db_minutes.last_edited_at = datetime.utcnow()
         else:
             db_minutes = Minutes(
                 meeting_id=meeting_id,
                 content=generated_content,
-                status=MinutesStatus.DRAFT
+                status=MinutesStatus.DRAFT,
+                current_version=1,
+                last_edited_by=current_user.id,
+                last_edited_at=datetime.utcnow()
             )
             db.add(db_minutes)
             
