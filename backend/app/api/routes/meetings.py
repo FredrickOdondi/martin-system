@@ -16,10 +16,11 @@ from app.models.models import Meeting, Agenda, Minutes, User, UserRole, MinutesS
 from app.schemas.schemas import (
     MeetingCreate, MeetingRead, MeetingUpdate, MeetingCancel, MeetingUpdateNotification,
     AgendaCreate, AgendaRead, MinutesCreate, MinutesRead, MinutesUpdate, MinutesRejectionRequest,
-    MinutesVersionRead, MinutesUpdateWithVersion,  # Version control schemas
+    MinutesVersionRead, MinutesUpdateWithVersion,
     ActionItemCreate, ActionItemRead, MeetingParticipantCreate, MeetingParticipantRead,
-    MeetingParticipantUpdate, User, MeetingDependencyRead
-), DependencyType as DependencyTypeSchema
+    MeetingParticipantUpdate, User as UserSchema, MeetingDependencyRead,
+    DependencyType as DependencyTypeSchema
+)
 from app.api.deps import get_current_active_user, require_facilitator, require_twg_access, has_twg_access
 from app.services.email_service import email_service
 from app.core.config import settings
