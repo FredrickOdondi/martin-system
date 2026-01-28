@@ -363,7 +363,6 @@ async def upsert_minutes(
     """
     from app.models.models import Minutes, MinutesVersion
     from sqlalchemy import select
-    from datetime import datetime
     
     # Verify meeting
     result = await db.execute(select(Meeting).where(Meeting.id == meeting_id))
