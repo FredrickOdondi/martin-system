@@ -639,6 +639,7 @@ async def generate_minutes(
                 
                 new_action = ActionItem(
                     meeting_id=meeting_id,
+                    twg_id=db_meeting.twg_id,
                     description=desc,
                     owner_id=owner_id,
                     due_date=due_date,
@@ -3182,6 +3183,11 @@ async def restore_minutes_version(
     
     # Restore Action Items if snapshot exists
     if version_to_restore.action_items_snapshot:
+        # Fetch TWG ID from meeting
+        from app.models.models import Meeting
+        m_result = await db.execute(select(Meeting.twg_id).where(Meeting.id == meeting_id))
+        twg_id = m_result.scalar_one()
+
         # Delete current items
         await db.execute(delete(ActionItem).where(ActionItem.meeting_id == meeting_id))
         
@@ -3200,6 +3206,7 @@ async def restore_minutes_version(
 
             new_action = ActionItem(
                 meeting_id=meeting_id,
+                twg_id=twg_id,
                 description=item["description"],
                 owner_id=uuid.UUID(item["owner_id"]) if item["owner_id"] else None,
                 due_date=datetime.fromisoformat(item["due_date"]).date() if item["due_date"] else None,

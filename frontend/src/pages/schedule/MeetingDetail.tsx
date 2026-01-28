@@ -98,6 +98,17 @@ export default function MeetingDetail() {
 
     useEffect(() => {
         loadMeetingDetails()
+
+        // Listen for real-time updates
+        const handleUpdate = (event: any) => {
+            if (event.detail?.meetingId === meetingId) {
+                console.log("Received meeting update via WebSocket, refreshing...");
+                loadMeetingDetails();
+            }
+        };
+
+        window.addEventListener('meeting-update', handleUpdate);
+        return () => window.removeEventListener('meeting-update', handleUpdate);
     }, [meetingId])
 
     const loadMeetingDetails = async () => {

@@ -168,6 +168,7 @@ class TWGRead(TWGBase):
     id: uuid.UUID
     political_lead: Optional["UserSimple"] = None
     technical_lead: Optional["UserSimple"] = None
+    members: List["UserSimple"] = []
     stats: Optional[TWGStats] = None
     # Removed action_items and documents to prevent MissingGreenlet errors
 
