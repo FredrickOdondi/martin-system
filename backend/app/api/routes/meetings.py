@@ -575,7 +575,6 @@ async def generate_minutes(
                 due_date = None
                 if action.get("due_date"):
                     try:
-                        from datetime import datetime
                         due_date = datetime.strptime(action["due_date"], "%Y-%m-%d").date()
                     except:
                         pass
