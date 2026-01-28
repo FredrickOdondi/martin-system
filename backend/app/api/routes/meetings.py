@@ -55,6 +55,14 @@ async def get_active_meeting(
     # as that's what Vexa is recording.
     stmt = select(Meeting).join(Document, Meeting.id == Document.meeting_id).where(
         Document.document_type == "transcript_placeholder"
+    ).options(
+        selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+        selectinload(Meeting.agenda),
+        selectinload(Meeting.minutes),
+        selectinload(Meeting.twg),
+        selectinload(Meeting.documents).selectinload(Document.uploaded_by),
+        selectinload(Meeting.successors).selectinload(MeetingDependency.target_meeting),
+        selectinload(Meeting.predecessors).selectinload(MeetingDependency.source_meeting)
     ).order_by(Meeting.scheduled_at.desc()).limit(1)
     
     result = await db.execute(stmt)
@@ -69,6 +77,14 @@ async def get_active_meeting(
                 Meeting.scheduled_at >= now - timedelta(hours=2),
                 Meeting.status != 'cancelled'
             )
+        ).options(
+            selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
+            selectinload(Meeting.agenda),
+            selectinload(Meeting.minutes),
+            selectinload(Meeting.twg),
+            selectinload(Meeting.documents).selectinload(Document.uploaded_by),
+            selectinload(Meeting.successors).selectinload(MeetingDependency.target_meeting),
+            selectinload(Meeting.predecessors).selectinload(MeetingDependency.source_meeting)
         ).order_by(Meeting.scheduled_at.desc()).limit(1)
         result = await db.execute(stmt)
         meeting = result.scalar_one_or_none()
@@ -76,6 +92,13 @@ async def get_active_meeting(
     if not meeting:
         raise HTTPException(status_code=404, detail="No active meeting found")
     
+    # Map titles for UI
+    if meeting:
+        for s in meeting.successors:
+            s.target_meeting_title = s.target_meeting.title
+        for p in meeting.predecessors:
+            p.source_meeting_title = p.source_meeting.title
+            
     return meeting
 
 @router.post("/", response_model=MeetingRead, status_code=status.HTTP_201_CREATED)
@@ -144,16 +167,16 @@ async def create_meeting(
         await db.commit()
         
         # Eagerly load relationships to avoid MissingGreenlet during serialization
-        # Eagerly load relationships to avoid MissingGreenlet during serialization
         result = await db.execute(
             select(Meeting)
             .options(
                 selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
-                selectinload(Meeting.documents), 
                 selectinload(Meeting.twg),
-                selectinload(Meeting.successors),
-                selectinload(Meeting.predecessors),
-                selectinload(Meeting.agenda)
+                selectinload(Meeting.agenda),
+                selectinload(Meeting.minutes),
+                selectinload(Meeting.documents).selectinload(Document.uploaded_by),
+                selectinload(Meeting.successors).selectinload(MeetingDependency.target_meeting),
+                selectinload(Meeting.predecessors).selectinload(MeetingDependency.source_meeting)
             )
             .where(Meeting.id == db_meeting.id)
         )
@@ -296,7 +319,11 @@ async def update_meeting(
     query = select(Meeting).where(Meeting.id == meeting_id).options(
         selectinload(Meeting.participants).selectinload(MeetingParticipant.user),
         selectinload(Meeting.twg),
-        selectinload(Meeting.agenda)
+        selectinload(Meeting.agenda),
+        selectinload(Meeting.minutes),
+        selectinload(Meeting.documents).selectinload(Document.uploaded_by),
+        selectinload(Meeting.successors).selectinload(MeetingDependency.target_meeting),
+        selectinload(Meeting.predecessors).selectinload(MeetingDependency.source_meeting)
     )
     result = await db.execute(query)
     db_meeting = result.scalar_one_or_none()
