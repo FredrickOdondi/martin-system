@@ -18,7 +18,7 @@ from app.schemas.schemas import (
     AgendaCreate, AgendaRead, MinutesCreate, MinutesRead, MinutesUpdate, MinutesRejectionRequest,
     MinutesVersionRead, MinutesUpdateWithVersion,
     ActionItemCreate, ActionItemRead, MeetingParticipantCreate, MeetingParticipantRead,
-    MeetingParticipantUpdate, User as UserSchema, MeetingDependencyRead,
+    MeetingParticipantUpdate, MeetingDependencyRead,
     DependencyType as DependencyTypeSchema
 )
 from app.api.deps import get_current_active_user, require_facilitator, require_twg_access, has_twg_access
