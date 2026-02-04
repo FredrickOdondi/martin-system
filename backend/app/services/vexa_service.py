@@ -407,8 +407,8 @@ class VexaService:
                      # action_count += 1
                  
                  
-             if action_count > 0:
-                 logger.info(f"✓ Automatically extracted {action_count} action items from Vexa minutes.")
+                 if action_count > 0:
+                     logger.info(f"✓ Automatically extracted {action_count} action items from Vexa minutes.")
              except Exception as ae:
                  logger.error(f"Failed to auto-extract action items: {ae}")
                  import traceback
@@ -533,4 +533,4 @@ class VexaService:
                 logger.error(f"Email Sending Failed: {e}")
 
 vexa_service = VexaService()
-```
+
