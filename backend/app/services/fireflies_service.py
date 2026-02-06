@@ -418,6 +418,48 @@ class FirefliesService:
         except Exception as e:
             logger.error(f"PDF Generation Failed: {e}")
 
+        # 2b. Save PDF to disk and create Document record for the Document Library
+        if pdf_bytes:
+            try:
+                from app.models.models import Document, User
+                upload_dir = os.path.join(settings.UPLOAD_DIR, "minutes")
+                os.makedirs(upload_dir, exist_ok=True)
+                pdf_filename = f"Minutes - {meeting.title}.pdf"
+                pdf_path = os.path.join(upload_dir, f"minutes_{meeting.id}.pdf")
+                with open(pdf_path, "wb") as f:
+                    f.write(pdf_bytes)
+
+                # Check if a minutes Document already exists
+                existing = await db.execute(
+                    select(Document).where(
+                        and_(Document.meeting_id == meeting.id, Document.document_type == "minutes")
+                    )
+                )
+                if not existing.scalar_one_or_none():
+                    res_u = await db.execute(select(User.id).limit(1))
+                    uploader_id = res_u.scalars().first()
+                    if uploader_id:
+                        minutes_doc = Document(
+                            twg_id=meeting.twg_id,
+                            meeting_id=meeting.id,
+                            file_name=pdf_filename,
+                            file_path=pdf_path,
+                            file_type="application/pdf",
+                            document_type="minutes",
+                            uploaded_by_id=uploader_id,
+                            metadata_json={
+                                "meeting_id": str(meeting.id),
+                                "meeting_title": meeting.title,
+                                "status": "approved",
+                                "file_size": len(pdf_bytes),
+                            }
+                        )
+                        db.add(minutes_doc)
+                        await db.flush()
+                        logger.info(f"Minutes Document record created for '{meeting.title}'")
+            except Exception as e:
+                logger.error(f"Minutes Document creation failed: {e}")
+
         # 3. Index to Knowledge Base
         try:
             if meeting.minutes and meeting.minutes.content:
