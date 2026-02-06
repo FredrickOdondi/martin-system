@@ -358,6 +358,7 @@ class ContinuousMonitor:
                                         metadata_json={
                                             "provider": "fireflies",
                                             "fireflies_id": matched_transcript['id'],
+                                            "meeting_id": str(meeting.id),
                                             "duration": full_transcript.get('duration'),
                                             "participants": full_transcript.get('participants')
                                         }

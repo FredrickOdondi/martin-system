@@ -567,12 +567,47 @@ class FirefliesService:
                      text = self.format_transcript_text(transcript_data)
                      
                      # Process
-                     await self.process_transcript_text(matched_meeting, text, db)
-                     
+                     file_path = await self.process_transcript_text(matched_meeting, text, db)
+
                      # Update status
                      matched_meeting.status = MeetingStatus.COMPLETED
+
+                     # Create a Document record so it appears in meeting documents
+                     if file_path and isinstance(file_path, str):
+                         from app.models.models import Document, User
+                         res_u = await db.execute(select(User.id).limit(1))
+                         uploader_id = res_u.scalars().first()
+                         if uploader_id:
+                             doc = Document(
+                                 twg_id=matched_meeting.twg_id,
+                                 meeting_id=matched_meeting.id,
+                                 file_name=f"Fireflies Transcript - {matched_meeting.title}.txt",
+                                 file_path=file_path,
+                                 file_type="text/plain",
+                                 document_type="transcript",
+                                 uploaded_by_id=uploader_id,
+                                 metadata_json={
+                                     "provider": "fireflies",
+                                     "fireflies_id": meeting_id,
+                                     "meeting_id": str(matched_meeting.id),
+                                 }
+                             )
+                             db.add(doc)
+
                      await db.commit()
                      logger.info("Webhook processing complete.")
+
+                     # Broadcast real-time update to frontend
+                     try:
+                         from app.services.broadcast_service import get_broadcast_service
+                         broadcast = get_broadcast_service()
+                         await broadcast.notify_meeting_update(matched_meeting.id, {
+                             "status": "COMPLETED",
+                             "has_transcript": True,
+                             "title": matched_meeting.title
+                         })
+                     except Exception as broadcast_err:
+                         logger.error(f"Broadcast after webhook failed: {broadcast_err}")
                      
                 else:
                     logger.warning(f"No local meeting found matching webhook title: {title}")
