@@ -59,12 +59,24 @@ const CoreWorkspace = () => {
 
                 // Check if user is a TWG lead (political or technical lead)
                 const ledTwgIds: string[] = [];
+                const userId = String(user?.id || '');
+
+                console.log('Checking TWG lead status for user:', userId);
+
                 response.data.forEach((twg: any) => {
-                    if (twg.political_lead?.id === user?.id || twg.technical_lead?.id === user?.id) {
+                    const politicalLeadId = String(twg.political_lead?.id || '');
+                    const technicalLeadId = String(twg.technical_lead?.id || '');
+
+                    console.log(`TWG: ${twg.name}, political_lead_id: ${politicalLeadId}, technical_lead_id: ${technicalLeadId}`);
+
+                    if (politicalLeadId === userId || technicalLeadId === userId) {
                         ledTwgIds.push(twg.id);
+                        console.log(`User is lead of TWG: ${twg.name}`);
                     }
                 });
+
                 setUserLedTwgIds(ledTwgIds);
+                console.log('Final ledTwgIds:', ledTwgIds);
             } catch (err) {
                 console.error('Failed to fetch TWGs:', err);
             }

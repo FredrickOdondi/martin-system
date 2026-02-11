@@ -39,12 +39,22 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
 
                 // Check if user is a TWG lead (political or technical lead)
                 const ledTwgIds: string[] = [];
+                const userId = String(currentUser?.id || '');
+
+                console.log('[SharedDocumentsManager] Checking TWG lead status for user:', userId);
+
                 twgs.forEach((twg: any) => {
-                    if (twg.political_lead?.id === currentUser?.id || twg.technical_lead?.id === currentUser?.id) {
+                    const politicalLeadId = String(twg.political_lead?.id || '');
+                    const technicalLeadId = String(twg.technical_lead?.id || '');
+
+                    if (politicalLeadId === userId || technicalLeadId === userId) {
                         ledTwgIds.push(twg.id);
+                        console.log(`[SharedDocumentsManager] User is lead of TWG: ${twg.name}`);
                     }
                 });
+
                 setUserLedTwgIds(ledTwgIds);
+                console.log('[SharedDocumentsManager] Final ledTwgIds:', ledTwgIds);
 
                 // If user is a TWG lead, pre-select their TWG(s)
                 if (ledTwgIds.length > 0 && !isAdmin) {
