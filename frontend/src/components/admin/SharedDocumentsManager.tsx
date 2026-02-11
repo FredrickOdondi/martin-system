@@ -28,6 +28,7 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
     const isAdmin = currentUser?.role === UserRole.ADMIN || currentUser?.role === UserRole.SECRETARIAT_LEAD;
     const isFacilitator = currentUser?.role === UserRole.TWG_FACILITATOR;
     const isTwgLead = userLedTwgIds.length > 0;
+    const hasRestrictedAccess = isFacilitator || isTwgLead; // Facilitators and TWG leads have restricted access
 
     const HIDDEN_PILLARS = ['protocol_logistics', 'resource_mobilization'];
 
@@ -38,36 +39,49 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
                 const twgs = response.data.filter((t: any) => !HIDDEN_PILLARS.includes(t.pillar));
                 setAllTwgs(twgs);
 
-                // Check if user is a TWG lead (political or technical lead)
-                const ledTwgIds: string[] = [];
+                // Get TWGs this user can share to
+                const accessibleTwgIds: string[] = [];
                 const userId = String(currentUser?.id || '');
 
-                console.log('[SharedDocumentsManager] Checking TWG lead status for user:', userId);
+                console.log('[SharedDocumentsManager] Checking TWG access for user:', userId, 'role:', currentUser?.role);
 
-                twgs.forEach((twg: any) => {
-                    const politicalLeadId = String(twg.political_lead?.id || '');
-                    const technicalLeadId = String(twg.technical_lead?.id || '');
+                if (isFacilitator) {
+                    // Facilitators use their assigned twg_ids from the user object
+                    const userTwgIds = currentUser?.twg_ids || [];
+                    // Filter to only include TWGs that exist and aren't hidden
+                    userTwgIds.forEach((twgId: string) => {
+                        if (twgs.find((t: any) => t.id === twgId)) {
+                            accessibleTwgIds.push(twgId);
+                        }
+                    });
+                    console.log('[SharedDocumentsManager] Facilitator TWGs:', accessibleTwgIds);
+                } else {
+                    // For TWG leads (political/technical), check the lead fields
+                    twgs.forEach((twg: any) => {
+                        const politicalLeadId = String(twg.political_lead?.id || '');
+                        const technicalLeadId = String(twg.technical_lead?.id || '');
 
-                    if (politicalLeadId === userId || technicalLeadId === userId) {
-                        ledTwgIds.push(twg.id);
-                        console.log(`[SharedDocumentsManager] User is lead of TWG: ${twg.name}`);
-                    }
-                });
+                        if (politicalLeadId === userId || technicalLeadId === userId) {
+                            accessibleTwgIds.push(twg.id);
+                            console.log(`[SharedDocumentsManager] User is lead of TWG: ${twg.name}`);
+                        }
+                    });
+                }
 
-                setUserLedTwgIds(ledTwgIds);
-                console.log('[SharedDocumentsManager] Final ledTwgIds:', ledTwgIds);
+                setUserLedTwgIds(accessibleTwgIds);
+                console.log('[SharedDocumentsManager] Final accessibleTwgIds:', accessibleTwgIds);
 
-                // If user is a TWG lead (not facilitator or admin), pre-select their TWG(s)
-                if (ledTwgIds.length > 0 && !isAdmin && !isFacilitator) {
+                // If user has restricted access (facilitator or TWG lead), pre-select their TWG(s)
+                if (accessibleTwgIds.length > 0 && hasRestrictedAccess) {
                     setAccessControl('specific_twgs');
-                    setSharedTwgIds(ledTwgIds);
+                    setSharedTwgIds(accessibleTwgIds);
                 }
             } catch (err) {
                 console.error('Failed to fetch TWGs:', err);
             }
         };
         fetchTwgs();
-    }, [currentUser?.id]);
+    }, [currentUser?.id, currentUser?.twg_ids, isFacilitator, hasRestrictedAccess]);
 
     const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
@@ -189,7 +203,7 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
                     Add to Core Workspace
                 </h3>
                 <p className="text-xs text-[#8a9dbd] font-bold uppercase tracking-wider mt-1">
-                    {isAdmin || isFacilitator ? 'Upload files or add Google Drive links' : 'TWG Lead - Share documents with your TWG'}
+                    {isAdmin ? 'Admin Only - Upload files or add Google Drive links' : 'Share documents with your TWG'}
                 </p>
             </div>
 
@@ -323,8 +337,8 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
 
                     {/* Visibility Controls - Same for both modes */}
                     <div className="space-y-3">
-                        {isTwgLead && !isFacilitator && !isAdmin ? (
-                            // TWG Lead View - Fixed to their TWG only
+                        {hasRestrictedAccess ? (
+                            // TWG Lead/Facilitator View - Fixed to their TWG only
                             <>
                                 <label className="block text-[11px] font-black text-[#8a9dbd] uppercase tracking-wider">
                                     Sharing Scope
@@ -333,9 +347,9 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
                                     <div className="flex items-start gap-3">
                                         <span className="material-symbols-outlined text-blue-600 dark:text-blue-400 text-[20px]">lock</span>
                                         <div>
-                                            <p className="text-sm font-bold text-blue-800 dark:text-blue-200">Your TWG Only</p>
+                                            <p className="text-sm font-bold text-blue-800 dark:text-blue-200">Your Assigned TWG(s) Only</p>
                                             <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                                                This document will be shared only with your TWG as a TWG lead.
+                                                This document will be shared only with your assigned TWG(s).
                                             </p>
                                             <div className="flex flex-wrap gap-2 mt-2">
                                                 {userLedTwgIds.map(twgId => {

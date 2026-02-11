@@ -29,8 +29,8 @@ async def add_drive_link(
     This system only controls which TWGs see the link in the Core Workspace UI.
 
     Accessible by ADMIN, SECRETARIAT_LEAD, TWG_FACILITATOR, and TWG leads.
-    - Admins/Secretariat/Facilitators can share to any TWGs or all TWGs
-    - TWG leads can only share to their own specific TWG
+    - Admins/Secretariat can share to any TWGs or all TWGs
+    - TWG facilitators and leads can only share to their assigned TWGs
 
     drive_url: Full Google Drive URL (supports docs, sheets, slides, folders)
     access_control: "all_twgs" (default) or "specific_twgs"
@@ -44,32 +44,47 @@ async def add_drive_link(
     is_twg_lead = False
     is_facilitator = current_user.role == UserRole.TWG_FACILITATOR
 
-    if current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD, UserRole.TWG_FACILITATOR]:
-        # Admins, Secretariat, and Facilitators can share to any TWG - access_control is respected
+    if current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
+        # Admins and Secretariat can share to any TWG - access_control is respected
         pass
     else:
-        # For TWG leads, find which TWGs they lead
+        # For TWG facilitators and leads, get their assigned TWGs
         from app.models.models import TWG
-        twg_result = await db.execute(
-            select(TWG).where(
-                (TWG.political_lead_id == current_user.id) | (TWG.technical_lead_id == current_user.id)
+        from sqlalchemy.orm import selectinload
+
+        if is_facilitator:
+            # Facilitators use their assigned twg_ids
+            # Load user with their TWGs
+            await db.refresh(current_user, attribute_names=['twgs'])
+            user_twg_ids = [str(twg.id) for twg in current_user.twgs]
+
+            if not user_twg_ids:
+                raise HTTPException(
+                    status_code=403,
+                    detail="TWG facilitators must be assigned to at least one TWG to share documents"
+                )
+        else:
+            # For TWG leads (political/technical), find which TWGs they lead
+            twg_result = await db.execute(
+                select(TWG).where(
+                    (TWG.political_lead_id == current_user.id) | (TWG.technical_lead_id == current_user.id)
+                )
             )
-        )
-        led_twgs = twg_result.scalars().all()
+            led_twgs = twg_result.scalars().all()
 
-        if not led_twgs:
-            raise HTTPException(
-                status_code=403,
-                detail="Only administrators, secretariat leads, facilitators, and TWG leads can add shared documents"
-            )
+            if not led_twgs:
+                raise HTTPException(
+                    status_code=403,
+                    detail="TWG leads must be assigned as a political or technical lead of at least one TWG to share documents"
+                )
 
-        is_twg_lead = True
-        user_twg_ids = [str(twg.id) for twg in led_twgs]
+            is_twg_lead = True
+            user_twg_ids = [str(twg.id) for twg in led_twgs]
 
-        # TWG leads can only share to their own TWGs - force specific_twgs access
+        # Facilitators and TWG leads can only share to their assigned TWGs - force specific_twgs access
         access_control = "specific_twgs"
         if shared_with_twg_ids:
-            # Filter to only include TWGs they actually lead
+            # Filter to only include TWGs they're actually assigned to
             requested_ids = [tid.strip() for tid in shared_with_twg_ids.split(",") if tid.strip()]
             valid_ids = [tid for tid in requested_ids if tid in user_twg_ids]
             shared_with_twg_ids = ",".join(valid_ids) if valid_ids else user_twg_ids[0]
@@ -77,8 +92,8 @@ async def add_drive_link(
             # Default to their first TWG if none specified
             shared_with_twg_ids = user_twg_ids[0]
 
-    # Parse access control (for admins/facilitators)
-    if not is_twg_lead and access_control not in ("all_twgs", "specific_twgs"):
+    # Parse access control (for admins/secretariat only)
+    if not is_twg_lead and not is_facilitator and access_control not in ("all_twgs", "specific_twgs"):
         access_control = "all_twgs"
 
     parsed_scope = []
@@ -261,8 +276,8 @@ async def upload_shared_document(
     Upload a document to the Shared Documents folder in Google Drive.
 
     Accessible by ADMIN, SECRETARIAT_LEAD, TWG_FACILITATOR, and TWG leads.
-    - Admins/Secretariat/Facilitators can share to any TWGs or all TWGs
-    - TWG leads can only share to their own specific TWG
+    - Admins/Secretariat can share to any TWGs or all TWGs
+    - TWG facilitators and leads can only share to their assigned TWGs
 
     access_control: "all_twgs" (default, visible to everyone) or "specific_twgs"
     shared_with_twg_ids: comma-separated TWG UUIDs when access_control is "specific_twgs"
@@ -275,32 +290,47 @@ async def upload_shared_document(
     is_twg_lead = False
     is_facilitator = current_user.role == UserRole.TWG_FACILITATOR
 
-    if current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD, UserRole.TWG_FACILITATOR]:
-        # Admins, Secretariat, and Facilitators can share to any TWG - access_control is respected
+    if current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
+        # Admins and Secretariat can share to any TWG - access_control is respected
         pass
     else:
-        # For TWG leads, find which TWGs they lead
+        # For TWG facilitators and leads, get their assigned TWGs
         from app.models.models import TWG
-        twg_result = await db.execute(
-            select(TWG).where(
-                (TWG.political_lead_id == current_user.id) | (TWG.technical_lead_id == current_user.id)
+        from sqlalchemy.orm import selectinload
+
+        if is_facilitator:
+            # Facilitators use their assigned twg_ids
+            # Load user with their TWGs
+            await db.refresh(current_user, attribute_names=['twgs'])
+            user_twg_ids = [str(twg.id) for twg in current_user.twgs]
+
+            if not user_twg_ids:
+                raise HTTPException(
+                    status_code=403,
+                    detail="TWG facilitators must be assigned to at least one TWG to share documents"
+                )
+        else:
+            # For TWG leads (political/technical), find which TWGs they lead
+            twg_result = await db.execute(
+                select(TWG).where(
+                    (TWG.political_lead_id == current_user.id) | (TWG.technical_lead_id == current_user.id)
+                )
             )
-        )
-        led_twgs = twg_result.scalars().all()
+            led_twgs = twg_result.scalars().all()
 
-        if not led_twgs:
-            raise HTTPException(
-                status_code=403,
-                detail="Only administrators, secretariat leads, facilitators, and TWG leads can upload shared documents"
-            )
+            if not led_twgs:
+                raise HTTPException(
+                    status_code=403,
+                    detail="TWG leads must be assigned as a political or technical lead of at least one TWG to share documents"
+                )
 
-        is_twg_lead = True
-        user_twg_ids = [str(twg.id) for twg in led_twgs]
+            is_twg_lead = True
+            user_twg_ids = [str(twg.id) for twg in led_twgs]
 
-        # TWG leads can only share to their own TWGs - force specific_twgs access
+        # Facilitators and TWG leads can only share to their assigned TWGs - force specific_twgs access
         access_control = "specific_twgs"
         if shared_with_twg_ids:
-            # Filter to only include TWGs they actually lead
+            # Filter to only include TWGs they're actually assigned to
             requested_ids = [tid.strip() for tid in shared_with_twg_ids.split(",") if tid.strip()]
             valid_ids = [tid for tid in requested_ids if tid in user_twg_ids]
             shared_with_twg_ids = ",".join(valid_ids) if valid_ids else user_twg_ids[0]
@@ -308,8 +338,8 @@ async def upload_shared_document(
             # Default to their first TWG if none specified
             shared_with_twg_ids = user_twg_ids[0]
 
-    # Parse access control (for admins/facilitators)
-    if not is_twg_lead and access_control not in ("all_twgs", "specific_twgs"):
+    # Parse access control (for admins/secretariat only)
+    if not is_twg_lead and not is_facilitator and access_control not in ("all_twgs", "specific_twgs"):
         access_control = "all_twgs"
 
     parsed_scope = []
