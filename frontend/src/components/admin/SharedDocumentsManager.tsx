@@ -26,6 +26,7 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
 
     const currentUser = useSelector((state: RootState) => state.auth.user);
     const isAdmin = currentUser?.role === UserRole.ADMIN || currentUser?.role === UserRole.SECRETARIAT_LEAD;
+    const isFacilitator = currentUser?.role === UserRole.TWG_FACILITATOR;
     const isTwgLead = userLedTwgIds.length > 0;
 
     const HIDDEN_PILLARS = ['protocol_logistics', 'resource_mobilization'];
@@ -56,8 +57,8 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
                 setUserLedTwgIds(ledTwgIds);
                 console.log('[SharedDocumentsManager] Final ledTwgIds:', ledTwgIds);
 
-                // If user is a TWG lead, pre-select their TWG(s)
-                if (ledTwgIds.length > 0 && !isAdmin) {
+                // If user is a TWG lead (not facilitator or admin), pre-select their TWG(s)
+                if (ledTwgIds.length > 0 && !isAdmin && !isFacilitator) {
                     setAccessControl('specific_twgs');
                     setSharedTwgIds(ledTwgIds);
                 }
@@ -188,7 +189,7 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
                     Add to Core Workspace
                 </h3>
                 <p className="text-xs text-[#8a9dbd] font-bold uppercase tracking-wider mt-1">
-                    {isAdmin ? 'Admin Only - Upload files or add Google Drive links' : 'TWG Lead - Share documents with your TWG'}
+                    {isAdmin || isFacilitator ? 'Upload files or add Google Drive links' : 'TWG Lead - Share documents with your TWG'}
                 </p>
             </div>
 
@@ -322,7 +323,7 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
 
                     {/* Visibility Controls - Same for both modes */}
                     <div className="space-y-3">
-                        {isTwgLead ? (
+                        {isTwgLead && !isFacilitator && !isAdmin ? (
                             // TWG Lead View - Fixed to their TWG only
                             <>
                                 <label className="block text-[11px] font-black text-[#8a9dbd] uppercase tracking-wider">

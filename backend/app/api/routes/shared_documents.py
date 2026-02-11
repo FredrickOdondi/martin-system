@@ -28,8 +28,8 @@ async def add_drive_link(
     IMPORTANT: The file must already be shared in Google Drive as "Anyone with the link can view/edit".
     This system only controls which TWGs see the link in the Core Workspace UI.
 
-    Accessible by ADMIN, SECRETARIAT_LEAD, and TWG leads.
-    - Admins/Secretariat can share to any TWGs or all TWGs
+    Accessible by ADMIN, SECRETARIAT_LEAD, TWG_FACILITATOR, and TWG leads.
+    - Admins/Secretariat/Facilitators can share to any TWGs or all TWGs
     - TWG leads can only share to their own specific TWG
 
     drive_url: Full Google Drive URL (supports docs, sheets, slides, folders)
@@ -42,9 +42,10 @@ async def add_drive_link(
     # Check if user is TWG lead and get their TWG
     user_twg_ids = []
     is_twg_lead = False
+    is_facilitator = current_user.role == UserRole.TWG_FACILITATOR
 
-    if current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
-        # Admins can share to any TWG - access_control is respected
+    if current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD, UserRole.TWG_FACILITATOR]:
+        # Admins, Secretariat, and Facilitators can share to any TWG - access_control is respected
         pass
     else:
         # For TWG leads, find which TWGs they lead
@@ -59,7 +60,7 @@ async def add_drive_link(
         if not led_twgs:
             raise HTTPException(
                 status_code=403,
-                detail="Only administrators, secretariat leads, and TWG leads can add shared documents"
+                detail="Only administrators, secretariat leads, facilitators, and TWG leads can add shared documents"
             )
 
         is_twg_lead = True
@@ -76,7 +77,7 @@ async def add_drive_link(
             # Default to their first TWG if none specified
             shared_with_twg_ids = user_twg_ids[0]
 
-    # Parse access control (for admins)
+    # Parse access control (for admins/facilitators)
     if not is_twg_lead and access_control not in ("all_twgs", "specific_twgs"):
         access_control = "all_twgs"
 
@@ -259,8 +260,8 @@ async def upload_shared_document(
     """
     Upload a document to the Shared Documents folder in Google Drive.
 
-    Accessible by ADMIN, SECRETARIAT_LEAD, and TWG leads.
-    - Admins/Secretariat can share to any TWGs or all TWGs
+    Accessible by ADMIN, SECRETARIAT_LEAD, TWG_FACILITATOR, and TWG leads.
+    - Admins/Secretariat/Facilitators can share to any TWGs or all TWGs
     - TWG leads can only share to their own specific TWG
 
     access_control: "all_twgs" (default, visible to everyone) or "specific_twgs"
@@ -272,9 +273,10 @@ async def upload_shared_document(
     # Check if user is TWG lead and get their TWG
     user_twg_ids = []
     is_twg_lead = False
+    is_facilitator = current_user.role == UserRole.TWG_FACILITATOR
 
-    if current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD]:
-        # Admins can share to any TWG - access_control is respected
+    if current_user.role in [UserRole.ADMIN, UserRole.SECRETARIAT_LEAD, UserRole.TWG_FACILITATOR]:
+        # Admins, Secretariat, and Facilitators can share to any TWG - access_control is respected
         pass
     else:
         # For TWG leads, find which TWGs they lead
@@ -289,7 +291,7 @@ async def upload_shared_document(
         if not led_twgs:
             raise HTTPException(
                 status_code=403,
-                detail="Only administrators, secretariat leads, and TWG leads can upload shared documents"
+                detail="Only administrators, secretariat leads, facilitators, and TWG leads can upload shared documents"
             )
 
         is_twg_lead = True
@@ -306,7 +308,7 @@ async def upload_shared_document(
             # Default to their first TWG if none specified
             shared_with_twg_ids = user_twg_ids[0]
 
-    # Parse access control (for admins)
+    # Parse access control (for admins/facilitators)
     if not is_twg_lead and access_control not in ("all_twgs", "specific_twgs"):
         access_control = "all_twgs"
 

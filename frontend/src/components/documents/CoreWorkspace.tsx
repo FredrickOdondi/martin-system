@@ -29,8 +29,9 @@ const CoreWorkspace = () => {
 
     const user = useSelector((state: RootState) => state.auth.user);
     const isAdmin = user?.role === 'ADMIN' || user?.role === 'SECRETARIAT_LEAD';
+    const isFacilitator = user?.role === 'TWG_FACILITATOR';
     const isTwgLead = userLedTwgIds.length > 0;
-    const canUpload = isAdmin || isTwgLead;
+    const canUpload = isAdmin || isFacilitator || isTwgLead;
 
     const loadFiles = async () => {
         setLoading(true);
