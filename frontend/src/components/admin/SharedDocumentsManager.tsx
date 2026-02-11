@@ -26,9 +26,7 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
 
     const currentUser = useSelector((state: RootState) => state.auth.user);
     const isAdmin = currentUser?.role === UserRole.ADMIN || currentUser?.role === UserRole.SECRETARIAT_LEAD;
-    const isFacilitator = currentUser?.role === UserRole.TWG_FACILITATOR;
-    const isTwgLead = userLedTwgIds.length > 0;
-    const hasRestrictedAccess = isFacilitator || isTwgLead; // Facilitators and TWG leads have restricted access
+    const hasRestrictedAccess = !isAdmin; // All non-admin users have restricted access to their TWGs only
 
     const HIDDEN_PILLARS = ['protocol_logistics', 'resource_mobilization'];
 
@@ -45,23 +43,21 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
 
                 console.log('[SharedDocumentsManager] Checking TWG access for user:', userId, 'role:', currentUser?.role);
 
-                if (isFacilitator) {
-                    // Facilitators use their assigned twg_ids from the user object
+                if (!isAdmin) {
+                    // 1. Add TWGs from user's assigned twg_ids (works for facilitators, members, and leads)
                     const userTwgIds = currentUser?.twg_ids || [];
-                    // Filter to only include TWGs that exist and aren't hidden
                     userTwgIds.forEach((twgId: string) => {
-                        if (twgs.find((t: any) => t.id === twgId)) {
+                        if (twgs.find((t: any) => t.id === twgId) && !accessibleTwgIds.includes(twgId)) {
                             accessibleTwgIds.push(twgId);
                         }
                     });
-                    console.log('[SharedDocumentsManager] Facilitator TWGs:', accessibleTwgIds);
-                } else {
-                    // For TWG leads (political/technical), check the lead fields
+                    console.log('[SharedDocumentsManager] User assigned TWGs:', accessibleTwgIds);
+
+                    // 2. Also add TWGs where user is political/technical lead
                     twgs.forEach((twg: any) => {
                         const politicalLeadId = String(twg.political_lead?.id || '');
                         const technicalLeadId = String(twg.technical_lead?.id || '');
-
-                        if (politicalLeadId === userId || technicalLeadId === userId) {
+                        if ((politicalLeadId === userId || technicalLeadId === userId) && !accessibleTwgIds.includes(twg.id)) {
                             accessibleTwgIds.push(twg.id);
                             console.log(`[SharedDocumentsManager] User is lead of TWG: ${twg.name}`);
                         }
@@ -81,7 +77,7 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
             }
         };
         fetchTwgs();
-    }, [currentUser?.id, currentUser?.twg_ids, isFacilitator, hasRestrictedAccess]);
+    }, [currentUser?.id, currentUser?.twg_ids, isAdmin]);
 
     const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
 
@@ -212,8 +208,8 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
                 <button
                     onClick={() => setInputMode('upload')}
                     className={`flex-1 px-4 py-3 rounded-xl font-bold text-sm transition-all ${inputMode === 'upload'
-                            ? 'bg-[#1152d4] text-white shadow-lg shadow-blue-500/20'
-                            : 'bg-gray-100 dark:bg-[#2d3748] text-[#4c669a] hover:bg-gray-200 dark:hover:bg-[#4a5568]'
+                        ? 'bg-[#1152d4] text-white shadow-lg shadow-blue-500/20'
+                        : 'bg-gray-100 dark:bg-[#2d3748] text-[#4c669a] hover:bg-gray-200 dark:hover:bg-[#4a5568]'
                         }`}
                 >
                     <span className="material-symbols-outlined text-[18px] align-middle mr-1">upload_file</span>
@@ -222,8 +218,8 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
                 <button
                     onClick={() => setInputMode('link')}
                     className={`flex-1 px-4 py-3 rounded-xl font-bold text-sm transition-all ${inputMode === 'link'
-                            ? 'bg-[#1152d4] text-white shadow-lg shadow-blue-500/20'
-                            : 'bg-gray-100 dark:bg-[#2d3748] text-[#4c669a] hover:bg-gray-200 dark:hover:bg-[#4a5568]'
+                        ? 'bg-[#1152d4] text-white shadow-lg shadow-blue-500/20'
+                        : 'bg-gray-100 dark:bg-[#2d3748] text-[#4c669a] hover:bg-gray-200 dark:hover:bg-[#4a5568]'
                         }`}
                 >
                     <span className="material-symbols-outlined text-[18px] align-middle mr-1">link</span>
@@ -238,8 +234,8 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
                     className={`border-2 border-dashed rounded-xl p-8 text-center transition-all ${isDragging
-                            ? 'border-[#1152d4] bg-blue-50 dark:bg-blue-900/20'
-                            : 'border-[#cfd7e7] dark:border-[#2d3748] hover:border-[#1152d4]'
+                        ? 'border-[#1152d4] bg-blue-50 dark:bg-blue-900/20'
+                        : 'border-[#cfd7e7] dark:border-[#2d3748] hover:border-[#1152d4]'
                         }`}
                 >
                     <input
@@ -337,7 +333,20 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
 
                     {/* Visibility Controls - Same for both modes */}
                     <div className="space-y-3">
-                        {hasRestrictedAccess ? (
+                        {hasRestrictedAccess && userLedTwgIds.length === 0 ? (
+                            // Facilitator/Lead with no TWGs assigned
+                            <div className="p-4 bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
+                                <div className="flex items-start gap-3">
+                                    <span className="material-symbols-outlined text-amber-600 dark:text-amber-400 text-[20px]">warning</span>
+                                    <div>
+                                        <p className="text-sm font-bold text-amber-800 dark:text-amber-200">No TWGs Assigned</p>
+                                        <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                                            You haven't been assigned to any TWGs yet. Please contact your administrator to be assigned to a TWG.
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                        ) : hasRestrictedAccess ? (
                             // TWG Lead/Facilitator View - Fixed to their TWG only
                             <>
                                 <label className="block text-[11px] font-black text-[#8a9dbd] uppercase tracking-wider">
@@ -380,8 +389,8 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
                                         <label
                                             key={option.value}
                                             className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-all ${accessControl === option.value
-                                                    ? 'border-[#1152d4] bg-[#eef2ff] dark:bg-[#1e3a8a]/20'
-                                                    : 'border-[#cfd7e7] dark:border-[#4a5568] hover:border-[#1152d4]/30'
+                                                ? 'border-[#1152d4] bg-[#eef2ff] dark:bg-[#1e3a8a]/20'
+                                                : 'border-[#cfd7e7] dark:border-[#4a5568] hover:border-[#1152d4]/30'
                                                 }`}
                                         >
                                             <input
@@ -403,23 +412,26 @@ const SharedDocumentsManager = ({ onUploadSuccess }: SharedDocumentsManagerProps
 
                                 {accessControl === 'specific_twgs' && (
                                     <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-[#e7ebf3] dark:border-[#4a5568] space-y-2 max-h-48 overflow-y-auto scrollbar-thin">
-                                        {allTwgs.map((twg: any) => (
-                                            <label key={twg.id} className="flex items-center gap-3 cursor-pointer group">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={sharedTwgIds.includes(twg.id)}
-                                                    onChange={(e) => {
-                                                        if (e.target.checked) {
-                                                            setSharedTwgIds(prev => [...prev, twg.id]);
-                                                        } else {
-                                                            setSharedTwgIds(prev => prev.filter(id => id !== twg.id));
-                                                        }
-                                                    }}
-                                                    className="size-4 rounded border-[#cfd7e7] text-[#1152d4] focus:ring-[#1152d4]"
-                                                />
-                                                <span className="text-sm font-bold text-[#4c669a] group-hover:text-[#1152d4] transition-colors">{twg.name}</span>
-                                            </label>
-                                        ))}
+                                        {allTwgs
+                                            // Filter TWGs: show all for admin, only assigned for facilitators/TWG leads
+                                            .filter((twg: any) => !hasRestrictedAccess || userLedTwgIds.includes(twg.id))
+                                            .map((twg: any) => (
+                                                <label key={twg.id} className="flex items-center gap-3 cursor-pointer group">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={sharedTwgIds.includes(twg.id)}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) {
+                                                                setSharedTwgIds(prev => [...prev, twg.id]);
+                                                            } else {
+                                                                setSharedTwgIds(prev => prev.filter(id => id !== twg.id));
+                                                            }
+                                                        }}
+                                                        className="size-4 rounded border-[#cfd7e7] text-[#1152d4] focus:ring-[#1152d4]"
+                                                    />
+                                                    <span className="text-sm font-bold text-[#4c669a] group-hover:text-[#1152d4] transition-colors">{twg.name}</span>
+                                                </label>
+                                            ))}
                                         {sharedTwgIds.length > 0 && (
                                             <p className="text-[10px] font-black text-[#1152d4] uppercase tracking-wider mt-2">
                                                 {sharedTwgIds.length} TWG{sharedTwgIds.length > 1 ? 's' : ''} selected
